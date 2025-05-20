@@ -1,0 +1,83 @@
+{
+  "name": "shadowrun-fps-launcher",
+  "productName": "Shadowrun FPS Launcher",
+  "version": "1.0.0",
+  "description": "Community game launcher for Shadowrun FPS",
+  "main": "app/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --watch && electron .",
+    "build": "npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --minify && electron-builder",
+    "build:win": "npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --minify && electron-builder --win",
+    "compile-registry-tool": "compile.bat",
+    "postbuild": "npm run compile-registry-tool && xcopy /Y RegistryWriter.exe dist\\win-unpacked\\resources\\"
+  },
+  "author": "Sinful Hollowz",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^7.6.0",
+    "electron": "^25.0.0",
+    "electron-builder": "^24.4.0",
+    "tailwindcss": "^3.3.0"
+  },
+  "build": {
+    "appId": "com.yourdomain.shadowrunlauncher",
+    "productName": "Shadowrun FPS Launcher",
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      {
+        "from": "node_modules/regedit/vbs",
+        "to": "vbs",
+        "filter": [
+          "*.vbs",
+          "*.wsf"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "app/assets/icon2.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "${productName}.exe"
+    },
+    "asar": true,
+    "compression": "maximum"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "discord-rpc": "^4.0.1",
+    "discord.js": "^14.19.3",
+    "dotenv": "^16.5.0",
+    "electron-dl": "^4.0.0",
+    "electron-squirrel-startup": "^1.0.1",
+    "electron-store": "^10.0.1",
+    "express": "^5.1.0",
+    "extract-zip": "^2.0.1",
+    "node-addon-api": "^8.3.1",
+    "regedit": "^5.1.4",
+    "uuid": "^9.0.1"
+  }
+}

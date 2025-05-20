@@ -1,0 +1,1222 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #0f172a; /* Darker background as fallback */
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  color: white;
+  overflow: hidden;
+  user-select: none;
+  background-image: url("../assets/launcher-background.gif");
+  background-size: 100% 100%; /* Ensure image covers entire window */
+  background-position: center;
+  background-repeat: no-repeat;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+/* Remove this if you want to see the full background without any overlay */
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(
+    0,
+    0,
+    0,
+    0.3
+  ); /* Subtle dark overlay for better text readability */
+  pointer-events: none;
+}
+
+/* Window controls */
+.window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  padding: 8px;
+  z-index: 100;
+}
+
+.control-button {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 16px;
+  margin-left: 8px;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.control-button:hover {
+  color: white;
+}
+
+#closeButton:hover {
+  color: #ff6b6b;
+}
+
+/* Content */
+.content {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 40px 30px; /* Adjusted padding */
+  position: relative;
+}
+
+/* Left-align buttons container */
+.buttons-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 140px;
+  margin-left: 40px;
+}
+
+/* Left-align button content */
+.button-row {
+  width: auto;
+  max-width: 180px; /* Narrower than before */
+  margin-bottom: 8px;
+  text-align: center; /* Center text */
+}
+
+/* Unify all button styles into a single rule set */
+.button-row button,
+#playButton,
+.primary-button.play,
+.primary-button.download,
+.nav-button {
+  width: 180px;
+  height: 34px;
+  background-color: rgba(31, 41, 65, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  font-weight: 400;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 4px;
+  transition: all 0.2s ease;
+  padding: 0 14px;
+  box-sizing: border-box;
+  text-transform: none;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Unified hover state */
+.button-row button:hover,
+#playButton:hover,
+.primary-button.play:hover,
+.primary-button.download:hover,
+.nav-button:hover {
+  background-color: rgba(41, 56, 88, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 1) !important;
+}
+
+/* Specifically style the disabled/running state */
+.button-row button:disabled,
+#playButton:disabled,
+.primary-button.running {
+  border: 1px solid rgba(75, 85, 99, 0.3) !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  cursor: not-allowed !important;
+  opacity: 0.8 !important;
+  box-shadow: none !important;
+}
+
+/* Ensure no hover effects on disabled buttons */
+.button-row button:disabled:hover,
+#playButton:disabled:hover,
+.primary-button.running:hover {
+  background-color: rgba(60, 65, 80, 0.5) !important;
+  border: 1px solid rgba(75, 85, 99, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Settings screen */
+.settings-screen {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 500px;
+  background-color: rgba(30, 41, 59, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: none; /* Hidden by default */
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+.settings-screen.visible {
+  display: block;
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background-color: rgba(15, 23, 42, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.close-settings-button {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.close-settings-button:hover {
+  color: white;
+}
+
+.settings-content {
+  padding: 20px;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.setting-item:last-child {
+  border-bottom: none;
+}
+
+.setting-item label {
+  font-size: 14px;
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 22px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #4b5563;
+  transition: 0.4s;
+  border-radius: 34px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 2px;
+  background-color: white;
+  transition: 0.4s;
+  border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+  background-color: #3b82f6;
+}
+
+input:checked + .toggle-slider:before {
+  transform: translateX(21px);
+}
+
+.settings-action-button {
+  background-color: #334155;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.settings-action-button:hover {
+  background-color: #475569;
+}
+
+/* Custom focus styles */
+button:focus {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+/* Version number */
+.version-info {
+  position: absolute;
+  bottom: 10px;
+  left: 20px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 300;
+}
+
+/* Add social icons styling */
+.social-icons {
+  position: absolute;
+  bottom: 10px;
+  right: 20px;
+  display: flex;
+  gap: 10px;
+}
+
+.social-icon-button {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.social-icon-button:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Modal screens for instructions and download progress */
+.modal-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-screen.visible {
+  display: flex;
+}
+
+.modal-content {
+  background-color: rgba(15, 23, 42, 0.95);
+  border-radius: 8px;
+  width: 500px;
+  max-width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background-color: rgba(30, 41, 59, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.close-button {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.close-button:hover {
+  color: white;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.instructions-list {
+  margin-left: 20px;
+  line-height: 1.6;
+}
+
+.instructions-list li {
+  margin-bottom: 10px;
+}
+
+/* Progress bars */
+.progress-item {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-item p {
+  width: 100px;
+  font-size: 14px;
+}
+
+.progress-container {
+  flex-grow: 1;
+  height: 8px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background-color: #3b82f6;
+  transition: width 0.3s ease;
+}
+
+.download-message {
+  margin-top: 20px;
+  text-align: center;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Disable settings that aren't ready */
+.setting-item.disabled {
+  opacity: 0.7;
+  position: relative;
+}
+
+.setting-item.disabled::after {
+  content: none;
+}
+
+.setting-item.disabled .toggle-switch {
+  opacity: 0.6;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.setting-item.disabled label {
+  cursor: not-allowed;
+}
+
+/* Make disabled toggle switches look better */
+.setting-item.disabled .toggle-slider {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.settings-note {
+  margin-top: 20px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  font-style: italic;
+}
+
+/* Add styles for the cancel button */
+.download-actions {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.cancel-button {
+  background-color: rgba(220, 38, 38, 0.7);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s;
+}
+
+.cancel-button:hover {
+  background-color: rgba(220, 38, 38, 0.9);
+}
+
+/* Styles for skipped components */
+.progress-item.skipped {
+  background-color: rgba(15, 23, 42, 0.3);
+  padding: 5px;
+  border-radius: 4px;
+  border-left: 3px solid rgba(100, 100, 100, 0.7);
+}
+
+.progress-item.skipped .progress-status {
+  color: rgba(150, 150, 150, 0.9);
+  font-style: italic;
+}
+
+/* Add styling for number inputs */
+.input-with-label {
+  display: flex;
+  align-items: center;
+}
+
+.number-input {
+  background-color: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 4px 8px;
+  width: 70px;
+  border-radius: 4px;
+  font-size: 14px;
+  text-align: right;
+}
+
+.input-suffix {
+  margin-left: 8px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Styles for feedback tooltip */
+.tooltip-container {
+  position: relative;
+}
+
+.settings-feedback {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(17, 94, 89, 0.9);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  white-space: nowrap;
+  z-index: 1500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.settings-feedback.visible {
+  opacity: 1;
+}
+
+.settings-feedback::after {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 6px solid rgba(17, 94, 89, 0.9);
+}
+
+/* Improve the FPS input and button layout */
+.setting-item.fps-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fps-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+/* Make the Apply button more prominent */
+#saveFrameRateButton {
+  background-color: rgba(44, 82, 130, 0.8);
+  transition: background-color 0.2s;
+}
+
+#saveFrameRateButton:hover {
+  background-color: rgba(59, 130, 246, 0.9);
+}
+
+#saveFrameRateButton:active {
+  background-color: rgba(37, 99, 235, 1);
+}
+
+/* Add styling for the auto-detect notification */
+.notification {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: 4px;
+  color: white;
+  font-size: 14px;
+  z-index: 9999;
+  animation: fadeInOut 3s ease-in-out;
+  background-color: rgba(59, 130, 246, 0.9);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  max-width: 80%;
+  text-align: center;
+}
+
+.notification.error {
+  background-color: rgba(220, 38, 38, 0.9);
+}
+
+.notification.success {
+  background-color: rgba(16, 185, 129, 0.9);
+}
+
+.notification.warning {
+  background-color: rgba(245, 158, 11, 0.9);
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  85% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+}
+
+/* Center the player count at the bottom of the screen */
+.player-count-container {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 10px;
+  z-index: 10;
+}
+
+.player-count {
+  display: flex;
+  align-items: center;
+  background-color: rgba(15, 23, 42, 0.7);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  transition: all 0.3s ease;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.player-count:hover {
+  background-color: rgba(25, 35, 52, 0.8);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+  transform: translateY(-2px);
+}
+
+.player-count svg {
+  margin-right: 6px;
+  color: rgba(56, 189, 248, 0.9);
+}
+
+#playerCount {
+  font-weight: 600;
+  color: rgba(56, 189, 248, 1);
+  margin-right: 4px;
+}
+
+/* Add styling for warning notifications */
+.notification.warning {
+  background-color: rgba(234, 179, 8, 0.9);
+  color: rgba(15, 23, 42, 1);
+}
+
+/* Change the Running button to grey instead of red */
+.primary-button.running {
+  background-color: rgba(75, 85, 99, 0.8); /* Grey instead of red */
+  cursor: not-allowed;
+  opacity: 0.7;
+  color: rgba(255, 255, 255, 0.6);
+  text-shadow: none;
+  border: 1px solid rgba(75, 85, 99, 0.4);
+  box-shadow: none;
+  transform: none;
+  transition: all 0.3s ease;
+}
+
+.primary-button.running:hover {
+  background-color: rgba(75, 85, 99, 0.8);
+  transform: none;
+  box-shadow: none;
+}
+
+/* Updated button styles to match the reference image */
+.nav-button {
+  background-color: rgba(
+    14,
+    22,
+    40,
+    0.6
+  ); /* Dark blue semi-transparent background */
+  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(59, 130, 246, 0.2); /* Very subtle blue border */
+  box-shadow: none;
+  text-transform: uppercase;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  text-shadow: none;
+  font-size: 14px;
+  padding: 12px 16px;
+  text-align: center; /* Ensure text is centered */
+  display: flex;
+  justify-content: center; /* Center text horizontally */
+  align-items: center; /* Center text vertically */
+  border-radius: 0; /* Remove any border radius */
+}
+
+.nav-button:hover {
+  background-color: rgba(24, 38, 66, 0.8);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  box-shadow: 0 0 10px rgba(37, 99, 235, 0.2);
+  color: rgba(255, 255, 255, 1);
+  text-shadow: 0 0 4px rgba(59, 130, 246, 0.5);
+  transform: none; /* Remove any transform on hover */
+}
+
+/* Reset any previous hover effects */
+.nav-button::after {
+  display: none; /* Remove the blue line effect */
+}
+
+/* Primary buttons (like Download) */
+.primary-button {
+  background-color: rgba(14, 22, 40, 0.6);
+  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  box-shadow: none;
+  text-transform: uppercase;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-shadow: none;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  text-align: left; /* Change from center to left */
+  display: flex;
+  justify-content: flex-start; /* Change from center to flex-start */
+  align-items: center;
+  border-radius: 0;
+}
+
+/* Remove the gradient effect */
+.primary-button::before {
+  display: none;
+}
+
+.primary-button.play,
+.primary-button.download {
+  background-color: rgba(14, 22, 40, 0.6);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  box-shadow: none;
+}
+
+.primary-button.play:hover,
+.primary-button.download:hover {
+  background-color: rgba(24, 38, 66, 0.8);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  box-shadow: 0 0 10px rgba(37, 99, 235, 0.2);
+  transform: none;
+  text-shadow: 0 0 4px rgba(59, 130, 246, 0.5);
+}
+
+/* Keep the running button state gray */
+.primary-button.running {
+  background-color: rgba(60, 70, 85, 0.6);
+  border: 1px solid rgba(75, 85, 99, 0.3);
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+
+.primary-button.running:hover {
+  background-color: rgba(60, 70, 85, 0.6);
+  box-shadow: none;
+}
+
+/* Discord icon animation with scale and glow */
+#discordIconButton {
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+#discordIconButton:hover {
+  transform: scale(1.1);
+}
+
+#discordIconButton:hover svg {
+  filter: drop-shadow(0 0 5px rgba(114, 137, 218, 0.7));
+}
+
+/* Add a subtle pulse animation to the Discord icon */
+@keyframes discordPulse {
+  0% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 2px rgba(114, 137, 218, 0.3));
+  }
+  50% {
+    transform: scale(1.05);
+    filter: drop-shadow(0 0 5px rgba(114, 137, 218, 0.6));
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 2px rgba(114, 137, 218, 0.3));
+  }
+}
+
+#discordIconButton svg {
+  animation: discordPulse 3s infinite ease-in-out;
+}
+
+/* Improve window controls with subtle hover animations */
+.window-controls button {
+  transition: all 0.2s ease;
+  opacity: 0.7;
+}
+
+.window-controls button:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+#closeButton:hover {
+  background-color: rgba(220, 38, 38, 0.8);
+}
+
+/* Modernize player count with backdrop blur and hover effects */
+.player-count {
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  transition: all 0.3s ease;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.player-count:hover {
+  background-color: rgba(25, 35, 52, 0.8);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+  transform: translateY(-2px);
+}
+
+/* Improve the nav button hover states */
+.nav-button {
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.nav-button:hover {
+  background-color: rgba(30, 58, 138, 0.5);
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+  transform: translateX(3px);
+}
+
+/* Add subtle indicator line that animates in on hover */
+.nav-button::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 3px;
+  background: linear-gradient(
+    to bottom,
+    rgba(56, 189, 248, 0),
+    rgba(56, 189, 248, 1),
+    rgba(56, 189, 248, 0)
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.nav-button:hover::after {
+  opacity: 1;
+}
+
+/* Fix text centering for buttons */
+.primary-button,
+.nav-button {
+  text-align: center; /* Center text */
+  display: flex;
+  justify-content: center; /* Center text */
+  align-items: center;
+  width: 180px; /* Narrower width */
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0 14px;
+}
+
+/* Update button row alignment */
+.button-row {
+  width: auto; /* Remove full width */
+  max-width: 180px; /* Narrower buttons */
+  margin-bottom: 8px;
+  text-align: center; /* Center text */
+}
+
+/* Override any existing color for the Play button */
+.primary-button.play {
+  background-color: rgba(
+    14,
+    22,
+    40,
+    0.6
+  ) !important; /* Same as other buttons */
+  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+/* Make sure hover state also doesn't have green */
+.primary-button.play:hover {
+  background-color: rgba(24, 38, 66, 0.8) !important;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+/* Explicitly remove any green-related styles */
+#playButton {
+  background-color: rgba(14, 22, 40, 0.6) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(59, 130, 246, 0.2) !important;
+}
+
+#playButton:hover {
+  background-color: rgba(24, 38, 66, 0.8) !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+}
+
+/* Remove any conflicting transformations that might affect centering */
+.button-row button {
+  transform: none;
+}
+
+/* Ensure all buttons have same styling */
+.button-row button {
+  width: 180px; /* Fixed width for all buttons */
+  height: 34px; /* Slightly reduced height */
+  margin-bottom: 4px; /* Reduced space between buttons */
+  padding: 0 14px; /* Slightly reduced padding */
+  box-sizing: border-box;
+}
+
+/* Remove any additional transitions or effects */
+.button-row button::before,
+.button-row button::after,
+.primary-button::before,
+.primary-button::after,
+.nav-button::before,
+.nav-button::after {
+  display: none !important;
+}
+
+/* Ensure play button has same dimensions */
+#playButton,
+.primary-button.play,
+.primary-button.download {
+  width: 180px;
+  height: 34px;
+}
+
+/* Fix the background color for the play button in all states */
+#playButton,
+.primary-button.play,
+.primary-button.download,
+.primary-button.running {
+  background-color: rgba(31, 41, 65, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* And ensure the running state is properly styled */
+#playButton.running,
+#playButton:disabled,
+.primary-button.running {
+  background-color: rgba(60, 65, 80, 0.5) !important;
+  border: 1px solid rgba(75, 85, 99, 0.3) !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  cursor: not-allowed !important;
+  opacity: 0.8 !important;
+}
+
+/* Toggle cooldown styling */
+.toggle-switch.cooldown {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.toggle-switch.cooldown .toggle-slider {
+  transition: background-color 0.3s ease, transform 0.3s ease;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.toggle-switch.cooldown::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 34px;
+  z-index: 1;
+}
+
+/* Add a subtle pulse animation during cooldown */
+@keyframes cooldownPulse {
+  0% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.7;
+  }
+}
+
+.toggle-switch.cooldown {
+  animation: cooldownPulse 1.5s ease-in-out;
+}
+
+/* Add this to your global.css file */
+.button-row button.activated {
+  background-color: rgba(16, 185, 129, 0.3) !important;
+  border: 1px solid rgba(16, 185, 129, 0.5) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.button-row button.activated:hover {
+  background-color: rgba(16, 185, 129, 0.4) !important;
+}
+
+/* Add this to your global.css if not already present */
+.toggle-switch.processing {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.toggle-switch.processing .toggle-slider {
+  background-color: #777;
+}
+
+/* Add these styles for the skip intro button */
+#skipIntroButton.installed {
+  background-color: rgba(
+    220,
+    38,
+    38,
+    0.5
+  ) !important; /* Red background for uninstall */
+  border-color: rgba(220, 38, 38, 0.7) !important;
+}
+
+#skipIntroButton:not(.installed) {
+  background-color: rgba(
+    16,
+    185,
+    129,
+    0.5
+  ) !important; /* Green background for install */
+  border-color: rgba(16, 185, 129, 0.7) !important;
+}
+
+#skipIntroButton.processing::after {
+  display: none; /* Hide the spinning indicator */
+}
+
+#skipIntroButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Add styles for the progress indicator */
+.setting-control-with-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.setting-progress-indicator {
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  gap: 4px; /* Reduced gap since spinner is gone */
+  width: 100%;
+  margin-top: 8px;
+}
+
+.progress-spinner-row {
+  display: flex;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.progress-bar-container {
+  height: 4px;
+  width: 100%;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background-color: rgba(59, 130, 246, 0.8);
+  border-radius: 2px;
+  transition: width 0.3s ease-in-out;
+}
+
+.setting-progress-indicator.visible {
+  display: flex;
+}
+
+.progress-spinner {
+  display: none !important;
+}
+
+.setting-progress-indicator .progress-spinner-row .progress-spinner {
+  display: none !important;
+}
+
+.modified-files-list {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.files-modified-title {
+  font-weight: bold;
+}
+
+.modified-files-list ul {
+  margin: 4px 0 0 0;
+  padding-left: 16px;
+}
+
+.close-progress-button {
+  margin-top: 8px;
+  background-color: rgba(100, 100, 100, 0.3);
+  border: 1px solid rgba(100, 100, 100, 0.5);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  align-self: flex-end;
+}
+
+.close-progress-button:hover {
+  background-color: rgba(100, 100, 100, 0.5);
+}
+
+.error-message {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(255, 100, 100, 0.9);
+  background-color: rgba(100, 0, 0, 0.1);
+  padding: 8px;
+  border-radius: 4px;
+  border-left: 3px solid rgba(220, 38, 38, 0.7);
+  width: 100%;
+}
+
+/* Remove any animation related to the spinner */
+@keyframes spin {
+  0% {
+    transform: none;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* Add these styles for the PCID display */
+.current-pcid-display {
+  margin-top: 10px;
+  font-family: monospace;
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 8px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.admin-button {
+  background-color: #4a5568;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 4px;
+  border: 1px solid #2d3748;
+  margin-right: 10px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.admin-button:hover {
+  background-color: #2d3748;
+}

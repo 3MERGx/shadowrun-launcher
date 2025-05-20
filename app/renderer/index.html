@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Shadowrun FPS Launcher</title>
+    <link rel="stylesheet" href="../styles/global.css" />
+    <script src="./index.js" defer></script>
+  </head>
+  <body>
+    <!-- Window control buttons -->
+    <div class="window-controls">
+      <button id="minimizeButton" class="control-button">-</button>
+      <button id="closeButton" class="control-button">×</button>
+    </div>
+
+    <div class="content">
+      <!-- Main content area -->
+      <div class="buttons-container">
+        <!-- Main button (Download/Play) -->
+        <div class="button-row" style="text-align: center">
+          <button id="playButton">Download</button>
+        </div>
+
+        <!-- Secondary buttons -->
+        <div class="button-row" style="text-align: center">
+          <button id="activateButton">Activate Game</button>
+        </div>
+        <div class="button-row" style="text-align: center">
+          <button id="instructionsButton">Instructions</button>
+        </div>
+        <div class="button-row" style="text-align: center">
+          <button id="settingsButton">Settings</button>
+        </div>
+        <div class="button-row" style="text-align: center">
+          <button id="websiteButton">Website</button>
+        </div>
+      </div>
+
+      <!-- Version info -->
+      <div class="version-info">Version 1.0.0</div>
+
+      <!-- Add this just before the version-info div
+      <div class="player-count-container">
+        <div class="player-count">
+          <span id="playerCountIcon">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+          </span>
+          <span id="playerCount">--</span> online
+        </div>
+      </div> -->
+
+      <!-- Add this before the closing div.content -->
+      <div class="social-icons">
+        <button
+          id="discordIconButton"
+          class="social-icon-button"
+          title="Join our Discord"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 127.14 96.36"
+            fill="currentColor"
+          >
+            <path
+              d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Settings screen (hidden by default) -->
+    <div id="settingsScreen" class="settings-screen">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="closeSettingsButton" class="close-settings-button">
+          ×
+        </button>
+      </div>
+
+      <div class="settings-content">
+        <div class="setting-item">
+          <label>Skip Intro Video</label>
+          <div class="setting-control-with-progress">
+            <button id="skipIntroButton" class="settings-action-button">
+              Install Mod
+            </button>
+            <div id="skipIntroProgress" class="setting-progress-indicator">
+              <div class="progress-spinner-row">
+                <div class="progress-spinner"></div>
+                <span id="skipIntroStatus">Preparing...</span>
+              </div>
+              <div class="progress-bar-container">
+                <div id="skipIntroProgressBar" class="progress-bar"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add the Open Game Directory button -->
+        <div class="setting-item">
+          <label>Game Installation</label>
+          <button
+            id="openGameDirButton"
+            class="settings-action-button"
+            onclick="console.log('HTML onclick fired'); window.api.openGameDirectory(); return false;"
+          >
+            Open Game Folder
+          </button>
+        </div>
+
+        <div class="setting-item disabled">
+          <label for="dxvk">DXVK Support</label>
+          <div class="toggle-switch">
+            <input type="checkbox" id="dxvk" disabled />
+            <span class="toggle-slider"></span>
+          </div>
+        </div>
+
+        <div class="setting-item fps-setting">
+          <label for="maxFrameRate">Max Frame Rate</label>
+          <div class="fps-controls">
+            <div class="input-with-label">
+              <input
+                type="number"
+                id="maxFrameRate"
+                min="30"
+                max="300"
+                value="85"
+                class="number-input"
+              />
+              <span class="input-suffix">FPS</span>
+            </div>
+            <div class="tooltip-container">
+              <button id="saveFrameRateButton" class="settings-action-button">
+                Apply
+              </button>
+              <div id="fpsFeedback" class="settings-feedback">
+                FPS setting saved!
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add this inside the settings-content div, after an existing setting-item -->
+        <div class="setting-item">
+          <label>PCID Backup</label>
+          <div class="setting-control-with-progress">
+            <button
+              id="backupPcidButton"
+              class="settings-action-button"
+              onclick="handlePcidBackupClick()"
+            >
+              Backup Current PCID
+            </button>
+            <div id="pcidBackupFeedback" class="setting-progress-indicator">
+              <div class="progress-spinner-row">
+                <div class="progress-spinner"></div>
+                <span id="pcidBackupStatus">Checking current PCID...</span>
+              </div>
+              <div id="currentPcidDisplay" class="current-pcid-display"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-note">
+          <p>
+            Note: Some settings are currently disabled as they will be
+            implemented in a future update.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add this before the closing body tag -->
+    <div id="instructionsScreen" class="modal-screen">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Installation Instructions</h2>
+          <button id="closeInstructionsButton" class="close-button">×</button>
+        </div>
+        <div class="modal-body">
+          <ol class="instructions-list">
+            <li>
+              Click "Download". Wait for all components (Shadowrun, GFWL, DirectX) to install.
+            </li>
+            <li>Once downloads are complete, click "Play" to start Shadowrun.</li>
+            <li>
+              In-game, GFWL will appear. Sign in with an Xbox Live account.
+            </li>
+            <li>
+              Proceed until you see a product key screen.
+            </li>
+            <li>
+              Alt-Tab out of the game (Do NOT close it) and return to this launcher.
+            </li>
+            <li>
+              Click the "Activate Game" button in the launcher. Confirm administrator access.
+            </li>
+            <li>Once activation is complete, return to Shadowrun</li>
+            <li>It should now pre-populate the product key and connect with signing you in.</li>
+            </li>
+            <li>
+              Once fully signed in and at the game's main menu, setup is
+              complete!
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add download progress modal -->
+    <div id="downloadProgressScreen" class="modal-screen">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Downloading Files</h2>
+        </div>
+        <div class="modal-body">
+          <div class="progress-item" data-component="game-files">
+            <p>Shadowrun</p>
+            <div class="progress-container">
+              <div id="gameFilesProgress" class="progress-bar"></div>
+            </div>
+            <p id="gameFilesStatus" class="progress-status">0%</p>
+          </div>
+          <div class="progress-item" data-component="gfwl">
+            <p>GFWL Installer:</p>
+            <div class="progress-container">
+              <div id="gfwlProgress" class="progress-bar"></div>
+            </div>
+            <p id="gfwlStatus" class="progress-status">0%</p>
+          </div>
+          <div class="progress-item" data-component="dx9">
+            <p>DirectX 9:</p>
+            <div class="progress-container">
+              <div id="dxProgress" class="progress-bar"></div>
+            </div>
+            <p id="dxStatus" class="progress-status">0%</p>
+          </div>
+          <div class="download-message">
+            <p id="downloadMessage">Preparing downloads...</p>
+          </div>
+          <div class="download-actions">
+            <button id="cancelDownloadButton" class="cancel-button">
+              Cancel Installation
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Update the tooltip container to be at bottom of page -->
+    <div
+      class="tooltip-container"
+      style="position: fixed; bottom: 0; left: 0; width: 100%; z-index: 1000"
+    ></div>
+
+    <!-- It's generally safer to put scripts at the end of the body -->
+    <script src="index.js"></script>
+  </body>
+</html>
