@@ -87,6 +87,9 @@ let gameProcess = null;
 // Define modifiedFiles at the higher scope level
 let modifiedFiles = [];
 
+// Add this near the top of your file with other variable declarations
+let downloadInProgress = false;
+
 // Remove unused encryption/decryption functions if they're only for player tracking
 // function simpleEncrypt(text, key) { ... }
 // function simpleDecrypt(text, key) { ... }
@@ -251,7 +254,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
       contextIsolation: true,
-      devTools: true,
+      devTools: false,
     },
     icon: path.join(__dirname, "assets/icon.png"),
     autoHideMenuBar: true,
@@ -495,7 +498,7 @@ ipcMain.handle("cancel-download", () => {
   return { success: true };
 });
 
-// Update the download-game handler
+// Update the download-game handler to check for existing components
 ipcMain.handle("download-game", async () => {
   try {
     if (downloadInProgress) {
@@ -503,7 +506,7 @@ ipcMain.handle("download-game", async () => {
     }
 
     downloadInProgress = true;
-    downloadCancelled = false;
+    cancelDownloadRequested = false;
 
     // Check if game directory is writable before proceeding
     const canWrite = isDirectoryWritable(GAME_INSTALL_DIR);
@@ -511,17 +514,25 @@ ipcMain.handle("download-game", async () => {
       const isAdmin = await isRunningAsAdmin();
 
       if (!isAdmin) {
-        return {
-          success: false,
-          requiresAdmin: true,
-          error: "Administrator privileges required for installation",
-        };
+        // Try to use a fallback location
+        const dirCreated = await createDirectoryWithPermissions(
+          GAME_INSTALL_DIR
+        );
+        if (!dirCreated) {
+          downloadInProgress = false;
+          return {
+            success: false,
+            requiresAdmin: true,
+            error: "Administrator privileges required for installation",
+          };
+        }
       }
     }
 
     // Create game directory with permissions check
     const dirCreated = await createDirectoryWithPermissions(GAME_INSTALL_DIR);
     if (!dirCreated) {
+      downloadInProgress = false;
       return {
         success: false,
         requiresAdmin: true,
@@ -535,15 +546,232 @@ ipcMain.handle("download-game", async () => {
       fs.mkdirSync(GAME_FILES_TEMP, { recursive: true });
     }
 
-    // Proceed with downloads...
-    // ... rest of the download code ...
+    // Send initial message
+    mainWindow.webContents.send("download-message", "Starting downloads...");
+
+    // Check for existing components
+    const gameFilesExist = checkGameFilesExist();
+    const dx9Installed = await isDX9Installed();
+    const gfwlInstalled = await isGFWLInstalled();
+
+    // Download game files if needed
+    if (gameFilesExist) {
+      mainWindow.webContents.send("game-files-progress", 100);
+      mainWindow.webContents.send(
+        "download-message",
+        "Game files already installed"
+      );
+    } else {
+      // Download game files
+      const gameFilesPath = path.join(GAME_FILES_TEMP, "build.zip");
+      mainWindow.webContents.send(
+        "download-message",
+        "Downloading game files..."
+      );
+
+      const gameFilesSuccess = await downloadFile(
+        GAME_FILES_URL,
+        gameFilesPath,
+        (progress) => {
+          mainWindow.webContents.send("game-files-progress", progress);
+        }
+      );
+
+      if (cancelDownloadRequested) {
+        downloadInProgress = false;
+        mainWindow.webContents.send("download-message", "Download cancelled");
+        return { success: false, cancelled: true };
+      }
+
+      if (!gameFilesSuccess) {
+        downloadInProgress = false;
+        mainWindow.webContents.send(
+          "download-message",
+          "Game files download failed"
+        );
+        mainWindow.webContents.send(
+          "download-error",
+          "Failed to download game files"
+        );
+        return { success: false, error: "Failed to download game files" };
+      }
+
+      // Extract game files
+      mainWindow.webContents.send(
+        "download-message",
+        "Installing game files..."
+      );
+      const extractSuccess = await extractZip(gameFilesPath, GAME_INSTALL_DIR);
+      if (!extractSuccess) {
+        downloadInProgress = false;
+        mainWindow.webContents.send(
+          "download-message",
+          "Game files extraction failed"
+        );
+        mainWindow.webContents.send(
+          "download-error",
+          "Failed to extract game files"
+        );
+        return { success: false, error: "Failed to extract game files" };
+      }
+    }
+
+    // Download and install GFWL if needed
+    if (gfwlInstalled) {
+      mainWindow.webContents.send("gfwl-progress", 100);
+      mainWindow.webContents.send("download-message", "GFWL already installed");
+    } else {
+      // Download GFWL
+      const gfwlPath = path.join(GAME_FILES_TEMP, "gfwlivesetup.zip");
+      mainWindow.webContents.send("download-message", "Downloading GFWL...");
+
+      const gfwlSuccess = await downloadFile(GFWL_URL, gfwlPath, (progress) => {
+        mainWindow.webContents.send("gfwl-progress", progress);
+      });
+
+      if (cancelDownloadRequested) {
+        downloadInProgress = false;
+        mainWindow.webContents.send("download-message", "Download cancelled");
+        return { success: false, cancelled: true };
+      }
+
+      if (!gfwlSuccess) {
+        downloadInProgress = false;
+        mainWindow.webContents.send("download-message", "GFWL download failed");
+        mainWindow.webContents.send(
+          "download-error",
+          "Failed to download GFWL"
+        );
+        return { success: false, error: "Failed to download GFWL" };
+      }
+
+      // Install GFWL
+      mainWindow.webContents.send("download-message", "Installing GFWL...");
+      const gfwlExtractSuccess = await extractZip(gfwlPath, GAME_FILES_TEMP);
+      if (!gfwlExtractSuccess) {
+        downloadInProgress = false;
+        mainWindow.webContents.send(
+          "download-message",
+          "GFWL extraction failed"
+        );
+        mainWindow.webContents.send("download-error", "Failed to extract GFWL");
+        return { success: false, error: "Failed to extract GFWL" };
+      }
+
+      // Run GFWL installer
+      const gfwlInstallerPath = path.join(GAME_FILES_TEMP, "gfwlivesetup.exe");
+      if (fs.existsSync(gfwlInstallerPath)) {
+        mainWindow.webContents.send(
+          "download-message",
+          "Running GFWL installer..."
+        );
+        await runInstaller(gfwlInstallerPath);
+      }
+    }
+
+    // Download and install DirectX 9 if needed
+    if (dx9Installed) {
+      mainWindow.webContents.send("dx-progress", 100);
+      mainWindow.webContents.send(
+        "download-message",
+        "DirectX 9 already installed"
+      );
+    } else {
+      // Download DirectX 9
+      const dx9Path = path.join(GAME_FILES_TEMP, "directx_Jun2010_redist.exe");
+      mainWindow.webContents.send(
+        "download-message",
+        "Downloading DirectX 9..."
+      );
+
+      const dx9Success = await downloadFile(DX9_URL, dx9Path, (progress) => {
+        mainWindow.webContents.send("dx-progress", progress);
+      });
+
+      if (cancelDownloadRequested) {
+        downloadInProgress = false;
+        mainWindow.webContents.send("download-message", "Download cancelled");
+        return { success: false, cancelled: true };
+      }
+
+      if (!dx9Success) {
+        downloadInProgress = false;
+        mainWindow.webContents.send(
+          "download-message",
+          "DirectX 9 download failed"
+        );
+        mainWindow.webContents.send(
+          "download-error",
+          "Failed to download DirectX 9"
+        );
+        return { success: false, error: "Failed to download DirectX 9" };
+      }
+
+      // Install DirectX 9
+      mainWindow.webContents.send(
+        "download-message",
+        "Installing DirectX 9..."
+      );
+      await runInstaller(dx9Path);
+    }
+
+    // Complete installation
+    mainWindow.webContents.send("download-message", "Installation complete!");
+    mainWindow.webContents.send("download-complete");
+
+    // Update game installation status
+    await checkExistingInstallation();
+
+    // Clean up downloads
+    downloadInProgress = false;
+    return { success: true };
   } catch (error) {
     console.error("Download error:", error);
     mainWindow.webContents.send("download-error", error.message);
     downloadInProgress = false;
     return { success: false, error: error.message };
+  } finally {
+    // Always make sure downloadInProgress is reset even if there's an uncaught exception
+    downloadInProgress = false;
   }
 });
+
+// Add this function to check if game files already exist
+function checkGameFilesExist() {
+  try {
+    const exePath = path.join(GAME_INSTALL_DIR, "Shadowrun.exe");
+    return fs.existsSync(exePath);
+  } catch (error) {
+    console.error("Error checking game files:", error);
+    return false;
+  }
+}
+
+// Add this helper function to run installers
+async function runInstaller(installerPath) {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(installerPath)) {
+      console.error(`Installer not found: ${installerPath}`);
+      resolve(false);
+      return;
+    }
+
+    const process = spawn(installerPath, ["/quiet", "/passive"], {
+      detached: true,
+      windowsHide: false,
+    });
+
+    process.on("error", (error) => {
+      console.error(`Installer error: ${error.message}`);
+      resolve(false);
+    });
+
+    process.on("exit", (code) => {
+      console.log(`Installer exited with code ${code}`);
+      resolve(code === 0);
+    });
+  });
+}
 
 // Replace the current downloadFile function with this one that handles both HTTP and HTTPS
 async function downloadFile(url, destination, progressCallback) {
@@ -570,6 +798,16 @@ async function downloadFile(url, destination, progressCallback) {
       let downloadedSize = 0;
 
       response.on("data", (chunk) => {
+        // Check if download was cancelled
+        if (cancelDownloadRequested) {
+          console.log("Download cancelled by user");
+          request.abort(); // Abort the HTTP request
+          file.close();
+          fs.unlink(destination, () => {});
+          resolve(false);
+          return;
+        }
+
         downloadedSize += chunk.length;
         // Calculate and report progress if callback provided
         if (progressCallback && totalSize) {
@@ -588,7 +826,10 @@ async function downloadFile(url, destination, progressCallback) {
     });
 
     request.on("error", (err) => {
-      console.error("Download error:", err.message);
+      // Don't log error if it was due to cancellation
+      if (!cancelDownloadRequested) {
+        console.error("Download error:", err.message);
+      }
       file.close();
       fs.unlink(destination, () => {});
       resolve(false);
@@ -1474,51 +1715,49 @@ ipcMain.handle("check-game-installed", async () => {
 // Add this function to check if a directory is writable
 function isDirectoryWritable(dirPath) {
   try {
-    // Try to create a test file in the directory or its parent if it doesn't exist
-    const testDir = fs.existsSync(dirPath) ? dirPath : path.dirname(dirPath);
-    const testFile = path.join(testDir, `.write-test-${Date.now()}.tmp`);
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true });
+    }
+
+    // Try to write a temporary file
+    const testFile = path.join(dirPath, `.write-test-${Date.now()}.tmp`);
     fs.writeFileSync(testFile, "test");
     fs.unlinkSync(testFile);
     return true;
   } catch (error) {
-    console.log(`Directory not writable: ${dirPath}`, error.message);
+    console.error(`Directory not writable: ${dirPath}`, error.message);
     return false;
   }
 }
 
-// Add this helper to create directories with elevation if needed
+// Add this function to create directory with proper permissions
 async function createDirectoryWithPermissions(dirPath) {
   try {
-    // First try to create the directory normally
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true });
     }
     return true;
   } catch (error) {
-    console.error(`Error creating directory: ${dirPath}`, error);
+    console.error(`Failed to create directory: ${dirPath}`, error.message);
 
-    // Check if we need admin privileges (EPERM or EACCES errors)
-    if (error.code === "EPERM" || error.code === "EACCES") {
-      const isAdmin = await isRunningAsAdmin();
-
-      if (!isAdmin) {
-        // Not running as admin, we need to restart with elevation
-        mainWindow.webContents.send("show-notification", {
-          title: "Administrator Privileges Required",
-          message:
-            "Installation requires administrator privileges to write to protected folders.",
-          type: "warning",
-        });
-
-        return false;
-      } else {
-        // We're admin but still couldn't create the directory
-        throw new Error(
-          `Failed to create directory even with admin privileges: ${error.message}`
-        );
+    // Try a fallback location in user's documents folder
+    try {
+      const fallbackDir = path.join(app.getPath("documents"), "Shadowrun");
+      if (!fs.existsSync(fallbackDir)) {
+        fs.mkdirSync(fallbackDir, { recursive: true });
       }
-    } else {
-      throw error;
+      // Update the global installation directory
+      GAME_INSTALL_DIR = fallbackDir;
+      RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+      console.log(`Using fallback installation directory: ${GAME_INSTALL_DIR}`);
+      return true;
+    } catch (fallbackError) {
+      console.error(
+        `Failed to create fallback directory:`,
+        fallbackError.message
+      );
+      return false;
     }
   }
 }
