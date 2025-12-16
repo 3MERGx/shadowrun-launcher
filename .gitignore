@@ -99,3 +99,15 @@ out/
 
 # Secure storage
 secure-config.json
+
+# Electron Builder output
+dist/
+
+# Compiled helper binaries (but keep RegistryWriter.exe)
+audio-volume-helper.exe
+audio-volume-helper.obj
+xlive-helper.exe
+xlive-helper.obj
+
+# Temporary files
+.commit-msg.txt
