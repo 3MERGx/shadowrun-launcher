@@ -1,0 +1,70 @@
+SHADOWRUN FPS LAUNCHER - END USER LICENSE AGREEMENT
+
+Copyright (c) 2024 Sinful Hollowz. All rights reserved.
+
+This launcher is provided as-is to help players enjoy Shadowrun (2007).
+
+By installing and using this software, you agree to the following terms:
+
+1. PERMITTED USE
+   - You may use this launcher for legitimate game installation and activation
+   - You may install the launcher on multiple computers you own
+   - You may use the launcher for personal, non-commercial purposes
+
+2. RESTRICTIONS
+   - You may not redistribute or modify the launcher without permission
+   - You may not reverse engineer, decompile, or disassemble the launcher
+   - You may not use the launcher for any illegal or unauthorized purpose
+   - You may not remove or alter any copyright, trademark, or license notices
+
+3. COMPLIANCE
+   - You must comply with Microsoft's Games for Windows Live terms of service
+   - You must comply with all applicable laws and regulations
+   - You are responsible for obtaining legitimate copies of Shadowrun (2007)
+
+4. DISCLAIMER OF WARRANTY
+   - This software is provided "AS IS" without warranty of any kind
+   - The author makes no warranties regarding functionality, accuracy, or reliability
+   - Use at your own risk
+
+5. LIMITATION OF LIABILITY
+   - In no event shall the author be liable for any damages arising from use
+   - This includes direct, indirect, incidental, or consequential damages
+   - The author is not responsible for any data loss or system damage
+
+6. COMMUNITY SOFTWARE
+   - This launcher is community-made and not affiliated with Microsoft
+   - This software is not endorsed by or associated with Microsoft Corporation
+   - Shadowrun is a trademark of Microsoft Corporation
+
+7. UPDATES AND MODIFICATIONS
+   - The author reserves the right to update or modify the launcher
+   - Updates may be installed automatically to improve functionality
+   - Continued use constitutes acceptance of any modifications
+
+8. TERMINATION
+   - This license is effective until terminated
+   - You may terminate by uninstalling the launcher
+   - Violation of terms may result in automatic termination
+
+9. SUPPORT
+   - For support, visit: https://www.shadowrunfps.com
+   - Join our Discord community: https://discord.gg/BPcxwJwfKv
+   - No guaranteed support or updates are provided
+
+10. ENTIRE AGREEMENT
+    - This agreement constitutes the entire understanding
+    - No other agreements or representations apply
+    - Changes to this agreement must be in writing
+
+By clicking "I Agree" or installing this software, you acknowledge that you have 
+read, understood, and agree to be bound by the terms of this agreement.
+
+If you do not agree to these terms, click "Cancel" and do not install the software.
+
+---
+
+For questions about this license, contact: Sinful Hollowz
+
+Last Updated: December 16, 2024
+

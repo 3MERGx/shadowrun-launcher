@@ -4,11 +4,62 @@
     <meta charset="UTF-8" />
     <title>Shadowrun FPS Launcher</title>
     <link rel="stylesheet" href="../styles/global.css" />
-    <script src="./index.js" defer></script>
+    <!-- Script moved to bottom of body to avoid double-loading -->
   </head>
   <body>
+    <!-- Audio elements -->
+    <audio id="backgroundAudio" loop>
+      <source src="../assets/backgroundAmbience.wav" type="audio/wav" />
+    </audio>
+    <audio id="buttonHoverAudio">
+      <source src="../assets/buttonHover.wav" type="audio/wav" />
+    </audio>
+    <audio id="buttonClickAudio">
+      <source src="../assets/buttonClick.wav" type="audio/wav" />
+    </audio>
+
     <!-- Window control buttons -->
     <div class="window-controls">
+      <button
+        id="muteButton"
+        class="control-button mute-button"
+        title="Mute/Unmute"
+      >
+        <svg
+          id="speakerIcon"
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <path
+            d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"
+          ></path>
+        </svg>
+        <svg
+          id="mutedIcon"
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          style="display: none"
+        >
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <line x1="23" y1="9" x2="17" y2="15"></line>
+          <line x1="17" y1="9" x2="23" y2="15"></line>
+        </svg>
+      </button>
       <button id="minimizeButton" class="control-button">-</button>
       <button id="closeButton" class="control-button">×</button>
     </div>
@@ -37,7 +88,16 @@
       </div>
 
       <!-- Version info -->
-      <div class="version-info">Version 1.0.0</div>
+      <div class="version-info-container">
+        <div class="version-info">Version 1.0.0</div>
+        <button
+          id="updateAvailableIndicator"
+          class="update-indicator"
+          style="display: none"
+        >
+          Update Available
+        </button>
+      </div>
 
       <!-- Add this just before the version-info div
       <div class="player-count-container">
@@ -96,95 +156,141 @@
       </div>
 
       <div class="settings-content">
-        <div class="setting-item">
-          <label>Skip Intro Video</label>
-          <div class="setting-control-with-progress">
-            <button id="skipIntroButton" class="settings-action-button">
-              Install Mod
-            </button>
-            <div id="skipIntroProgress" class="setting-progress-indicator">
-              <div class="progress-spinner-row">
-                <div class="progress-spinner"></div>
-                <span id="skipIntroStatus">Preparing...</span>
-              </div>
-              <div class="progress-bar-container">
-                <div id="skipIntroProgressBar" class="progress-bar"></div>
-              </div>
+        <!-- Game Settings Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Game Settings</h3>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>Skip Intro Video</label>
+              <span class="setting-description"
+                >Skip the opening cinematic videos when starting the game</span
+              >
             </div>
-          </div>
-        </div>
-
-        <!-- Add the Open Game Directory button -->
-        <div class="setting-item">
-          <label>Game Installation</label>
-          <button
-            id="openGameDirButton"
-            class="settings-action-button"
-            onclick="console.log('HTML onclick fired'); window.api.openGameDirectory(); return false;"
-          >
-            Open Game Folder
-          </button>
-        </div>
-
-        <div class="setting-item disabled">
-          <label for="dxvk">DXVK Support</label>
-          <div class="toggle-switch">
-            <input type="checkbox" id="dxvk" disabled />
-            <span class="toggle-slider"></span>
-          </div>
-        </div>
-
-        <div class="setting-item fps-setting">
-          <label for="maxFrameRate">Max Frame Rate</label>
-          <div class="fps-controls">
-            <div class="input-with-label">
-              <input
-                type="number"
-                id="maxFrameRate"
-                min="30"
-                max="300"
-                value="85"
-                class="number-input"
-              />
-              <span class="input-suffix">FPS</span>
-            </div>
-            <div class="tooltip-container">
-              <button id="saveFrameRateButton" class="settings-action-button">
-                Apply
+            <div class="setting-control-with-progress">
+              <button id="skipIntroButton" class="settings-action-button">
+                Install Mod
               </button>
-              <div id="fpsFeedback" class="settings-feedback">
-                FPS setting saved!
+              <div id="skipIntroProgress" class="setting-progress-indicator">
+                <div class="progress-spinner-row">
+                  <div class="progress-spinner"></div>
+                  <span id="skipIntroStatus">Preparing...</span>
+                </div>
+                <div class="progress-bar-container">
+                  <div id="skipIntroProgressBar" class="progress-bar"></div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Add this inside the settings-content div, after an existing setting-item -->
-        <div class="setting-item">
-          <label>PCID Backup</label>
-          <div class="setting-control-with-progress">
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>Game Installation Folder</label>
+              <span class="setting-description"
+                >Open the folder where Shadowrun is installed</span
+              >
+            </div>
             <button
-              id="backupPcidButton"
+              id="openGameDirButton"
               class="settings-action-button"
-              onclick="handlePcidBackupClick()"
+              onclick="console.log('HTML onclick fired'); window.api.openGameDirectory(); return false;"
             >
-              Backup Current PCID
+              Open Game Folder
             </button>
-            <div id="pcidBackupFeedback" class="setting-progress-indicator">
-              <div class="progress-spinner-row">
-                <div class="progress-spinner"></div>
-                <span id="pcidBackupStatus">Checking current PCID...</span>
+          </div>
+        </div>
+
+        <!-- Performance Settings Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Performance</h3>
+
+          <div class="setting-item fps-setting">
+            <div class="setting-label-group">
+              <label for="maxFrameRate">Max Frame Rate</label>
+              <span class="setting-description"
+                >Limit the maximum frames per second. Default is 85 FPS. Higher
+                values may cause instability.</span
+              >
+            </div>
+            <div class="fps-controls">
+              <div class="input-with-label">
+                <input
+                  type="number"
+                  id="maxFrameRate"
+                  min="30"
+                  max="300"
+                  value="85"
+                  class="number-input"
+                />
+                <span class="input-suffix">FPS</span>
               </div>
-              <div id="currentPcidDisplay" class="current-pcid-display"></div>
+              <div class="tooltip-container">
+                <button id="saveFrameRateButton" class="settings-action-button">
+                  Apply
+                </button>
+                <div id="fpsFeedback" class="settings-feedback">
+                  FPS setting saved!
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-item disabled">
+            <div class="setting-label-group">
+              <label for="dxvk">DXVK Support</label>
+              <span class="setting-description"
+                >Enable DXVK for better compatibility (Coming soon)</span
+              >
+            </div>
+            <div class="toggle-switch">
+              <input type="checkbox" id="dxvk" disabled />
+              <span class="toggle-slider"></span>
             </div>
           </div>
         </div>
 
-        <div class="settings-note">
-          <p>
-            Note: Some settings are currently disabled as they will be
-            implemented in a future update.
-          </p>
+        <!-- Advanced Settings Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Advanced</h3>
+
+          <!-- Check for Updates Button (RECREATED FRESH) -->
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>Check for Updates</label>
+              <span class="setting-description"
+                >Check if a new version of the launcher is available</span
+              >
+            </div>
+            <button id="btnCheckUpdates" class="settings-action-button">
+              Check for Updates
+            </button>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>PCID Backup</label>
+              <span class="setting-description"
+                >Backup your current PCID to restore it later if needed. Useful
+                before reinstalling Windows.</span
+              >
+            </div>
+            <div class="setting-control-with-progress">
+              <button
+                id="backupPcidButton"
+                class="settings-action-button"
+                onclick="handlePcidBackupClick()"
+              >
+                Backup Current PCID
+              </button>
+              <div id="pcidBackupFeedback" class="setting-progress-indicator">
+                <div class="progress-spinner-row">
+                  <div class="progress-spinner"></div>
+                  <span id="pcidBackupStatus">Checking current PCID...</span>
+                </div>
+                <div id="currentPcidDisplay" class="current-pcid-display"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -197,31 +303,59 @@
           <button id="closeInstructionsButton" class="close-button">×</button>
         </div>
         <div class="modal-body">
+          <div class="instructions-intro">
+            <p>
+              Follow these steps to install and activate Shadowrun (10-15 min).
+            </p>
+          </div>
           <ol class="instructions-list">
             <li>
-              Click "Download". Wait for all components (Shadowrun, GFWL, DirectX) to install.
-            </li>
-            <li>Once downloads are complete, click "Play" to start Shadowrun.</li>
-            <li>
-              In-game, GFWL will appear. Sign in with an Xbox Live account.
+              <strong>Download & Install:</strong> Click "Download" and wait for
+              all components (game files, GFWL, DirectX 9) to install.
             </li>
             <li>
-              Proceed until you see a product key screen.
+              <strong>Launch Game:</strong> Once complete, click "Play" to start
+              Shadowrun.
             </li>
             <li>
-              Alt-Tab out of the game (Do NOT close it) and return to this launcher.
+              <strong>Sign In:</strong> When GFWL appears, sign in with your
+              Xbox Live account (create one if needed).
             </li>
             <li>
-              Click the "Activate Game" button in the launcher. Confirm administrator access.
-            </li>
-            <li>Once activation is complete, return to Shadowrun</li>
-            <li>It should now pre-populate the product key and connect with signing you in.</li>
+              <strong>Product Key Screen:</strong> Continue until you see the
+              product key screen.
             </li>
             <li>
-              Once fully signed in and at the game's main menu, setup is
-              complete!
+              <strong>⚠️ Important:</strong> Press <kbd>Alt</kbd> +
+              <kbd>Tab</kbd> to return here.
+              <strong>Do NOT close the game</strong>.
+            </li>
+            <li>
+              <strong>Activate:</strong> Click "Activate Game" and allow admin
+              permissions when prompted.
+            </li>
+            <li>
+              <strong>Return:</strong> Switch back to Shadowrun with
+              <kbd>Alt</kbd> + <kbd>Tab</kbd>.
+            </li>
+            <li>
+              <strong>Complete:</strong> Product key should auto-fill. Once at
+              main menu, you're done!
             </li>
           </ol>
+          <div class="instructions-tips">
+            <h3>💡 Tips:</h3>
+            <ul>
+              <li>Launch game at least once before activating</li>
+              <li>Keep game running during activation</li>
+              <li>Run launcher as Administrator if issues occur</li>
+            </ul>
+          </div>
+          <div class="instructions-actions">
+            <button id="gotItButton" class="instructions-got-it-button">
+              Got it!
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -230,32 +364,34 @@
     <div id="downloadProgressScreen" class="modal-screen">
       <div class="modal-content">
         <div class="modal-header">
-          <h2>Downloading Files</h2>
+          <h2>Installing Shadowrun</h2>
         </div>
         <div class="modal-body">
           <div class="progress-item" data-component="game-files">
-            <p>Shadowrun</p>
+            <p><strong>Shadowrun Game</strong></p>
             <div class="progress-container">
               <div id="gameFilesProgress" class="progress-bar"></div>
             </div>
-            <p id="gameFilesStatus" class="progress-status">0%</p>
+            <p id="gameFilesStatus" class="progress-status">Waiting...</p>
           </div>
           <div class="progress-item" data-component="gfwl">
-            <p>GFWL Installer:</p>
+            <p><strong>Games for Windows Live</strong></p>
             <div class="progress-container">
               <div id="gfwlProgress" class="progress-bar"></div>
             </div>
-            <p id="gfwlStatus" class="progress-status">0%</p>
+            <p id="gfwlStatus" class="progress-status">Waiting...</p>
           </div>
           <div class="progress-item" data-component="dx9">
-            <p>DirectX 9:</p>
+            <p><strong>DirectX 9</strong></p>
             <div class="progress-container">
               <div id="dxProgress" class="progress-bar"></div>
             </div>
-            <p id="dxStatus" class="progress-status">0%</p>
+            <p id="dxStatus" class="progress-status">Waiting...</p>
           </div>
           <div class="download-message">
-            <p id="downloadMessage">Preparing downloads...</p>
+            <p id="downloadMessage">
+              Preparing installation... This may take a few minutes.
+            </p>
           </div>
           <div class="download-actions">
             <button id="cancelDownloadButton" class="cancel-button">
@@ -266,11 +402,158 @@
       </div>
     </div>
 
+    <!-- Launcher Update Progress Modal -->
+    <div
+      id="launcherUpdateProgressScreen"
+      class="modal-screen"
+      style="display: none"
+    >
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Updating Launcher</h2>
+        </div>
+        <div class="modal-body">
+          <div class="progress-item">
+            <p><strong>Downloading Update</strong></p>
+            <div class="progress-container">
+              <div
+                id="launcherUpdateProgress"
+                class="progress-bar"
+                style="width: 0%"
+              ></div>
+            </div>
+            <p id="launcherUpdateStatus" class="progress-status">
+              Starting download...
+            </p>
+            <p
+              id="launcherUpdateDetails"
+              class="progress-details"
+              style="font-size: 0.9em; color: #aaa; margin-top: 5px"
+            ></p>
+          </div>
+          <div class="download-message">
+            <p id="launcherUpdateMessage">
+              Downloading launcher update in the background. You can continue
+              using the launcher.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Custom Update Dialog -->
+    <div id="updateDialog" class="update-dialog-overlay">
+      <div class="update-dialog">
+        <div class="update-dialog-header">
+          <h2>🎮 Update Available</h2>
+        </div>
+        <div class="update-dialog-content">
+          <div class="update-version-info">
+            <div class="version-comparison">
+              <div class="version-current">
+                <span class="version-label">Current</span>
+                <span class="version-number" id="updateCurrentVersion"
+                  >0.9.0</span
+                >
+              </div>
+              <div class="version-arrow">→</div>
+              <div class="version-new">
+                <span class="version-label">New</span>
+                <span class="version-number" id="updateNewVersion">0.9.1</span>
+              </div>
+            </div>
+          </div>
+          <div class="update-description" id="updateDescription">
+            A new version of Shadowrun FPS Launcher is available!
+          </div>
+          <div class="update-release-notes" id="updateReleaseNotes"></div>
+          <div class="update-one-click-notice">
+            Click "Install Update" to download and automatically install the
+            latest version.
+          </div>
+        </div>
+        <div class="update-dialog-actions">
+          <button
+            id="updateLaterButton"
+            class="update-button update-button-secondary"
+          >
+            Later
+          </button>
+          <button
+            id="updateDownloadButton"
+            class="update-button update-button-primary"
+          >
+            Install Update
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rollback Dialog -->
+    <div id="rollbackDialog" class="update-dialog-overlay">
+      <div class="update-dialog rollback-dialog">
+        <div class="update-dialog-header rollback-header">
+          <h2>⚠️ Version Rollback Required</h2>
+        </div>
+        <div class="update-dialog-content">
+          <div class="update-version-info">
+            <div class="version-comparison">
+              <div class="version-current">
+                <span class="version-label">Current</span>
+                <span class="version-number" id="rollbackCurrentVersion"
+                  >0.9.1</span
+                >
+              </div>
+              <div class="version-arrow">←</div>
+              <div class="version-new rollback-version">
+                <span class="version-label">Rollback To</span>
+                <span class="version-number" id="rollbackTargetVersion"
+                  >0.9.0</span
+                >
+              </div>
+            </div>
+          </div>
+          <div class="update-description rollback-reason" id="rollbackReason">
+            A critical issue was found. Please rollback to a stable version.
+          </div>
+          <div
+            class="rollback-progress"
+            id="rollbackProgress"
+            style="display: none"
+          >
+            <div class="progress-bar">
+              <div class="progress-fill" id="rollbackProgressFill"></div>
+            </div>
+            <div class="progress-text" id="rollbackProgressText">
+              Downloading...
+            </div>
+          </div>
+        </div>
+        <div class="update-dialog-actions">
+          <button
+            id="rollbackLaterButton"
+            class="update-button update-button-secondary"
+          >
+            Later
+          </button>
+          <button
+            id="rollbackDownloadButton"
+            class="update-button update-button-primary"
+          >
+            Download & Rollback
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Update the tooltip container to be at bottom of page -->
     <div
       class="tooltip-container"
       style="position: fixed; bottom: 0; left: 0; width: 100%; z-index: 1000"
     ></div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
 
     <!-- It's generally safer to put scripts at the end of the body -->
     <script src="index.js"></script>

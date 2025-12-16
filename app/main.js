@@ -10,7 +10,9 @@ const { v4: uuidv4 } = require("uuid");
 const crypto = require("crypto");
 const registryUtils = require("./utils/registry");
 const tokenUtils = require("./utils/token");
+const playerTracker = require("./utils/playerTracking");
 const { spawn } = require("child_process");
+const { autoUpdater } = require("electron-updater");
 
 // Simplified logging utility
 const log = {
@@ -48,17 +50,40 @@ const GAME_FILES_URL = "http://157.245.214.234/releases/build.zip";
 const GFWL_URL = "http://157.245.214.234/releases/gfwlivesetup.zip";
 const DX9_URL =
   "https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe";
-const VERSION_URL = "http://157.245.214.234/releases/version.txt";
 
 // Define installation directories
-let GAME_INSTALL_DIR = path.join(
-  "C:\\Program Files (x86)\\Microsoft Games for Windows - LIVE\\Shadowrun"
-);
+// Use user-writable location by default (doesn't require admin)
+// Program Files location is tried only if running as admin
+let GAME_INSTALL_DIR = path.join(app.getPath("home"), "Games", "Shadowrun");
 const GAME_FILES_TEMP = path.join(os.tmpdir(), "Shadowrun_Downloads");
 
 // Now we can use GAME_INSTALL_DIR in other constants
 let RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
 const BACKUP_DIR = path.join(app.getPath("userData"), "BackupFiles");
+
+// Auto-launch game after successful download/installation
+// Set to false to disable auto-launch, true to enable
+const AUTO_LAUNCH_AFTER_DOWNLOAD = false;
+
+// Auto-updater configuration
+// Set your update server URL here
+const UPDATE_SERVER_URL = "http://157.245.214.234/launcher"; // Change this to your DigitalOcean server
+autoUpdater.setFeedURL({
+  provider: "generic",
+  url: UPDATE_SERVER_URL,
+});
+
+// Configure auto-updater logging (use simple console logging)
+autoUpdater.logger = {
+  info: (msg) => console.log("[Updater]", msg),
+  warn: (msg) => console.warn("[Updater]", msg),
+  error: (msg) => console.error("[Updater]", msg),
+  debug: (msg) => console.log("[Updater Debug]", msg),
+};
+
+// Auto-updater options
+autoUpdater.autoDownload = false; // We'll control when to download
+autoUpdater.autoInstallOnAppQuit = true; // Install update when app quits
 
 // Add this constant for the NoIntroFix download URL
 const NO_INTRO_FIX_URL = "http://157.245.214.234/releases/NoIntroFix.zip";
@@ -71,8 +96,7 @@ const BUNDLED_NO_INTRO_FIX = path.join(
   "NoIntroFix.zip"
 );
 
-// Discord application ID - you'll need to create an application in Discord Developer Portal
-const CLIENT_ID = "1352066395487076406"; // Replace with your actual Discord Application ID
+const CLIENT_ID = "1352066395487076406";
 
 // Make Discord RPC completely optional
 let DiscordRPC = null;
@@ -202,6 +226,7 @@ let settings = {
   skipIntro: false,
   dxvk: false,
   maxFrameRate: 240,
+  audioMuted: false, // Persist background audio mute state
 };
 
 const settingsPath = path.join(app.getPath("userData"), "settings.json");
@@ -245,6 +270,12 @@ function saveSettingsToDisk() {
 
 function createWindow() {
   // Create the browser window.
+  // Set app icon path (use .ico for Windows)
+  const iconPath = path.join(__dirname, "assets/icon2.ico");
+
+  // Check if running in dev mode
+  const isDevMode = process.argv.includes("--dev") || !app.isPackaged;
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 720,
@@ -254,9 +285,9 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
       contextIsolation: true,
-      devTools: false,
+      devTools: isDevMode, // Enable DevTools in dev mode
     },
-    icon: path.join(__dirname, "assets/icon.png"),
+    icon: iconPath,
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
     backgroundColor: "#000000", // Set a background color
@@ -268,14 +299,33 @@ function createWindow() {
   // Fix for taskbar icon in Windows
   if (process.platform === "win32") {
     app.setAppUserModelId(app.name);
+    // Explicitly set the icon for Windows taskbar
+    if (fs.existsSync(iconPath)) {
+      mainWindow.setIcon(iconPath);
+    }
   }
 
   // Load the index.html of the app.
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 
-  // Open the DevTools automatically (optional, but helpful for debugging)
-  // You can comment this out once you can open it manually
-  mainWindow.webContents.openDevTools();
+  // Open DevTools automatically in dev mode
+  if (isDevMode) {
+    console.log("[Dev Mode] Opening DevTools automatically...");
+    mainWindow.webContents.openDevTools();
+  }
+
+  // Enable F12 and Ctrl+Shift+I to toggle DevTools in dev mode
+  if (isDevMode) {
+    mainWindow.webContents.on("before-input-event", (event, input) => {
+      if (
+        input.key === "F12" ||
+        (input.control && input.shift && input.key.toLowerCase() === "i")
+      ) {
+        mainWindow.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    });
+  }
 
   // Listen for the 'close' event on the window
   mainWindow.on("close", (event) => {
@@ -351,7 +401,7 @@ function setupDiscordIntegration() {
   }
 }
 
-// Modify app.whenReady to include Discord setup
+// Modify app.whenReady to include Discord setup and auto-updater
 app.whenReady().then(async () => {
   try {
     // Load settings
@@ -359,6 +409,14 @@ app.whenReady().then(async () => {
 
     createWindow();
     setupDiscordIntegration();
+
+    // Start player tracking
+    playerTracker.start();
+
+    // Check for updates after window is created
+    setTimeout(() => {
+      checkForUpdates();
+    }, 3000); // Wait 3 seconds before checking for updates
 
     app.on("activate", function () {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -399,6 +457,116 @@ app.on("window-all-closed", function () {
   }
 });
 
+// Helper function to set default game configuration (resolution and volume)
+// This runs before first launch to prevent off-screen resolution issues
+function setDefaultGameConfig() {
+  try {
+    // Common config file locations for Shadowrun (2007 GFWL game)
+    const possibleConfigPaths = [
+      path.join(GAME_INSTALL_DIR, "config.ini"),
+      path.join(GAME_INSTALL_DIR, "settings.ini"),
+      path.join(GAME_INSTALL_DIR, "Shadowrun.ini"),
+      path.join(GAME_INSTALL_DIR, "System", "Shadowrun.ini"),
+      path.join(GAME_INSTALL_DIR, "System", "ShadowrunEngine.ini"),
+      path.join(
+        app.getPath("documents"),
+        "My Games",
+        "Shadowrun",
+        "config.ini"
+      ),
+      path.join(
+        app.getPath("documents"),
+        "My Games",
+        "Shadowrun",
+        "Shadowrun.ini"
+      ),
+      path.join(app.getPath("appData"), "Shadowrun", "config.ini"),
+    ];
+
+    // Try to find and modify existing config file
+    for (const configPath of possibleConfigPaths) {
+      if (fs.existsSync(configPath)) {
+        try {
+          let configContent = fs.readFileSync(configPath, "utf8");
+          let modified = false;
+
+          // Set resolution to a safe default (1920x1080 or 1280x720)
+          // Common patterns for resolution in game configs
+          const resolutionPatterns = [
+            /ResolutionSizeX\s*=\s*\d+/i,
+            /ScreenResolutionX\s*=\s*\d+/i,
+            /ResX\s*=\s*\d+/i,
+            /Width\s*=\s*\d+/i,
+          ];
+          const resolutionYPatterns = [
+            /ResolutionSizeY\s*=\s*\d+/i,
+            /ScreenResolutionY\s*=\s*\d+/i,
+            /ResY\s*=\s*\d+/i,
+            /Height\s*=\s*\d+/i,
+          ];
+
+          // Try to set resolution to 1920x1080 (or detect current resolution and use that)
+          // For now, we'll just log that we found the config
+          console.log(`[Game Config] Found config file at: ${configPath}`);
+
+          // Set music volume to 50% (0.5 or 50 depending on format)
+          const volumePatterns = [
+            /MusicVolume\s*=\s*[\d.]+/i,
+            /VolumeMusic\s*=\s*[\d.]+/i,
+            /MasterMusicVolume\s*=\s*[\d.]+/i,
+          ];
+
+          for (const pattern of volumePatterns) {
+            if (pattern.test(configContent)) {
+              // Replace with 0.5 (50% as decimal) or 50 (50% as integer)
+              configContent = configContent.replace(pattern, (match) => {
+                const numMatch = match.match(/[\d.]+/);
+                if (numMatch) {
+                  const num = parseFloat(numMatch[0]);
+                  // If it's a 0-1 scale, use 0.5; if 0-100 scale, use 50
+                  const newValue = num <= 1 ? "0.5" : "50";
+                  return match.replace(/[\d.]+/, newValue);
+                }
+                return match;
+              });
+              modified = true;
+              console.log(
+                `[Game Config] Set music volume to 50% in ${configPath}`
+              );
+            }
+          }
+
+          if (modified) {
+            fs.writeFileSync(configPath, configContent, "utf8");
+            console.log(`[Game Config] Updated config file: ${configPath}`);
+          }
+        } catch (error) {
+          console.warn(
+            `[Game Config] Could not modify config file ${configPath}:`,
+            error.message
+          );
+        }
+      }
+    }
+
+    // Also check registry for game settings (common for GFWL games)
+    // Shadowrun might store settings in: HKEY_CURRENT_USER\Software\Microsoft\Games\Shadowrun
+    try {
+      const regPath =
+        "HKEY_CURRENT_USER\\Software\\Microsoft\\Games\\Shadowrun";
+      // We could use registryUtils here, but for now just log
+      console.log("[Game Config] Checking registry for game settings...");
+    } catch (error) {
+      console.warn("[Game Config] Could not check registry:", error.message);
+    }
+  } catch (error) {
+    console.warn(
+      "[Game Config] Error setting default game config:",
+      error.message
+    );
+  }
+}
+
 // Update the launch-game handler to track the game process
 ipcMain.handle("launch-game", async (event, gameSettings) => {
   try {
@@ -418,6 +586,9 @@ ipcMain.handle("launch-game", async (event, gameSettings) => {
       console.error("Game executable not found at:", gameExePath);
       return { success: false, error: "Game executable not found" };
     }
+
+    // Set default game configuration before launching (resolution and volume)
+    setDefaultGameConfig();
 
     // Set player as in-game and send heartbeat
     playerInGame = true;
@@ -443,13 +614,48 @@ ipcMain.handle("launch-game", async (event, gameSettings) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("game-state-update", { running: false });
         }
+
+        // Update player tracking status back to menu
+        playerTracker.setStatus("menu");
       }
     );
+
+    // Set game audio volume to 50% using native helper
+    // This runs in the background and doesn't block game launch
+    try {
+      const audioHelperPath = path.join(
+        app.getAppPath(),
+        "resources",
+        "audio-volume-helper.exe"
+      );
+      if (fs.existsSync(audioHelperPath)) {
+        console.log(
+          "[Audio] Launching audio volume helper to set game volume to 50%..."
+        );
+        // Spawn the helper in detached mode so it doesn't block
+        const audioHelper = spawn(audioHelperPath, ["Shadowrun.exe", "50"], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        audioHelper.unref(); // Don't wait for it to complete
+        console.log("[Audio] Audio volume helper launched");
+      } else {
+        console.log(
+          "[Audio] Audio volume helper not found, skipping volume adjustment"
+        );
+      }
+    } catch (audioError) {
+      console.warn("[Audio] Could not set game volume:", audioError.message);
+    }
 
     // Notify renderer that game is now running
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("game-state-update", { running: true });
     }
+
+    // Update player tracking status
+    playerTracker.setStatus("in-game");
 
     // Update Discord status right away
     updateDiscordActivity(true);
@@ -508,13 +714,366 @@ ipcMain.handle("download-game", async () => {
     downloadInProgress = true;
     cancelDownloadRequested = false;
 
-    // Check if game directory is writable before proceeding
-    const canWrite = isDirectoryWritable(GAME_INSTALL_DIR);
-    if (!canWrite) {
-      const isAdmin = await isRunningAsAdmin();
+    // Create temp directory
+    if (!fs.existsSync(GAME_FILES_TEMP)) {
+      fs.mkdirSync(GAME_FILES_TEMP, { recursive: true });
+    }
 
-      if (!isAdmin) {
-        // Try to use a fallback location
+    // Send initial message
+    mainWindow.webContents.send(
+      "download-message",
+      "Preparing installation... This may take a few minutes."
+    );
+
+    // STEP 1: Check for existing components FIRST
+    console.log("[Download] Checking for existing components...");
+    const dx9Installed = await isDX9Installed();
+    const gfwlInstalled = await isGFWLInstalled();
+
+    // Update UI immediately for GFWL and DirectX status
+    if (gfwlInstalled) {
+      mainWindow.webContents.send("gfwl-progress", 100);
+      mainWindow.webContents.send(
+        "download-message",
+        "✓ Games for Windows Live is already installed"
+      );
+    } else {
+      mainWindow.webContents.send("gfwl-progress", 0);
+    }
+
+    if (dx9Installed) {
+      mainWindow.webContents.send("dx-progress", 100);
+      mainWindow.webContents.send(
+        "download-message",
+        "✓ DirectX 9 is already installed"
+      );
+    } else {
+      mainWindow.webContents.send("dx-progress", 0);
+    }
+
+    // STEP 2: Download and install GFWL FIRST (if needed) - BEFORE Shadowrun download
+    if (!gfwlInstalled) {
+      // Download GFWL
+      const gfwlPath = path.join(GAME_FILES_TEMP, "gfwlivesetup.zip");
+      mainWindow.webContents.send(
+        "download-message",
+        "📥 Downloading Games for Windows Live (required for online play)..."
+      );
+
+      const gfwlSuccess = await downloadFile(GFWL_URL, gfwlPath, (progress) => {
+        mainWindow.webContents.send("gfwl-progress", progress);
+      });
+
+      if (cancelDownloadRequested) {
+        downloadInProgress = false;
+        mainWindow.webContents.send("download-message", "Download cancelled");
+        return { success: false, cancelled: true };
+      }
+
+      if (!gfwlSuccess) {
+        downloadInProgress = false;
+        mainWindow.webContents.send(
+          "download-message",
+          "❌ Failed to download Games for Windows Live. Please check your internet connection."
+        );
+        mainWindow.webContents.send(
+          "download-error",
+          "Failed to download Games for Windows Live. Check your internet connection."
+        );
+        return { success: false, error: "Failed to download GFWL" };
+      }
+
+      // Extract GFWL
+      mainWindow.webContents.send(
+        "download-message",
+        "⚙️ Installing Games for Windows Live... You may see a Windows installer window."
+      );
+      const gfwlExtractSuccess = await extractZip(gfwlPath, GAME_FILES_TEMP);
+      if (!gfwlExtractSuccess) {
+        downloadInProgress = false;
+        mainWindow.webContents.send(
+          "download-message",
+          "❌ Failed to extract Games for Windows Live installer. Please try again."
+        );
+        mainWindow.webContents.send(
+          "download-error",
+          "Failed to extract Games for Windows Live."
+        );
+        return { success: false, error: "Failed to extract GFWL" };
+      }
+
+      // Run GFWL installer
+      const gfwlInstallerPath = path.join(GAME_FILES_TEMP, "gfwlivesetup.exe");
+      if (fs.existsSync(gfwlInstallerPath)) {
+        mainWindow.webContents.send(
+          "download-message",
+          "Running GFWL installer..."
+        );
+        await runInstaller(gfwlInstallerPath);
+        mainWindow.webContents.send("gfwl-progress", 100);
+      }
+    }
+
+    // STEP 3: Download and install DirectX 9 FIRST (if needed) - BEFORE Shadowrun download
+    if (!dx9Installed) {
+      // Download DirectX 9
+      const dx9Path = path.join(GAME_FILES_TEMP, "directx_Jun2010_redist.exe");
+      mainWindow.webContents.send(
+        "download-message",
+        "📥 Downloading DirectX 9 (required graphics library)..."
+      );
+
+      const dx9Success = await downloadFile(DX9_URL, dx9Path, (progress) => {
+        mainWindow.webContents.send("dx-progress", progress);
+      });
+
+      if (cancelDownloadRequested) {
+        downloadInProgress = false;
+        mainWindow.webContents.send("download-message", "Download cancelled");
+        return { success: false, cancelled: true };
+      }
+
+      if (!dx9Success) {
+        downloadInProgress = false;
+        mainWindow.webContents.send(
+          "download-message",
+          "❌ Failed to download DirectX 9. Please check your internet connection."
+        );
+        mainWindow.webContents.send(
+          "download-error",
+          "Failed to download DirectX 9. Check your internet connection."
+        );
+        return { success: false, error: "Failed to download DirectX 9" };
+      }
+
+      // Install DirectX 9
+      mainWindow.webContents.send(
+        "download-message",
+        "⚙️ Installing DirectX 9... This may take a minute or two."
+      );
+      await runInstaller(dx9Path);
+      mainWindow.webContents.send("dx-progress", 100);
+    }
+
+    // STEP 4: Determine installation directory (request admin if needed)
+    const isAdmin = await isRunningAsAdmin();
+    const programFilesPath = path.join(
+      "C:\\Program Files (x86)\\Microsoft Games for Windows - LIVE\\Shadowrun"
+    );
+
+    // Helper function to create directory with admin privileges and set write permissions
+    async function createDirectoryWithAdmin(dirPath) {
+      return new Promise((resolve) => {
+        const psScriptPath = path.join(
+          os.tmpdir(),
+          `create_dir_${Date.now()}.ps1`
+        );
+
+        // Get current username for permission setting
+        const currentUser = process.env.USERNAME || process.env.USER || "Users";
+        const userDomain = process.env.USERDOMAIN || "";
+
+        // Create PowerShell script to create directory AND set permissions
+        const psScript = `$dir = "${dirPath.replace(/\\/g, "\\\\")}"
+$userName = "${currentUser}"
+$domain = "${userDomain}"
+
+# Create directory if it doesn't exist
+if (-not (Test-Path $dir)) {
+    try {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        Write-Host "Directory created: $dir"
+    } catch {
+        Write-Host "Failed to create directory: $_"
+        exit 1
+    }
+} else {
+    Write-Host "Directory already exists: $dir"
+}
+
+# Set permissions so current user can write to it
+try {
+    $acl = Get-Acl $dir
+    # Grant full control to current user
+    $userIdentity = if ($domain) { "$domain\\$userName" } else { $userName }
+    $permission = $userIdentity,"FullControl","ContainerInherit,ObjectInherit","None","Allow"
+    $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule $permission
+    $acl.SetAccessRule($accessRule)
+    Set-Acl $dir $acl
+    Write-Host "Permissions set for: $userIdentity"
+    exit 0
+} catch {
+    Write-Host "Failed to set permissions: $_"
+    # Directory was created, but permissions failed - still return success
+    # The verification step will catch if it's not writable
+    exit 0
+}`;
+
+        try {
+          fs.writeFileSync(psScriptPath, psScript, "utf8");
+
+          // Run PowerShell script with admin privileges
+          const psCommand = `Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '${psScriptPath.replace(
+            /\\/g,
+            "\\\\"
+          )}' -Verb RunAs -Wait -WindowStyle Hidden`;
+
+          exec(
+            `powershell -Command "${psCommand}"`,
+            { timeout: 30000 },
+            (error, stdout, stderr) => {
+              // Clean up script file
+              try {
+                if (fs.existsSync(psScriptPath)) {
+                  fs.unlinkSync(psScriptPath);
+                }
+              } catch (e) {
+                // Ignore cleanup errors
+              }
+
+              // Check if directory was actually created and is writable (with a delay for filesystem sync)
+              setTimeout(() => {
+                if (fs.existsSync(dirPath)) {
+                  // Verify we can actually write to it
+                  const canWrite = isDirectoryWritable(dirPath);
+                  if (canWrite) {
+                    console.log(
+                      `[Download] Successfully created directory with admin and set permissions: ${dirPath}`
+                    );
+                    resolve(true);
+                  } else {
+                    console.log(
+                      `[Download] Directory created but still not writable - permissions may need adjustment: ${dirPath}`
+                    );
+                    if (stdout) {
+                      console.log(`[Download] PowerShell output: ${stdout}`);
+                    }
+                    if (stderr) {
+                      console.log(`[Download] PowerShell errors: ${stderr}`);
+                    }
+                    resolve(false);
+                  }
+                } else {
+                  console.log(
+                    `[Download] Directory creation failed or was cancelled: ${dirPath}`
+                  );
+                  if (error) {
+                    console.log(`[Download] Error: ${error.message}`);
+                  }
+                  resolve(false);
+                }
+              }, 1000); // Increased delay to allow permissions to propagate
+            }
+          );
+        } catch (fileError) {
+          console.error(
+            `Error creating PowerShell script: ${fileError.message}`
+          );
+          resolve(false);
+        }
+      });
+    }
+
+    // Check if user wants Program Files location
+    let useProgramFiles = false;
+
+    if (!isAdmin) {
+      // Check if Program Files path already exists and is accessible
+      const programFilesExists = fs.existsSync(programFilesPath);
+      const canWriteProgramFiles = programFilesExists
+        ? isDirectoryWritable(programFilesPath)
+        : false;
+
+      if (!canWriteProgramFiles) {
+        // Automatically attempt Program Files with admin privileges (UAC will prompt)
+        // If denied/cancelled, automatically fall back to user folder
+        mainWindow.webContents.send(
+          "download-message",
+          "🔐 Requesting administrator privileges for Program Files installation... (UAC prompt will appear)"
+        );
+
+        const dirCreated = await createDirectoryWithAdmin(programFilesPath);
+
+        if (dirCreated) {
+          mainWindow.webContents.send(
+            "download-message",
+            "✓ Installation directory created and configured successfully"
+          );
+          // Verify we can write to it
+          const canWrite = isDirectoryWritable(programFilesPath);
+          if (canWrite) {
+            GAME_INSTALL_DIR = programFilesPath;
+            RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+            console.log(
+              `[Download] Using Program Files location: ${GAME_INSTALL_DIR}`
+            );
+            useProgramFiles = true;
+          } else {
+            // Directory created but not writable, use fallback
+            console.log(
+              `[Download] Program Files directory created but not writable, using fallback`
+            );
+            mainWindow.webContents.send(
+              "download-message",
+              "⚠️ Could not set write permissions. Using user folder instead..."
+            );
+            const fallbackCreated = await createDirectoryWithPermissions(
+              GAME_INSTALL_DIR
+            );
+            if (!fallbackCreated) {
+              downloadInProgress = false;
+              return {
+                success: false,
+                requiresAdmin: false,
+                error: "Failed to create installation directory.",
+              };
+            }
+          }
+        } else {
+          // Failed to create with admin, automatically use fallback
+          console.log(
+            `[Download] Failed to create Program Files directory, using fallback`
+          );
+          mainWindow.webContents.send(
+            "download-message",
+            "⚠️ Administrator privileges were denied or cancelled. Using user folder instead..."
+          );
+          const fallbackCreated = await createDirectoryWithPermissions(
+            GAME_INSTALL_DIR
+          );
+          if (!fallbackCreated) {
+            downloadInProgress = false;
+            return {
+              success: false,
+              requiresAdmin: false,
+              error: "Failed to create installation directory.",
+            };
+          }
+        }
+      } else {
+        // Can write to Program Files (maybe it was created previously)
+        GAME_INSTALL_DIR = programFilesPath;
+        RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+        console.log(
+          `[Download] Using Program Files location (already accessible): ${GAME_INSTALL_DIR}`
+        );
+        useProgramFiles = true;
+      }
+    } else {
+      // Already running as admin, try Program Files first
+      const canWriteProgramFiles = isDirectoryWritable(programFilesPath);
+      if (canWriteProgramFiles) {
+        GAME_INSTALL_DIR = programFilesPath;
+        RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+        console.log(
+          `[Download] Using Program Files location (admin): ${GAME_INSTALL_DIR}`
+        );
+        useProgramFiles = true;
+      } else {
+        // Admin but can't write to Program Files, use fallback
+        console.log(
+          `[Download] Program Files not writable, using fallback location`
+        );
         const dirCreated = await createDirectoryWithPermissions(
           GAME_INSTALL_DIR
         );
@@ -522,51 +1081,52 @@ ipcMain.handle("download-game", async () => {
           downloadInProgress = false;
           return {
             success: false,
-            requiresAdmin: true,
-            error: "Administrator privileges required for installation",
+            requiresAdmin: false,
+            error: "Failed to create installation directory.",
           };
         }
       }
     }
 
-    // Create game directory with permissions check
-    const dirCreated = await createDirectoryWithPermissions(GAME_INSTALL_DIR);
-    if (!dirCreated) {
-      downloadInProgress = false;
-      return {
-        success: false,
-        requiresAdmin: true,
-        error:
-          "Failed to create installation directory. Administrator privileges required.",
-      };
+    // If we're using Program Files but directory doesn't exist yet, create it
+    if (useProgramFiles && !fs.existsSync(GAME_INSTALL_DIR)) {
+      try {
+        fs.mkdirSync(GAME_INSTALL_DIR, { recursive: true });
+      } catch (error) {
+        // If creation fails, fall back to user location
+        console.log(
+          `[Download] Failed to create Program Files directory, using fallback`
+        );
+        const dirCreated = await createDirectoryWithPermissions(
+          GAME_INSTALL_DIR
+        );
+        if (!dirCreated) {
+          downloadInProgress = false;
+          return {
+            success: false,
+            requiresAdmin: false,
+            error: "Failed to create installation directory.",
+          };
+        }
+      }
     }
 
-    // Create temp directory
-    if (!fs.existsSync(GAME_FILES_TEMP)) {
-      fs.mkdirSync(GAME_FILES_TEMP, { recursive: true });
-    }
-
-    // Send initial message
-    mainWindow.webContents.send("download-message", "Starting downloads...");
-
-    // Check for existing components
+    // STEP 5: Check for Shadowrun game files
     const gameFilesExist = checkGameFilesExist();
-    const dx9Installed = await isDX9Installed();
-    const gfwlInstalled = await isGFWLInstalled();
 
     // Download game files if needed
     if (gameFilesExist) {
       mainWindow.webContents.send("game-files-progress", 100);
       mainWindow.webContents.send(
         "download-message",
-        "Game files already installed"
+        "✓ Shadowrun game files are already installed"
       );
     } else {
       // Download game files
       const gameFilesPath = path.join(GAME_FILES_TEMP, "build.zip");
       mainWindow.webContents.send(
         "download-message",
-        "Downloading game files..."
+        "📥 Downloading Shadowrun game files... This is the largest download and may take several minutes."
       );
 
       const gameFilesSuccess = await downloadFile(
@@ -587,143 +1147,180 @@ ipcMain.handle("download-game", async () => {
         downloadInProgress = false;
         mainWindow.webContents.send(
           "download-message",
-          "Game files download failed"
+          "❌ Failed to download game files. Please check your internet connection and try again."
         );
         mainWindow.webContents.send(
           "download-error",
-          "Failed to download game files"
+          "Failed to download game files. Check your internet connection."
         );
         return { success: false, error: "Failed to download game files" };
       }
 
+      // Download completed successfully
+      console.log(
+        "[Download] Shadowrun game files download completed successfully"
+      );
+      mainWindow.webContents.send("game-files-progress", 100);
+      mainWindow.webContents.send(
+        "download-message",
+        "✓ Download complete. Extracting game files..."
+      );
+
       // Extract game files
       mainWindow.webContents.send(
         "download-message",
-        "Installing game files..."
+        "📦 Extracting and installing Shadowrun game files... Please wait."
       );
-      const extractSuccess = await extractZip(gameFilesPath, GAME_INSTALL_DIR);
+      // Update status to show extraction is in progress
+      mainWindow.webContents.send("game-files-extracting");
+
+      console.log("[Download] Starting extraction of game files...");
+      console.log(`[Download] Source: ${gameFilesPath}`);
+      console.log(`[Download] Destination: ${GAME_INSTALL_DIR}`);
+
+      let extractSuccess = false;
+      try {
+        extractSuccess = await extractZip(gameFilesPath, GAME_INSTALL_DIR);
+        console.log(
+          `[Download] Extraction completed, result: ${extractSuccess}`
+        );
+      } catch (extractError) {
+        console.error("[Download] Extraction threw an error:", extractError);
+        extractSuccess = false;
+      }
+
       if (!extractSuccess) {
         downloadInProgress = false;
         mainWindow.webContents.send(
           "download-message",
-          "Game files extraction failed"
+          "❌ Failed to extract game files. Please try running the launcher as Administrator."
         );
         mainWindow.webContents.send(
           "download-error",
-          "Failed to extract game files"
+          "Failed to extract game files. Try running as Administrator."
         );
         return { success: false, error: "Failed to extract game files" };
       }
-    }
 
-    // Download and install GFWL if needed
-    if (gfwlInstalled) {
-      mainWindow.webContents.send("gfwl-progress", 100);
-      mainWindow.webContents.send("download-message", "GFWL already installed");
-    } else {
-      // Download GFWL
-      const gfwlPath = path.join(GAME_FILES_TEMP, "gfwlivesetup.zip");
-      mainWindow.webContents.send("download-message", "Downloading GFWL...");
+      console.log("[Download] Game files extraction completed successfully");
 
-      const gfwlSuccess = await downloadFile(GFWL_URL, gfwlPath, (progress) => {
-        mainWindow.webContents.send("gfwl-progress", progress);
-      });
-
-      if (cancelDownloadRequested) {
-        downloadInProgress = false;
-        mainWindow.webContents.send("download-message", "Download cancelled");
-        return { success: false, cancelled: true };
-      }
-
-      if (!gfwlSuccess) {
-        downloadInProgress = false;
-        mainWindow.webContents.send("download-message", "GFWL download failed");
-        mainWindow.webContents.send(
-          "download-error",
-          "Failed to download GFWL"
-        );
-        return { success: false, error: "Failed to download GFWL" };
-      }
-
-      // Install GFWL
-      mainWindow.webContents.send("download-message", "Installing GFWL...");
-      const gfwlExtractSuccess = await extractZip(gfwlPath, GAME_FILES_TEMP);
-      if (!gfwlExtractSuccess) {
-        downloadInProgress = false;
-        mainWindow.webContents.send(
-          "download-message",
-          "GFWL extraction failed"
-        );
-        mainWindow.webContents.send("download-error", "Failed to extract GFWL");
-        return { success: false, error: "Failed to extract GFWL" };
-      }
-
-      // Run GFWL installer
-      const gfwlInstallerPath = path.join(GAME_FILES_TEMP, "gfwlivesetup.exe");
-      if (fs.existsSync(gfwlInstallerPath)) {
-        mainWindow.webContents.send(
-          "download-message",
-          "Running GFWL installer..."
-        );
-        await runInstaller(gfwlInstallerPath);
-      }
-    }
-
-    // Download and install DirectX 9 if needed
-    if (dx9Installed) {
-      mainWindow.webContents.send("dx-progress", 100);
-      mainWindow.webContents.send(
-        "download-message",
-        "DirectX 9 already installed"
+      // Verify that game files were actually extracted
+      const gameExePath = path.join(GAME_INSTALL_DIR, "Shadowrun.exe");
+      console.log(
+        `[Download] Verifying game executable exists at: ${gameExePath}`
       );
-    } else {
-      // Download DirectX 9
-      const dx9Path = path.join(GAME_FILES_TEMP, "directx_Jun2010_redist.exe");
-      mainWindow.webContents.send(
-        "download-message",
-        "Downloading DirectX 9..."
-      );
-
-      const dx9Success = await downloadFile(DX9_URL, dx9Path, (progress) => {
-        mainWindow.webContents.send("dx-progress", progress);
-      });
-
-      if (cancelDownloadRequested) {
-        downloadInProgress = false;
-        mainWindow.webContents.send("download-message", "Download cancelled");
-        return { success: false, cancelled: true };
-      }
-
-      if (!dx9Success) {
+      if (!fs.existsSync(gameExePath)) {
+        console.error(
+          "[Download] ERROR: Shadowrun.exe not found after extraction!"
+        );
+        console.error(
+          `[Download] Checking if directory exists: ${GAME_INSTALL_DIR}`
+        );
+        console.error(
+          `[Download] Directory exists: ${fs.existsSync(GAME_INSTALL_DIR)}`
+        );
+        if (fs.existsSync(GAME_INSTALL_DIR)) {
+          const files = fs.readdirSync(GAME_INSTALL_DIR);
+          console.error(`[Download] Files in directory: ${files.join(", ")}`);
+        }
         downloadInProgress = false;
         mainWindow.webContents.send(
           "download-message",
-          "DirectX 9 download failed"
+          "❌ Game files extraction completed but Shadowrun.exe not found. Please check the installation directory."
         );
         mainWindow.webContents.send(
           "download-error",
-          "Failed to download DirectX 9"
+          "Game executable not found after extraction."
         );
-        return { success: false, error: "Failed to download DirectX 9" };
+        return {
+          success: false,
+          error: "Game executable not found after extraction",
+        };
+      }
+      console.log("[Download] ✓ Game executable verified successfully");
+
+      // Create dxvk.conf with default values if it doesn't exist
+      const dxvkConfPath = path.join(GAME_INSTALL_DIR, "dxvk.conf");
+      console.log(`[Download] Checking for dxvk.conf at: ${dxvkConfPath}`);
+      if (!fs.existsSync(dxvkConfPath)) {
+        try {
+          const defaultConfig = `dxgi.maxFrameRate = 85
+d3d9.maxFrameRate = 85
+`;
+          fs.writeFileSync(dxvkConfPath, defaultConfig);
+          console.log(
+            "[Download] Created default dxvk.conf file with 85 FPS limit"
+          );
+        } catch (error) {
+          console.warn("[Download] Failed to create dxvk.conf file:", error);
+          // Non-critical, continue with installation
+        }
+      } else {
+        console.log("[Download] dxvk.conf already exists, skipping creation");
       }
 
-      // Install DirectX 9
-      mainWindow.webContents.send(
-        "download-message",
-        "Installing DirectX 9..."
-      );
-      await runInstaller(dx9Path);
+      // Ensure game files progress shows 100% after extraction
+      mainWindow.webContents.send("game-files-progress", 100);
+      console.log("[Download] Sent game-files-progress: 100");
     }
+
+    // GFWL and DirectX are already installed/downloaded above (before Shadowrun)
+    // No need to check again here
 
     // Complete installation
-    mainWindow.webContents.send("download-message", "Installation complete!");
-    mainWindow.webContents.send("download-complete");
+    console.log(
+      "[Download] ===== Installation process completed successfully ====="
+    );
+    mainWindow.webContents.send(
+      "download-message",
+      "✅ Installation complete! Shadowrun is ready to play."
+    );
+    console.log("[Download] Sent completion message to UI");
 
-    // Update game installation status
-    await checkExistingInstallation();
+    // Ensure all progress bars show complete
+    mainWindow.webContents.send("game-files-progress", 100);
+    mainWindow.webContents.send("gfwl-progress", 100);
+    mainWindow.webContents.send("dx-progress", 100);
+    console.log("[Download] Sent all progress bars to 100%");
+
+    // Update game installation status BEFORE sending download-complete
+    // This ensures the UI knows the game is installed
+    console.log("[Download] Verifying game installation...");
+    try {
+      const installationStatus = await checkExistingInstallation();
+      console.log(
+        `[Download] Installation check result: ${installationStatus}`
+      );
+    } catch (checkError) {
+      console.error("[Download] Error checking installation:", checkError);
+    }
+
+    // Notify renderer that download is complete and game is installed
+    console.log("[Download] Sending download-complete event...");
+    mainWindow.webContents.send("download-complete");
+    console.log("[Download] Sending game-installation-status event...");
+    mainWindow.webContents.send("game-installation-status", {
+      installed: true,
+    });
+    console.log("[Download] All completion events sent successfully");
 
     // Clean up downloads
     downloadInProgress = false;
+
+    // Auto-launch game if enabled
+    if (AUTO_LAUNCH_AFTER_DOWNLOAD) {
+      console.log("[Download] Auto-launch enabled, launching game...");
+      setTimeout(async () => {
+        // Give UI a moment to update before launching
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("auto-launching-game");
+        }
+        // Launch the game (use the same settings that would be used from the Play button)
+        const defaultSettings = await loadSettingsFromDisk();
+        ipcMain.emit("launch-game", null, defaultSettings);
+      }, 2000);
+    }
+
     return { success: true };
   } catch (error) {
     console.error("Download error:", error);
@@ -778,6 +1375,16 @@ async function downloadFile(url, destination, progressCallback) {
   return new Promise((resolve) => {
     console.log(`Downloading file from ${url} to ${destination}`);
     const file = fs.createWriteStream(destination);
+    let isCancelled = false;
+    let isFinished = false;
+    let isResolved = false;
+
+    // Helper to safely resolve
+    const safeResolve = (success) => {
+      if (isResolved) return;
+      isResolved = true;
+      resolve(success);
+    };
 
     // Choose the correct protocol module based on the URL
     const httpModule = url.startsWith("https:") ? https : http;
@@ -785,54 +1392,129 @@ async function downloadFile(url, destination, progressCallback) {
     const request = httpModule.get(url, (response) => {
       console.log(`Download response status: ${response.statusCode}`);
 
+      // Helper to cleanup streams (defined inside callback to access response)
+      const cleanup = () => {
+        if (!isFinished) {
+          try {
+            response.destroy();
+          } catch (e) {}
+          try {
+            file.destroy();
+          } catch (e) {}
+          try {
+            fs.unlink(destination, () => {});
+          } catch (e) {}
+        }
+      };
+
       if (response.statusCode !== 200) {
         console.error(`Failed to download file: ${response.statusCode}`);
-        file.close();
-        fs.unlink(destination, () => {});
-        resolve(false);
+        cleanup();
+        safeResolve(false);
         return;
       }
 
       // Get file size for progress calculation
       const totalSize = parseInt(response.headers["content-length"], 10);
       let downloadedSize = 0;
+      let isPaused = false;
 
-      response.on("data", (chunk) => {
-        // Check if download was cancelled
-        if (cancelDownloadRequested) {
-          console.log("Download cancelled by user");
-          request.abort(); // Abort the HTTP request
-          file.close();
-          fs.unlink(destination, () => {});
-          resolve(false);
-          return;
-        }
-
-        downloadedSize += chunk.length;
-        // Calculate and report progress if callback provided
-        if (progressCallback && totalSize) {
-          const percent = Math.floor((downloadedSize / totalSize) * 100);
-          progressCallback(percent);
+      // Handle backpressure: pause response when file buffer is full, resume on drain
+      file.on("drain", () => {
+        if (!isCancelled && !isFinished && isPaused) {
+          isPaused = false;
+          response.resume();
         }
       });
 
-      response.pipe(file);
+      // Manually handle data chunks for better cancellation control
+      response.on("data", (chunk) => {
+        // Check if download was cancelled
+        if (cancelDownloadRequested && !isCancelled) {
+          isCancelled = true;
+          console.log("Download cancelled by user");
+          request.abort();
+          cleanup();
+          safeResolve(false);
+          return;
+        }
+
+        if (isCancelled || isFinished) {
+          return;
+        }
+
+        // Write chunk to file
+        try {
+          const canContinue = file.write(chunk);
+          if (!canContinue && !isPaused) {
+            // Buffer is full, pause the response stream
+            isPaused = true;
+            response.pause();
+          }
+
+          downloadedSize += chunk.length;
+          // Calculate and report progress if callback provided
+          if (progressCallback && totalSize) {
+            const percent = Math.floor((downloadedSize / totalSize) * 100);
+            progressCallback(percent);
+          }
+        } catch (err) {
+          if (!isCancelled) {
+            console.error("Error writing chunk:", err.message);
+            cleanup();
+            safeResolve(false);
+          }
+        }
+      });
+
+      response.on("end", () => {
+        if (!isCancelled && !isFinished) {
+          console.log("[Download] Response stream ended, finalizing file...");
+          // Don't set isFinished here - let the file 'finish' event handle it
+          file.end();
+        }
+      });
 
       file.on("finish", () => {
-        console.log("Download completed successfully");
-        file.close();
-        resolve(true);
+        if (!isCancelled) {
+          isFinished = true;
+          console.log("Download completed successfully");
+          file.close();
+          safeResolve(true);
+        }
+      });
+
+      file.on("error", (err) => {
+        if (!isCancelled) {
+          console.error("File write error:", err.message);
+          cleanup();
+          safeResolve(false);
+        }
+      });
+
+      response.on("error", (err) => {
+        if (!isCancelled && !isFinished) {
+          console.error("Response error:", err.message);
+          cleanup();
+          safeResolve(false);
+        }
       });
     });
 
     request.on("error", (err) => {
       // Don't log error if it was due to cancellation
-      if (!cancelDownloadRequested) {
+      if (!cancelDownloadRequested && !isCancelled) {
         console.error("Download error:", err.message);
       }
-      file.close();
-      fs.unlink(destination, () => {});
-      resolve(false);
+      if (!isFinished && !isResolved) {
+        try {
+          file.destroy();
+        } catch (e) {}
+        try {
+          fs.unlink(destination, () => {});
+        } catch (e) {}
+        safeResolve(false);
+      }
     });
   });
 }
@@ -840,17 +1522,42 @@ async function downloadFile(url, destination, progressCallback) {
 // Alternative to AdmZip - use child_process to unzip
 function extractZip(zipPath, destPath) {
   return new Promise((resolve, reject) => {
+    console.log(`[Extract] Starting extraction: ${zipPath} -> ${destPath}`);
+
+    // Ensure destination directory exists
+    if (!fs.existsSync(destPath)) {
+      try {
+        fs.mkdirSync(destPath, { recursive: true });
+        console.log(`[Extract] Created destination directory: ${destPath}`);
+      } catch (mkdirError) {
+        console.error(
+          `[Extract] Failed to create destination directory:`,
+          mkdirError
+        );
+        reject(mkdirError);
+        return;
+      }
+    }
+
     // Use PowerShell to extract zip on Windows
     const command =
       process.platform === "win32"
-        ? `powershell -command "Expand-Archive -Path '${zipPath}' -DestinationPath '${destPath}' -Force"`
+        ? `powershell -command "Expand-Archive -Path '${zipPath.replace(
+            /'/g,
+            "''"
+          )}' -DestinationPath '${destPath.replace(/'/g, "''")}' -Force"`
         : `unzip -o '${zipPath}' -d '${destPath}'`;
 
-    exec(command, (error) => {
+    console.log(`[Extract] Running extraction command...`);
+    exec(command, { timeout: 300000 }, (error, stdout, stderr) => {
       if (error) {
+        console.error(`[Extract] Extraction failed:`, error);
+        console.error(`[Extract] stderr:`, stderr);
         reject(error);
       } else {
-        resolve();
+        console.log(`[Extract] Extraction completed successfully`);
+        if (stdout) console.log(`[Extract] stdout:`, stdout);
+        resolve(true); // Return true on success
       }
     });
   });
@@ -902,7 +1609,8 @@ function runSilentInstaller(installerPath) {
 // Add handler to get version number
 ipcMain.handle("get-version", async () => {
   try {
-    const version = await fetchVersionNumber();
+    // Get version from package.json (via Electron's app.getVersion())
+    const version = app.getVersion();
     return { success: true, version };
   } catch (error) {
     console.error("Error fetching version:", error);
@@ -910,25 +1618,7 @@ ipcMain.handle("get-version", async () => {
   }
 });
 
-// Function to fetch version number from server
-async function fetchVersionNumber() {
-  return new Promise((resolve, reject) => {
-    const httpModule = getHttpModule(VERSION_URL);
-    httpModule
-      .get(VERSION_URL, (response) => {
-        let data = "";
-        response.on("data", (chunk) => {
-          data += chunk;
-        });
-        response.on("end", () => {
-          resolve(data.trim());
-        });
-      })
-      .on("error", (err) => {
-        reject(err);
-      });
-  });
-}
+// Version is now fetched from package.json via app.getVersion() - see "get-version" handler above
 
 // Add this function near the top of your file with other helper functions
 function getHttpModule(url) {
@@ -936,9 +1626,29 @@ function getHttpModule(url) {
 }
 
 ipcMain.handle("activate-game", async () => {
+  const PRODUCT_KEY = "R9GJT-87T6K-6KV49-XTX8G-6VBWW";
+
   try {
     console.log("Starting game activation...");
 
+    // 2.1 Registry Accessibility Check
+    const canAccessRegistry = await registryUtils.checkPathAccess();
+    if (!canAccessRegistry) {
+      dialog.showMessageBox(mainWindow, {
+        type: "error",
+        title: "Activation Failed",
+        message: "Registry Access Denied",
+        detail:
+          "Cannot access the required registry path. Please ensure you have proper permissions.",
+        buttons: ["OK"],
+      });
+      return {
+        success: false,
+        error: "Registry access denied",
+      };
+    }
+
+    // 3.1 Check PCID Exists
     const pcidExists = await registryUtils.checkPcidInRegistry();
     if (!pcidExists) {
       dialog.showMessageBox(mainWindow, {
@@ -955,13 +1665,58 @@ ipcMain.handle("activate-game", async () => {
       };
     }
 
-    // Call the functions that actually perform the activation steps
+    // 3.2 Read Current PCID
+    const currentPcid = await registryUtils.getPcidFromRegistry();
+    if (!currentPcid) {
+      dialog.showMessageBox(mainWindow, {
+        type: "error",
+        title: "Activation Failed",
+        message: "Failed to Read PCID",
+        detail: "Could not read the PCID value from registry.",
+        buttons: ["OK"],
+      });
+      return {
+        success: false,
+        error: "Failed to retrieve current PCID",
+      };
+    }
+
+    // 3.3 Check for Existing Backup & Create if Needed
+    const backupExists = await registryUtils.checkSrPcidBackupExists();
+    if (!backupExists) {
+      console.log(
+        "[Activation] PCID backup not found - creating mandatory backup..."
+      );
+      const backupResult = await registryUtils.backupPcidToRegistryViaRegFile(
+        currentPcid
+      );
+
+      if (!backupResult || !backupResult.success) {
+        dialog.showMessageBox(mainWindow, {
+          type: "error",
+          title: "Activation Failed",
+          message: "PCID Backup Failed",
+          detail:
+            "Failed to create a PCID backup. Activation cannot continue without a recovery point.",
+          buttons: ["OK"],
+        });
+        return {
+          success: false,
+          error: "Failed to create PCID backup",
+        };
+      }
+      console.log("[Activation] PCID backup created successfully");
+    } else {
+      console.log(
+        "[Activation] PCID backup already exists - skipping backup step"
+      );
+    }
+
+    // 4. Registry-Based Game Activation
     try {
-      // Ensure GAME_INSTALL_DIR is correctly set and accessible
-      // And ACTIVATION_PRODUCT_KEY is accessible from registryUtils
       const activationRegResult = await registryUtils.activateGameInRegistry(
-        GAME_INSTALL_DIR, // Make sure this is up-to-date
-        "R9GJT-87T6K-6KV49-XTX8G-6VBWW" // Using the key directly or accessing from registryUtils if exported
+        GAME_INSTALL_DIR,
+        PRODUCT_KEY
       );
 
       if (!activationRegResult || !activationRegResult.success) {
@@ -971,21 +1726,122 @@ ipcMain.handle("activate-game", async () => {
         );
       }
 
-      const tokenDeletionResult = await registryUtils.deleteTokenFiles(); // or tokenUtils.deleteTokenFiles()
+      console.log("[Activation] Registry activation completed successfully");
+
+      // 5. Native Token Injection (xlive.dll) - Best-Effort
+      let tokenInjectionSuccess = false;
+      try {
+        const helperPath = path.join(
+          app.getAppPath(),
+          "resources",
+          "xlive-helper.exe"
+        );
+
+        // Fallback to checking in app directory if not in resources
+        const helperPathFallback = path.join(
+          process.resourcesPath || app.getAppPath(),
+          "xlive-helper.exe"
+        );
+
+        let actualHelperPath = null;
+        if (fs.existsSync(helperPath)) {
+          actualHelperPath = helperPath;
+        } else if (fs.existsSync(helperPathFallback)) {
+          actualHelperPath = helperPathFallback;
+        } else {
+          // Try in the same directory as the main executable
+          const exeDir = path.dirname(process.execPath);
+          const exeDirHelper = path.join(exeDir, "xlive-helper.exe");
+          if (fs.existsSync(exeDirHelper)) {
+            actualHelperPath = exeDirHelper;
+          }
+        }
+
+        if (actualHelperPath) {
+          console.log(
+            `[Activation] Calling xlive-helper.exe: ${actualHelperPath}`
+          );
+
+          const helperResult = await new Promise((resolve) => {
+            const helperProcess = spawn(actualHelperPath, [PRODUCT_KEY], {
+              stdio: ["ignore", "pipe", "pipe"],
+              windowsHide: true,
+            });
+
+            let stdout = "";
+            let stderr = "";
+
+            helperProcess.stdout.on("data", (data) => {
+              stdout += data.toString();
+            });
+
+            helperProcess.stderr.on("data", (data) => {
+              stderr += data.toString();
+            });
+
+            helperProcess.on("close", (code) => {
+              resolve({ code, stdout, stderr });
+            });
+
+            helperProcess.on("error", (error) => {
+              resolve({ code: -1, error: error.message });
+            });
+          });
+
+          if (helperResult.code === 0) {
+            tokenInjectionSuccess = true;
+            console.log("[Activation] Token injection via xlive.dll succeeded");
+          } else {
+            console.warn(
+              `[Activation] Token injection failed (exit code: ${helperResult.code})`
+            );
+            if (helperResult.stderr) {
+              console.warn(
+                `[Activation] Helper stderr: ${helperResult.stderr}`
+              );
+            }
+          }
+        } else {
+          console.warn(
+            "[Activation] xlive-helper.exe not found - skipping token injection"
+          );
+        }
+      } catch (helperError) {
+        console.warn(
+          "[Activation] Error calling xlive-helper.exe:",
+          helperError.message
+        );
+      }
+
+      // Show warning if token injection failed (non-fatal)
+      if (!tokenInjectionSuccess) {
+        dialog.showMessageBox(mainWindow, {
+          type: "warning",
+          title: "Token Injection Warning",
+          message:
+            "Registry activation succeeded, but automatic token injection failed.",
+          detail:
+            "The game may still activate normally. If you experience issues, try launching the game.",
+          buttons: ["OK"],
+        });
+      }
+
+      // 6. Token File Cleanup
+      const tokenDeletionResult = await registryUtils.deleteTokenFiles();
       if (!tokenDeletionResult || !tokenDeletionResult.success) {
-        // This might not be critical for success, so perhaps just a warning
         console.warn(
           "Could not delete all token files during activation:",
           tokenDeletionResult.errors
         );
       }
 
+      // 7. Success Completion
       dialog.showMessageBox(mainWindow, {
         type: "info",
         title: "Activation Successful",
         message: "Game activation process completed.",
         detail:
-          "The necessary registry changes have been applied and token files cleared. Please try launching the game.",
+          "Registry activation applied, PCID safely backed up, and token cache cleared. Please try launching the game.",
         buttons: ["OK"],
       });
       return { success: true, message: "Game activated successfully." };
@@ -1004,7 +1860,7 @@ ipcMain.handle("activate-game", async () => {
       };
     }
   } catch (error) {
-    // Catch errors from pcidExists check or other unexpected issues
+    // Catch errors from validation checks or other unexpected issues
     console.error("Outer error during game activation:", error);
     dialog.showMessageBox(mainWindow, {
       type: "error",
@@ -1373,8 +2229,29 @@ ipcMain.handle("minimize-window", () => {
 });
 
 ipcMain.handle("close-window", () => {
+  // Check if game is running before attempting to close
+  if (gameProcess !== null) {
+    log.info("Close window requested but game is running. Denying request.");
+
+    // Show notification to user
+    if (
+      mainWindow &&
+      mainWindow.webContents &&
+      !mainWindow.webContents.isDestroyed()
+    ) {
+      mainWindow.webContents.send("show-notification", {
+        message:
+          "Cannot close launcher while the game is running. Exit the game first.",
+        type: "warning",
+      });
+    }
+
+    return { success: false, reason: "game-running" };
+  }
+
+  // Game is not running, allow close
   mainWindow.close();
-  return true;
+  return { success: true };
 });
 
 // Use a more reliable dragging approach
@@ -1419,8 +2296,7 @@ ipcMain.handle("set-max-frame-rate", async (event, fps) => {
     // Create file with default settings if it doesn't exist
     if (!fs.existsSync(dxvkConfPath)) {
       console.log("Creating new dxvk.conf file");
-      const defaultConfig = `# DXVK Configuration File
-dxgi.maxFrameRate = ${fps}
+      const defaultConfig = `dxgi.maxFrameRate = ${fps}
 d3d9.maxFrameRate = ${fps}
 `;
       fs.writeFileSync(dxvkConfPath, defaultConfig);
@@ -1431,10 +2307,11 @@ d3d9.maxFrameRate = ${fps}
     console.log("Reading existing dxvk.conf file");
     let configContent = fs.readFileSync(dxvkConfPath, "utf8");
 
-    // Update or add the frame rate settings
+    // Update or add the frame rate settings - always update both together
     const dxgiRegex = /dxgi\.maxFrameRate\s*=\s*\d+/;
     const d3d9Regex = /d3d9\.maxFrameRate\s*=\s*\d+/;
 
+    // Update or add dxgi.maxFrameRate
     if (dxgiRegex.test(configContent)) {
       console.log("Updating existing dxgi.maxFrameRate setting");
       configContent = configContent.replace(
@@ -1443,9 +2320,15 @@ d3d9.maxFrameRate = ${fps}
       );
     } else {
       console.log("Adding new dxgi.maxFrameRate setting");
-      configContent += `\ndxgi.maxFrameRate = ${fps}`;
+      // Add at the beginning if file is empty, otherwise add newline
+      if (configContent.trim() === "") {
+        configContent = `dxgi.maxFrameRate = ${fps}`;
+      } else {
+        configContent += `\ndxgi.maxFrameRate = ${fps}`;
+      }
     }
 
+    // Update or add d3d9.maxFrameRate - always ensure it matches dxgi
     if (d3d9Regex.test(configContent)) {
       console.log("Updating existing d3d9.maxFrameRate setting");
       configContent = configContent.replace(
@@ -1528,24 +2411,48 @@ function initDiscord() {
   }
 }
 
-// Update the setDiscordActivity function to show "Shadowrun PC" instead
+// Update Discord Activity with enhanced information
 function updateDiscordActivity(playing) {
   if (!rpc) return;
 
   const activity = playing
     ? {
-        details: "Playing Shadowrun",
-        state: "In Game",
+        details: "Playing Shadowrun (2007)",
+        state: "First-Person Shooter",
         largeImageKey: "game_logo",
         largeImageText: "Shadowrun",
+        smallImageKey: "controller", // Optional: add a controller icon if you upload one
+        smallImageText: "PC",
+        startTimestamp: new Date(), // Shows "elapsed" time
+        buttons: [
+          {
+            label: "🌐 Visit Website",
+            url: "https://www.shadowrunfps.com",
+          },
+          {
+            label: "💬 Join Discord",
+            url: "https://discord.gg/BPcxwJwfKv",
+          },
+        ],
         instance: false,
-        startTimestamp: new Date(),
       }
     : {
         details: "In Launcher",
-        state: "Browsing",
+        state: "Browsing Menu",
         largeImageKey: "launcher_logo",
         largeImageText: "Shadowrun Launcher",
+        smallImageKey: "menu", // Optional: add a menu icon if you upload one
+        smallImageText: "Idle",
+        buttons: [
+          {
+            label: "🌐 Visit Website",
+            url: "https://www.shadowrunfps.com",
+          },
+          {
+            label: "💬 Join Discord",
+            url: "https://discord.gg/BPcxwJwfKv",
+          },
+        ],
         instance: false,
       };
 
@@ -1554,6 +2461,10 @@ function updateDiscordActivity(playing) {
 
 // Clean up when the app is closing
 app.on("before-quit", () => {
+  // Stop player tracking
+  playerTracker.stop();
+
+  // Clean up Discord RPC
   if (rpc) {
     rpc.destroy().catch(console.error);
   }
@@ -1741,24 +2652,44 @@ async function createDirectoryWithPermissions(dirPath) {
   } catch (error) {
     console.error(`Failed to create directory: ${dirPath}`, error.message);
 
-    // Try a fallback location in user's documents folder
-    try {
-      const fallbackDir = path.join(app.getPath("documents"), "Shadowrun");
-      if (!fs.existsSync(fallbackDir)) {
-        fs.mkdirSync(fallbackDir, { recursive: true });
+    // Try fallback locations in order of preference
+    const fallbackLocations = [
+      path.join(app.getPath("home"), "Games", "Shadowrun"), // Best: Dedicated Games folder
+      path.join(app.getPath("documents"), "Shadowrun"), // Good: Documents folder
+      path.join(app.getPath("home"), "Shadowrun"), // Last resort: Home folder
+    ];
+
+    for (const fallbackDir of fallbackLocations) {
+      try {
+        if (!fs.existsSync(fallbackDir)) {
+          fs.mkdirSync(fallbackDir, { recursive: true });
+        }
+        // Verify we can write to it
+        const testFile = path.join(
+          fallbackDir,
+          `.write-test-${Date.now()}.tmp`
+        );
+        fs.writeFileSync(testFile, "test");
+        fs.unlinkSync(testFile);
+
+        // Update the global installation directory
+        GAME_INSTALL_DIR = fallbackDir;
+        RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+        console.log(
+          `Using fallback installation directory: ${GAME_INSTALL_DIR}`
+        );
+        return true;
+      } catch (fallbackError) {
+        console.warn(
+          `Fallback location failed: ${fallbackDir}`,
+          fallbackError.message
+        );
+        continue; // Try next fallback
       }
-      // Update the global installation directory
-      GAME_INSTALL_DIR = fallbackDir;
-      RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
-      console.log(`Using fallback installation directory: ${GAME_INSTALL_DIR}`);
-      return true;
-    } catch (fallbackError) {
-      console.error(
-        `Failed to create fallback directory:`,
-        fallbackError.message
-      );
-      return false;
     }
+
+    console.error(`All fallback locations failed`);
+    return false;
   }
 }
 
@@ -2592,4 +3523,384 @@ ipcMain.handle("show-logs", () => {
     console.error("Error showing logs:", error);
     return { success: false, error: error.message };
   }
+});
+
+// ========================================
+// AUTO-UPDATER IMPLEMENTATION
+// ========================================
+
+// Function to check for updates
+function checkForUpdates() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.log("[Updater] Main window not ready, skipping update check");
+    return;
+  }
+
+  console.log("[Updater] Checking for updates...");
+  console.log("[Updater] Current version:", app.getVersion());
+  console.log("[Updater] Update server:", UPDATE_SERVER_URL);
+
+  // Check for updates
+  autoUpdater.checkForUpdates().catch((error) => {
+    console.error("[Updater] Error checking for updates:", error);
+    // Silently fail - don't bother the user if update check fails
+  });
+}
+
+// When update is available
+autoUpdater.on("update-available", (info) => {
+  console.log("[Updater] Update available:", info.version);
+  console.log("[Updater] Release notes:", info.releaseNotes);
+
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  // Send update notification to renderer for custom styled dialog
+  mainWindow.webContents.send("show-update-dialog", {
+    version: info.version,
+    releaseNotes: info.releaseNotes,
+    currentVersion: app.getVersion(),
+  });
+});
+
+// When no update is available
+autoUpdater.on("update-not-available", (info) => {
+  console.log(
+    "[Updater] No update available. Current version is latest:",
+    info.version
+  );
+
+  // Send to renderer for UI feedback
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update-not-available", {
+      version: info.version,
+    });
+  }
+});
+
+// Download progress
+autoUpdater.on("download-progress", (progressObj) => {
+  const logMessage = `[Updater] Download progress: ${Math.round(
+    progressObj.percent
+  )}% (${progressObj.transferred}/${progressObj.total})`;
+  console.log(logMessage);
+
+  // Send progress to renderer
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update-download-progress", {
+      percent: Math.round(progressObj.percent),
+      transferred: progressObj.transferred,
+      total: progressObj.total,
+    });
+  }
+});
+
+// When update is downloaded
+autoUpdater.on("update-downloaded", (info) => {
+  console.log("[Updater] Update downloaded, ready to install");
+  console.log("[Updater] New version:", info.version);
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    // If window is destroyed, just quit and install
+    autoUpdater.quitAndInstall(false, true);
+    return;
+  }
+
+  // Send update ready notification to renderer for custom dialog
+  mainWindow.webContents.send("update-ready-to-install", {
+    version: info.version,
+  });
+
+  // Auto-install after brief delay (one-click experience)
+  setTimeout(() => {
+    console.log("[Updater] Auto-installing update...");
+    // quitAndInstall(isSilent, isForceRunAfter)
+    // false = not silent (show progress), true = force run after update
+    autoUpdater.quitAndInstall(false, true);
+  }, 2000); // 2 second delay so user sees the "Installing..." message
+
+  /* OLD CODE - Required user to click "Restart Now"
+  dialog
+    .showMessageBox(mainWindow, {
+      type: "info",
+      title: "Update Ready",
+      message: "Update downloaded successfully!",
+      detail: "The launcher will restart to apply the update.",
+      buttons: ["Restart Now", "Restart Later"],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    .then((result) => {
+      if (result.response === 0) {
+        // User clicked "Restart Now"
+        console.log("[Updater] User approved restart, installing update...");
+        // Close game if running
+        if (gameProcess) {
+          console.log("[Updater] Closing game before update...");
+          try {
+            gameProcess.kill();
+          } catch (e) {
+            console.error("[Updater] Error closing game:", e);
+          }
+        }
+        // Quit and install (false = don't force close, true = restart after install)
+        autoUpdater.quitAndInstall(false, true);
+      } else {
+        console.log("[Updater] User chose to restart later");
+        // Update will be installed when app quits (autoInstallOnAppQuit = true)
+      }
+    });
+  */
+});
+
+// Error handling
+autoUpdater.on("error", (error) => {
+  console.error("[Updater] Error:", error);
+  // Silently fail - don't bother user with update errors
+  // They can always download manually from website
+});
+
+// Check for rollback configuration
+async function checkRollbackConfig() {
+  return new Promise((resolve) => {
+    const rollbackUrl = "http://157.245.214.234/launcher/rollback.json";
+    console.log("[Rollback] Checking rollback config:", rollbackUrl);
+
+    const protocol = rollbackUrl.startsWith("https") ? https : http;
+    protocol
+      .get(rollbackUrl, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            const config = JSON.parse(data);
+            console.log("[Rollback] Config loaded:", config);
+            resolve(config);
+          } catch (error) {
+            console.error("[Rollback] Failed to parse config:", error);
+            resolve({ enabled: false });
+          }
+        });
+      })
+      .on("error", (error) => {
+        console.error("[Rollback] Failed to fetch config:", error);
+        resolve({ enabled: false });
+      });
+  });
+}
+
+// Compare semantic versions (returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2)
+function compareVersions(v1, v2) {
+  const parts1 = v1.split(".").map(Number);
+  const parts2 = v2.split(".").map(Number);
+
+  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+    const part1 = parts1[i] || 0;
+    const part2 = parts2[i] || 0;
+
+    if (part1 > part2) return 1;
+    if (part1 < part2) return -1;
+  }
+
+  return 0;
+}
+
+// Force download a specific version (for rollback)
+async function forceVersionDownload(targetVersion, reason) {
+  const currentVersion = app.getVersion();
+  const comparison = compareVersions(currentVersion, targetVersion);
+
+  console.log(
+    `[Rollback] Version comparison: ${currentVersion} vs ${targetVersion}`
+  );
+
+  // Only rollback if current version is NEWER than target
+  if (comparison <= 0) {
+    console.log(
+      "[Rollback] User is already on target version or older - skipping rollback"
+    );
+    // Send message to renderer that they're up to date
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("update-not-available-feedback", {
+        version: currentVersion,
+      });
+    }
+    return false;
+  }
+
+  const updateUrl = `http://157.245.214.234/launcher/Shadowrun%20FPS%20Launcher%20Setup%20${targetVersion}.exe`;
+  console.log("[Rollback] Forcing download of version:", targetVersion);
+
+  // Send rollback dialog to renderer
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("show-rollback-dialog", {
+      currentVersion: currentVersion,
+      targetVersion,
+      reason,
+      downloadUrl: updateUrl,
+    });
+  }
+
+  return true;
+}
+
+// IPC handler for manual update check (optional - can be triggered from UI)
+ipcMain.handle("check-for-updates", async () => {
+  try {
+    console.log("");
+    console.log("=================================================");
+    console.log("🔍 CHECK FOR UPDATES - IPC CALL RECEIVED");
+    console.log("=================================================");
+    console.log("[Updater] Manual update check requested");
+    console.log("[Updater] Time:", new Date().toLocaleTimeString());
+
+    // Check if we're in development mode
+    const isDev = !app.isPackaged;
+
+    if (isDev) {
+      console.log("[Updater] ==========================================");
+      console.log("[Updater] 🔧 DEVELOPMENT MODE - CHECK FOR UPDATES");
+      console.log("[Updater] ==========================================");
+      console.log(
+        "[Updater] Development mode detected - auto-updater disabled"
+      );
+      console.log(
+        "[Updater] In production, this would check: http://157.245.214.234/launcher/latest.yml"
+      );
+
+      // Add a small delay so user can see the "Checking..." button state
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      console.log("[Updater] Sending dev mode message to renderer...");
+
+      // Send dev mode message to renderer
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("update-check-dev-mode");
+      }
+
+      console.log("[Updater] ==========================================");
+
+      return { success: true, devMode: true };
+    }
+
+    // First check for rollback config
+    const rollbackConfig = await checkRollbackConfig();
+    if (rollbackConfig.enabled) {
+      console.log(
+        "[Rollback] Rollback mode enabled - checking if rollback needed"
+      );
+      const rollbackTriggered = await forceVersionDownload(
+        rollbackConfig.targetVersion,
+        rollbackConfig.reason
+      );
+
+      // If rollback was shown to user, stop here
+      if (rollbackTriggered) {
+        return { success: true, devMode: false, rollback: true };
+      }
+
+      // If user is already on target version or older, continue to normal update check
+      console.log(
+        "[Rollback] User already on safe version - checking for normal updates"
+      );
+    }
+
+    // Production mode - check for normal updates
+    checkForUpdates();
+    return { success: true, devMode: false, rollback: false };
+  } catch (error) {
+    console.error("[Updater] Manual update check error:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle rollback download confirmation
+ipcMain.handle("confirm-rollback-download", async (event, downloadUrl) => {
+  try {
+    console.log("[Rollback] User confirmed rollback download:", downloadUrl);
+
+    // Download the installer and save it
+    const downloadPath = path.join(
+      app.getPath("temp"),
+      "rollback-installer.exe"
+    );
+
+    return new Promise((resolve, reject) => {
+      const protocol = downloadUrl.startsWith("https") ? https : http;
+      const file = fs.createWriteStream(downloadPath);
+
+      protocol
+        .get(downloadUrl, (response) => {
+          const totalBytes = parseInt(response.headers["content-length"], 10);
+          let downloadedBytes = 0;
+
+          response.pipe(file);
+
+          response.on("data", (chunk) => {
+            downloadedBytes += chunk.length;
+            const progress = (downloadedBytes / totalBytes) * 100;
+
+            // Send progress to renderer
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send(
+                "rollback-download-progress",
+                progress
+              );
+            }
+          });
+
+          file.on("finish", () => {
+            file.close(() => {
+              console.log("[Rollback] Download complete, launching installer");
+
+              // Launch the installer
+              exec(`"${downloadPath}"`, (error) => {
+                if (error) {
+                  console.error(
+                    "[Rollback] Failed to launch installer:",
+                    error
+                  );
+                  reject(error);
+                } else {
+                  // Quit the app so installer can proceed
+                  app.quit();
+                }
+              });
+
+              resolve({ success: true });
+            });
+          });
+        })
+        .on("error", (error) => {
+          fs.unlink(downloadPath, () => {});
+          console.error("[Rollback] Download failed:", error);
+          reject(error);
+        });
+    });
+  } catch (error) {
+    console.error("[Rollback] Error:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle user confirming update download from custom dialog
+ipcMain.handle("confirm-update-download", async () => {
+  try {
+    console.log("[Updater] User confirmed update download");
+    autoUpdater.downloadUpdate();
+
+    // Show download progress notification
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("update-download-started");
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("[Updater] Error starting update download:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler to get current app version
+ipcMain.handle("get-app-version", async () => {
+  return app.getVersion();
 });

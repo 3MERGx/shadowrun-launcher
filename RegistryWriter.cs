@@ -14,8 +14,8 @@ class RegistryWriter
             string logPath = Path.Combine(Path.GetTempPath(), "RegistryWriter_log.txt");
             using (StreamWriter log = new StreamWriter(logPath, true))
             {
-                log.WriteLine($"RegistryWriter started at {DateTime.Now}");
-                log.WriteLine($"Arguments received: {string.Join(", ", args)}");
+                log.WriteLine("RegistryWriter started at " + DateTime.Now);
+                log.WriteLine("Arguments received: " + string.Join(", ", args));
                 
                 // Show a message to confirm admin operation is starting
                 MessageBox.Show(
@@ -35,11 +35,11 @@ class RegistryWriter
                 }
 
                 string pcidValue = args[0];
-                log.WriteLine($"PCID value: {pcidValue}");
+                log.WriteLine("PCID value: " + pcidValue);
                 
                 // Convert the hex string to a long value
                 long pcidLong = Convert.ToInt64(pcidValue, 16);
-                log.WriteLine($"Converted to long: {pcidLong}");
+                log.WriteLine("Converted to long: " + pcidLong);
                 
                 // Open the registry key (will trigger UAC prompt due to manifest)
                 log.WriteLine("Attempting to open registry key...");
@@ -67,8 +67,8 @@ class RegistryWriter
             string errorLogPath = Path.Combine(Path.GetTempPath(), "RegistryWriter_error.txt");
             using (StreamWriter errorLog = new StreamWriter(errorLogPath, true))
             {
-                errorLog.WriteLine($"Error at {DateTime.Now}: {ex.Message}");
-                errorLog.WriteLine($"Stack trace: {ex.StackTrace}");
+                errorLog.WriteLine("Error at " + DateTime.Now + ": " + ex.Message);
+                errorLog.WriteLine("Stack trace: " + ex.StackTrace);
             }
             
             MessageBox.Show(

@@ -104,6 +104,116 @@ setTimeout(() => {
   }
 }, 1000);
 
+// Audio elements
+const backgroundAudio = document.getElementById("backgroundAudio");
+const buttonHoverAudio = document.getElementById("buttonHoverAudio");
+const buttonClickAudio = document.getElementById("buttonClickAudio");
+
+// Audio state
+let isMuted = false;
+
+// Initialize background audio
+async function initBackgroundAudio() {
+  if (backgroundAudio) {
+    // Load mute state from settings
+    try {
+      const savedSettings = await window.api.loadSettings();
+      if (savedSettings && savedSettings.audioMuted !== undefined) {
+        isMuted = savedSettings.audioMuted;
+        backgroundAudio.muted = isMuted;
+
+        // Update button icon to reflect saved state
+        const speakerIcon = document.getElementById("speakerIcon");
+        const mutedIcon = document.getElementById("mutedIcon");
+        if (isMuted) {
+          if (speakerIcon) speakerIcon.style.display = "none";
+          if (mutedIcon) mutedIcon.style.display = "block";
+        }
+      }
+    } catch (error) {
+      console.log("Could not load audio mute state:", error);
+    }
+
+    backgroundAudio.volume = 0.5; // Set volume to 50%
+
+    // Only play if not muted
+    if (!isMuted) {
+      backgroundAudio.play().catch((error) => {
+        console.log("Background audio autoplay prevented:", error);
+        // Audio will play when user interacts with the page
+      });
+    }
+
+    // Start audio on first user interaction if autoplay was blocked
+    const startAudioOnInteraction = () => {
+      if (backgroundAudio.paused) {
+        backgroundAudio.play().catch(() => {});
+      }
+      // Remove listeners after first interaction
+      document.removeEventListener("click", startAudioOnInteraction);
+      document.removeEventListener("keydown", startAudioOnInteraction);
+    };
+
+    document.addEventListener("click", startAudioOnInteraction, { once: true });
+    document.addEventListener("keydown", startAudioOnInteraction, {
+      once: true,
+    });
+  }
+}
+
+// Mute/Unmute functionality
+function toggleMute() {
+  if (!backgroundAudio) return;
+
+  isMuted = !isMuted;
+  backgroundAudio.muted = isMuted;
+
+  // Update button icon
+  const speakerIcon = document.getElementById("speakerIcon");
+  const mutedIcon = document.getElementById("mutedIcon");
+
+  if (isMuted) {
+    if (speakerIcon) speakerIcon.style.display = "none";
+    if (mutedIcon) mutedIcon.style.display = "block";
+  } else {
+    if (speakerIcon) speakerIcon.style.display = "block";
+    if (mutedIcon) mutedIcon.style.display = "none";
+  }
+
+  // Save mute state to settings
+  window.api
+    .loadSettings()
+    .then((currentSettings) => {
+      window.api.saveSettings({
+        ...currentSettings,
+        audioMuted: isMuted,
+      });
+    })
+    .catch((error) => {
+      console.log("Could not save audio mute state:", error);
+    });
+}
+
+// Play button hover sound
+function playHoverSound() {
+  if (isMuted || !buttonHoverAudio) return;
+  buttonHoverAudio.currentTime = 0;
+  buttonHoverAudio.play().catch((error) => {
+    // Ignore autoplay errors
+    console.log("Hover sound play error:", error);
+  });
+}
+
+// Play button click sound
+function playClickSound() {
+  if (isMuted || !buttonClickAudio) return;
+  buttonClickAudio.currentTime = 0;
+  buttonClickAudio.play().catch((error) => {
+    // Ignore autoplay errors
+    console.log("Click sound play error:", error);
+  });
+}
+
 // DOM Elements
 const playButton = document.getElementById("playButton");
 const activateButton = document.getElementById("activateButton");
@@ -112,6 +222,7 @@ const websiteButton = document.getElementById("websiteButton");
 const settingsButton = document.getElementById("settingsButton");
 const minimizeButton = document.getElementById("minimizeButton");
 const closeButton = document.getElementById("closeButton");
+const muteButton = document.getElementById("muteButton");
 
 // Settings screen elements
 const settingsScreen = document.getElementById("settingsScreen");
@@ -254,13 +365,48 @@ function updateUI() {
 }
 
 // Window control handlers
+muteButton.addEventListener("click", () => {
+  // Play click sound before toggling mute (so it plays if currently unmuted)
+  if (!isMuted) {
+    playClickSound();
+  }
+  toggleMute();
+});
+
 minimizeButton.addEventListener("click", () => {
+  playClickSound();
   window.api.minimizeWindow();
 });
 
 closeButton.addEventListener("click", async () => {
-  window.api.closeWindow();
+  playClickSound();
+  const result = await window.api.closeWindow();
+
+  // If close was denied because game is running, the notification is already shown
+  // from the main process, so we don't need to do anything else here
+  if (result && !result.success && result.reason === "game-running") {
+    console.log("Cannot close launcher: game is currently running");
+  }
 });
+
+// Add hover and click sound effects to all buttons
+function addButtonSoundEffects() {
+  // Get all buttons
+  const allButtons = document.querySelectorAll("button");
+
+  allButtons.forEach((button) => {
+    // Skip mute button for hover (it's a control button)
+    if (button.id !== "muteButton") {
+      button.addEventListener("mouseenter", playHoverSound);
+    }
+    button.addEventListener("click", () => {
+      // Don't play click sound for mute button (it's handled separately)
+      if (button.id !== "muteButton") {
+        playClickSound();
+      }
+    });
+  });
+}
 
 // Button event handlers
 playButton.addEventListener("click", async () => {
@@ -312,10 +458,11 @@ playButton.addEventListener("click", async () => {
     gameFilesProgress.style.width = "0%";
     gfwlProgress.style.width = "0%";
     dxProgress.style.width = "0%";
-    gameFilesStatus.textContent = "0%";
-    gfwlStatus.textContent = "0%";
-    dxStatus.textContent = "0%";
-    downloadMessage.textContent = "Starting downloads...";
+    gameFilesStatus.textContent = "Waiting...";
+    gfwlStatus.textContent = "Waiting...";
+    dxStatus.textContent = "Waiting...";
+    downloadMessage.textContent =
+      "Preparing installation... This may take a few minutes.";
 
     // Start download
     window.api.downloadGame();
@@ -499,6 +646,10 @@ updateUI();
 loadSettings();
 loadVersion();
 
+// Initialize audio
+initBackgroundAudio();
+addButtonSoundEffects();
+
 // Update the drag event handler
 document.addEventListener("mousedown", (e) => {
   // Don't start drag on buttons or settings screen
@@ -539,20 +690,51 @@ closeInstructionsButton.addEventListener("click", () => {
   instructionsScreen.classList.remove("visible");
 });
 
+const gotItButton = document.getElementById("gotItButton");
+if (gotItButton) {
+  gotItButton.addEventListener("click", () => {
+    playClickSound();
+    instructionsScreen.classList.remove("visible");
+  });
+}
+
 // Download progress event listeners
 window.api.onGameFilesProgress((progress) => {
   gameFilesProgress.style.width = `${progress}%`;
-  gameFilesStatus.textContent = `${progress}%`;
+  if (progress === 100) {
+    gameFilesStatus.textContent = "Complete";
+  } else if (progress > 0) {
+    gameFilesStatus.textContent = `${progress}%`;
+  } else {
+    gameFilesStatus.textContent = "Waiting...";
+  }
+});
+
+// Listen for extraction status
+window.api.onGameFilesExtracting(() => {
+  gameFilesStatus.textContent = "Extracting...";
 });
 
 window.api.onGfwlProgress((progress) => {
   gfwlProgress.style.width = `${progress}%`;
-  gfwlStatus.textContent = `${progress}%`;
+  if (progress === 100) {
+    gfwlStatus.textContent = "Complete";
+  } else if (progress > 0) {
+    gfwlStatus.textContent = `${progress}%`;
+  } else {
+    gfwlStatus.textContent = "Waiting...";
+  }
 });
 
 window.api.onDxProgress((progress) => {
   dxProgress.style.width = `${progress}%`;
-  dxStatus.textContent = `${progress}%`;
+  if (progress === 100) {
+    dxStatus.textContent = "Complete";
+  } else if (progress > 0) {
+    dxStatus.textContent = `${progress}%`;
+  } else {
+    dxStatus.textContent = "Waiting...";
+  }
 });
 
 window.api.onDownloadMessage((message) => {
@@ -560,13 +742,16 @@ window.api.onDownloadMessage((message) => {
 });
 
 window.api.onDownloadComplete(() => {
-  // Close download screen and show instructions
+  // Close download screen and return to main window
   downloadProgressScreen.classList.remove("visible");
-  instructionsScreen.classList.add("visible");
 
-  // Update game installed state
+  // The game-installation-status event will be sent by main process
+  // which will update gameInstalled and call updateUI()
+  // But we can also set it optimistically since download completed successfully
   gameInstalled = true;
   updateUI();
+
+  console.log("Download complete - game is now installed");
 });
 
 window.api.onDownloadError((error) => {
@@ -730,30 +915,15 @@ window.api.onSkipIntroFinalState((state) => {
   updateSkipIntroButtonState(state.installed);
 });
 
-// When updating the skip intro button state:
+// REMOVED - This was using ipcRenderer directly which caused errors
+// The skip intro functionality works fine without this listener
+// (Line 919 error fixed)
+
+/* OLD CODE REMOVED - CAUSED ipcRenderer ERROR:
 ipcRenderer.on("skip-intro-final-state", (event, state) => {
-  const button = document.getElementById("skipIntroButton");
-  if (state.installed) {
-    // If we detect it was manually installed (has our marker file)
-    if (
-      fs.existsSync(
-        path.join(
-          GAME_INSTALL_DIR,
-          "Resources",
-          "BackupIntro",
-          "installed_externally.txt"
-        )
-      )
-    ) {
-      button.textContent = "Detected (Manual Install)";
-      button.disabled = true; // Optional: disable the button or add a different behavior
-    } else {
-      button.textContent = "Uninstall Mod";
-    }
-  } else {
-    button.textContent = "Install Mod";
-  }
+  ...code removed...
 });
+*/
 
 // Keep this block (replaces your current DOMContentLoaded block)
 document.addEventListener("DOMContentLoaded", function () {
@@ -929,3 +1099,474 @@ window.apiTest = {
 console.log(
   "Test functions added - you can run window.testIpcDirectly() in the console"
 );
+
+// ========================================
+// LAUNCHER UPDATE UI HANDLERS
+// ========================================
+
+// Get launcher update UI elements (OLD CODE - WILL BE REPLACED)
+const launcherUpdateProgressScreen = document.getElementById(
+  "launcherUpdateProgressScreen"
+);
+const launcherUpdateProgress = document.getElementById(
+  "launcherUpdateProgress"
+);
+const launcherUpdateStatus = document.getElementById("launcherUpdateStatus");
+const launcherUpdateDetails = document.getElementById("launcherUpdateDetails");
+const launcherUpdateMessage = document.getElementById("launcherUpdateMessage");
+
+// Listen for update download started
+window.api.onUpdateDownloadStarted(() => {
+  console.log("[Renderer] Update download started");
+  if (launcherUpdateProgressScreen) {
+    launcherUpdateProgressScreen.style.display = "flex";
+    launcherUpdateProgress.style.width = "0%";
+    launcherUpdateStatus.textContent = "Starting download...";
+    launcherUpdateDetails.textContent = "";
+    launcherUpdateMessage.textContent =
+      "Downloading launcher update. You can continue using the launcher.";
+  }
+});
+
+// Listen for update download progress
+window.api.onUpdateDownloadProgress((progress) => {
+  console.log(`[Renderer] Update download progress: ${progress.percent}%`);
+  if (launcherUpdateProgress) {
+    launcherUpdateProgress.style.width = `${progress.percent}%`;
+  }
+  if (launcherUpdateStatus) {
+    launcherUpdateStatus.textContent = `Downloading... ${progress.percent}%`;
+  }
+  if (launcherUpdateDetails) {
+    // Format bytes to MB
+    const transferredMB = (progress.transferred / 1024 / 1024).toFixed(2);
+    const totalMB = (progress.total / 1024 / 1024).toFixed(2);
+    launcherUpdateDetails.textContent = `${transferredMB} MB / ${totalMB} MB`;
+  }
+});
+
+// Listen for update download complete
+window.api.onUpdateDownloadComplete(() => {
+  console.log("[Renderer] Update download complete");
+  if (launcherUpdateProgress) {
+    launcherUpdateProgress.style.width = "100%";
+  }
+  if (launcherUpdateStatus) {
+    launcherUpdateStatus.textContent = "Download complete!";
+  }
+  if (launcherUpdateMessage) {
+    launcherUpdateMessage.textContent =
+      "Update downloaded successfully. You'll be prompted to restart.";
+  }
+
+  // Hide the progress screen after 2 seconds (dialog will show instead)
+  setTimeout(() => {
+    if (launcherUpdateProgressScreen) {
+      launcherUpdateProgressScreen.style.display = "none";
+    }
+  }, 2000);
+});
+
+// ========================================
+// CUSTOM UPDATE DIALOG HANDLERS
+// ========================================
+
+// Get update dialog elements
+const updateDialog = document.getElementById("updateDialog");
+const updateCurrentVersion = document.getElementById("updateCurrentVersion");
+const updateNewVersion = document.getElementById("updateNewVersion");
+const updateDescription = document.getElementById("updateDescription");
+const updateReleaseNotes = document.getElementById("updateReleaseNotes");
+const updateLaterButton = document.getElementById("updateLaterButton");
+const updateDownloadButton = document.getElementById("updateDownloadButton");
+const updateAvailableIndicator = document.getElementById(
+  "updateAvailableIndicator"
+);
+
+// Store pending update data
+let pendingUpdateData = null;
+
+// Listen for update available from main process
+window.api.onShowUpdateDialog((data) => {
+  console.log("");
+  console.log("=================================================");
+  console.log("🎮 UPDATE AVAILABLE!");
+  console.log("=================================================");
+  console.log("[Renderer] Update found and dialog opening");
+  console.log("[Renderer] Current version:", data.currentVersion);
+  console.log("[Renderer] New version:", data.version);
+  console.log("[Renderer] Time:", new Date().toLocaleTimeString());
+
+  // Store update data for later use
+  pendingUpdateData = data;
+
+  // Update dialog content
+  if (updateCurrentVersion) {
+    updateCurrentVersion.textContent = data.currentVersion;
+  }
+  if (updateNewVersion) {
+    updateNewVersion.textContent = data.version;
+  }
+
+  // Update release notes if available
+  if (updateReleaseNotes && data.releaseNotes) {
+    updateReleaseNotes.textContent = data.releaseNotes;
+    updateReleaseNotes.style.display = "block";
+  } else if (updateReleaseNotes) {
+    updateReleaseNotes.style.display = "none";
+  }
+
+  // Show the dialog
+  if (updateDialog) {
+    updateDialog.classList.add("visible");
+  }
+
+  // (OLD CODE REMOVED - Button will be recreated)
+});
+
+// Listen for no update available
+window.api.onUpdateNotAvailable((data) => {
+  console.log("");
+  console.log("=================================================");
+  console.log("✅ NO UPDATE AVAILABLE");
+  console.log("=================================================");
+  console.log("[Renderer] You're already on the latest version");
+  console.log("[Renderer] Current version:", data.version || "Unknown");
+  console.log("[Renderer] Time:", new Date().toLocaleTimeString());
+
+  // Show success toast
+  showToast("You're on the latest version! ✓", "success", 4000);
+
+  console.log("");
+  console.log("=================================================");
+  console.log("");
+});
+
+// Rollback Dialog Handlers
+const rollbackDialog = document.getElementById("rollbackDialog");
+const rollbackCurrentVersion = document.getElementById(
+  "rollbackCurrentVersion"
+);
+const rollbackTargetVersion = document.getElementById("rollbackTargetVersion");
+const rollbackReason = document.getElementById("rollbackReason");
+const rollbackDownloadButton = document.getElementById(
+  "rollbackDownloadButton"
+);
+const rollbackLaterButton = document.getElementById("rollbackLaterButton");
+const rollbackProgress = document.getElementById("rollbackProgress");
+const rollbackProgressFill = document.getElementById("rollbackProgressFill");
+const rollbackProgressText = document.getElementById("rollbackProgressText");
+
+let pendingRollbackData = null;
+
+window.api.onShowRollbackDialog((data) => {
+  // Store rollback data
+  pendingRollbackData = data;
+  console.log("[Renderer] Rollback dialog data received:", data);
+
+  // Update dialog content
+  if (rollbackCurrentVersion) {
+    rollbackCurrentVersion.textContent = data.currentVersion;
+  }
+  if (rollbackTargetVersion) {
+    rollbackTargetVersion.textContent = data.targetVersion;
+  }
+  if (rollbackReason) {
+    rollbackReason.textContent =
+      data.reason ||
+      "A critical issue was found. Please rollback to a stable version.";
+  }
+
+  // Show the dialog
+  if (rollbackDialog) {
+    rollbackDialog.classList.add("visible");
+  }
+
+  // (OLD CODE REMOVED - Button will be recreated)
+
+  // Show update available link
+  if (updateAvailableLink) {
+    updateAvailableLink.style.display = "inline-block";
+    updateAvailableLink.onclick = (e) => {
+      e.preventDefault();
+      rollbackDialog.classList.add("visible");
+    };
+  }
+});
+
+// Rollback download confirmation
+if (rollbackDownloadButton) {
+  rollbackDownloadButton.addEventListener("click", async () => {
+    if (!pendingRollbackData) {
+      console.error("[Renderer] No rollback data available");
+      return;
+    }
+
+    console.log("[Renderer] User confirmed rollback download");
+
+    // Disable button and show progress
+    rollbackDownloadButton.disabled = true;
+    if (rollbackProgress) {
+      rollbackProgress.style.display = "block";
+    }
+
+    try {
+      await window.api.confirmRollbackDownload(pendingRollbackData.downloadUrl);
+      // App will quit after download completes
+    } catch (error) {
+      console.error("[Renderer] Rollback download error:", error);
+      rollbackDownloadButton.disabled = false;
+      if (rollbackProgressText) {
+        rollbackProgressText.textContent = "Download failed. Please try again.";
+        rollbackProgressText.style.color = "#ef4444";
+      }
+    }
+  });
+}
+
+// Rollback later button
+if (rollbackLaterButton) {
+  rollbackLaterButton.addEventListener("click", () => {
+    console.log("[Renderer] User chose to rollback later");
+    if (rollbackDialog) {
+      rollbackDialog.classList.remove("visible");
+    }
+    // Keep the update available link visible
+  });
+}
+
+// Listen for rollback download progress
+window.api.onRollbackDownloadProgress((progress) => {
+  console.log("[Renderer] Rollback download progress:", progress);
+  if (rollbackProgressFill) {
+    rollbackProgressFill.style.width = `${progress}%`;
+  }
+  if (rollbackProgressText) {
+    rollbackProgressText.textContent = `Downloading: ${Math.round(progress)}%`;
+  }
+});
+
+// Listen for dev mode (update checker disabled in development)
+window.api.onUpdateCheckDevMode(() => {
+  console.log("");
+  console.log("=================================================");
+  console.log("🔧 DEV MODE RESPONSE RECEIVED");
+  console.log("=================================================");
+  console.log("[Renderer] Auto-updater is disabled in development mode");
+  console.log("[Renderer] Time:", new Date().toLocaleTimeString());
+
+  // Show toast notification
+  showToast("Auto-updater is disabled in development mode", "info", 5000);
+
+  console.log("=================================================");
+});
+
+// Listen for update ready to install (one-click auto-install)
+window.api.onUpdateReadyToInstall((data) => {
+  console.log("[Renderer] Update ready to install:", data);
+
+  // Update dialog content to show "Installing..." message
+  if (updateDialog && updateDialog.classList.contains("visible")) {
+    const dialogHeader = updateDialog.querySelector(".update-dialog-header h2");
+    const dialogContent = updateDialog.querySelector(".update-description");
+    const dialogActions = updateDialog.querySelector(".update-dialog-actions");
+
+    if (dialogHeader) {
+      dialogHeader.textContent = "🚀 Installing Update...";
+    }
+    if (dialogContent) {
+      dialogContent.innerHTML = `
+        <p style="text-align: center; font-size: 16px; margin: 20px 0;">
+          The launcher will restart in a moment to complete the update to <strong>v${data.version}</strong>.
+        </p>
+        <div style="text-align: center; margin-top: 20px;">
+          <div class="progress-spinner" style="margin: 0 auto;"></div>
+        </div>
+      `;
+    }
+    if (dialogActions) {
+      dialogActions.style.display = "none"; // Hide buttons
+    }
+  }
+  // (OLD CODE REMOVED - Button will be recreated)
+});
+
+// Handle "Later" button
+if (updateLaterButton) {
+  updateLaterButton.addEventListener("click", () => {
+    console.log("[Renderer] User declined update");
+    if (updateDialog) {
+      updateDialog.classList.remove("visible");
+    }
+
+    // Show persistent update indicator
+    if (updateAvailableIndicator && pendingUpdateData) {
+      updateAvailableIndicator.style.display = "block";
+      console.log("[Renderer] Showing persistent update indicator");
+    }
+  });
+}
+
+// Handle clicking the persistent update indicator
+if (updateAvailableIndicator) {
+  updateAvailableIndicator.addEventListener("click", () => {
+    console.log("[Renderer] Update indicator clicked");
+
+    // Re-show the update dialog with stored data
+    if (pendingUpdateData && updateDialog) {
+      // Update dialog content
+      if (updateCurrentVersion) {
+        updateCurrentVersion.textContent = pendingUpdateData.currentVersion;
+      }
+      if (updateNewVersion) {
+        updateNewVersion.textContent = pendingUpdateData.version;
+      }
+      if (updateReleaseNotes && pendingUpdateData.releaseNotes) {
+        updateReleaseNotes.textContent = pendingUpdateData.releaseNotes;
+        updateReleaseNotes.style.display = "block";
+      } else if (updateReleaseNotes) {
+        updateReleaseNotes.style.display = "none";
+      }
+
+      // Show the dialog
+      updateDialog.classList.add("visible");
+    }
+  });
+}
+
+// Handle "Download & Install" button
+if (updateDownloadButton) {
+  updateDownloadButton.addEventListener("click", async () => {
+    console.log("[Renderer] User confirmed update download");
+
+    // Hide dialog
+    if (updateDialog) {
+      updateDialog.classList.remove("visible");
+    }
+
+    // Hide the persistent indicator since update is being downloaded
+    if (updateAvailableIndicator) {
+      updateAvailableIndicator.style.display = "none";
+    }
+
+    // Clear pending update data
+    pendingUpdateData = null;
+
+    // Confirm download with main process
+    try {
+      await window.api.confirmUpdateDownload();
+      console.log("[Renderer] Update download started");
+    } catch (error) {
+      console.error("[Renderer] Error starting update download:", error);
+    }
+  });
+}
+
+// ============================================================================
+// TOAST NOTIFICATION SYSTEM
+// ============================================================================
+
+function showToast(message, type = "info", duration = 4000) {
+  const container = document.getElementById("toastContainer");
+  if (!container) {
+    console.error("Toast container not found");
+    return;
+  }
+
+  // Create toast element
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  // Icon based on type
+  const icons = {
+    success: "✓",
+    info: "ℹ",
+    warning: "⚠",
+    error: "✕",
+  };
+
+  toast.innerHTML = `
+    <div class="toast-icon">${icons[type] || icons.info}</div>
+    <div class="toast-content">
+      <div class="toast-message">${message}</div>
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Trigger animation
+  setTimeout(() => toast.classList.add("show"), 10);
+
+  // Auto-remove after duration
+  setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+
+  console.log(`[Toast] ${type.toUpperCase()}: ${message}`);
+}
+
+// ============================================================================
+// CHECK FOR UPDATES BUTTON (RECREATED FRESH - CLEAN CODE)
+// ============================================================================
+
+(function initCheckForUpdates() {
+  console.log("");
+  console.log("=== Initializing Check for Updates Button ===");
+
+  const btn = document.getElementById("btnCheckUpdates");
+
+  if (!btn) {
+    console.error("❌ ERROR: btnCheckUpdates not found in DOM!");
+    return;
+  }
+
+  console.log("✅ Button found:", btn);
+
+  btn.addEventListener("click", async function handleCheckUpdatesClick() {
+    console.log("");
+    console.log("=================================================");
+    console.log("🔍 CHECK FOR UPDATES BUTTON CLICKED!");
+    console.log("=================================================");
+    console.log("Time:", new Date().toLocaleTimeString());
+
+    // Visual feedback - button changes
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Checking...";
+    btn.style.opacity = "0.6";
+
+    console.log("✓ Button disabled and changed to 'Checking...'");
+
+    try {
+      console.log("📡 Calling window.api.checkForUpdates()...");
+      const result = await window.api.checkForUpdates();
+
+      console.log("✅ API Response:", result);
+
+      // Reset button immediately (feedback will come via toast)
+      btn.disabled = false;
+      btn.textContent = originalText;
+      btn.style.opacity = "1";
+      console.log("✓ Button reset to normal state");
+    } catch (error) {
+      console.error("❌ Error checking for updates:", error);
+
+      // Show error toast
+      showToast("Failed to check for updates. Please try again.", "error");
+
+      // Reset button on error
+      btn.disabled = false;
+      btn.textContent = originalText;
+      btn.style.opacity = "1";
+    }
+
+    console.log("=================================================");
+    console.log("");
+  });
+
+  console.log("✅ Event listener attached successfully");
+  console.log("==============================================");
+  console.log("");
+})();

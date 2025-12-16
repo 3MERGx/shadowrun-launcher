@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld("api", {
   onGameFilesProgress: (callback) => {
     ipcRenderer.on("game-files-progress", (_, progress) => callback(progress));
   },
+  onGameFilesExtracting: (callback) => {
+    ipcRenderer.on("game-files-extracting", () => callback());
+  },
   onGfwlProgress: (callback) => {
     ipcRenderer.on("gfwl-progress", (_, progress) => callback(progress));
   },
@@ -120,6 +123,44 @@ contextBridge.exposeInMainWorld("api", {
 
   // Add this to your exposed API
   restartAsAdmin: () => ipcRenderer.invoke("restart-as-admin"),
+
+  // Auto-updater methods
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+  confirmUpdateDownload: () => ipcRenderer.invoke("confirm-update-download"),
+  confirmRollbackDownload: (downloadUrl) =>
+    ipcRenderer.invoke("confirm-rollback-download", downloadUrl),
+  onShowUpdateDialog: (callback) => {
+    ipcRenderer.on("show-update-dialog", (event, data) => callback(data));
+  },
+  onShowRollbackDialog: (callback) => {
+    ipcRenderer.on("show-rollback-dialog", (event, data) => callback(data));
+  },
+  onRollbackDownloadProgress: (callback) => {
+    ipcRenderer.on("rollback-download-progress", (event, progress) =>
+      callback(progress)
+    );
+  },
+  onUpdateNotAvailable: (callback) => {
+    ipcRenderer.on("update-not-available", (event, data) => callback(data));
+  },
+  onUpdateCheckDevMode: (callback) => {
+    ipcRenderer.on("update-check-dev-mode", () => callback());
+  },
+  onUpdateReadyToInstall: (callback) => {
+    ipcRenderer.on("update-ready-to-install", (event, data) => callback(data));
+  },
+  onUpdateDownloadStarted: (callback) => {
+    ipcRenderer.on("update-download-started", callback);
+  },
+  onUpdateDownloadProgress: (callback) => {
+    ipcRenderer.on("update-download-progress", (event, progress) =>
+      callback(progress)
+    );
+  },
+  onUpdateDownloadComplete: (callback) => {
+    ipcRenderer.on("update-download-complete", callback);
+  },
 
   // For receiving messages from main (if you use them)
   on: (channel, callback) => {

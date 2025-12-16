@@ -1,0 +1,248 @@
+; Shadowrun FPS Launcher - Custom NSIS Installer Script
+; This script customizes the installer to check and install dependencies
+
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
+
+; Custom page for welcome message
+!define MUI_PAGE_CUSTOMFUNCTION_PRE WelcomePagePre
+!insertmacro MUI_PAGE_WELCOME
+
+Var DirectXInstalled
+Var GFWLInstalled
+Var InstallDependencies
+Var TempDir
+
+; Welcome page customization
+Function WelcomePagePre
+    ; Set custom welcome text
+    !insertmacro MUI_HEADER_TEXT "Welcome to Shadowrun FPS Launcher Setup" "Please read the following important information before continuing."
+FunctionEnd
+
+; Custom macro to check and install dependencies
+!macro customInstall
+    ; Create temp directory for downloads
+    SetOutPath "$TEMP\ShadowrunLauncher"
+    StrCpy $TempDir "$TEMP\ShadowrunLauncher"
+    
+    DetailPrint "Checking for required dependencies..."
+    
+    ; Check if DirectX 9 is installed
+    Call CheckDirectX
+    Pop $DirectXInstalled
+    
+    ; Check if Games for Windows Live is installed
+    Call CheckGFWL
+    Pop $GFWLInstalled
+    
+    ${If} $DirectXInstalled == "0"
+    ${OrIf} $GFWLInstalled == "0"
+        ; Ask user if they want to install dependencies now
+        MessageBox MB_YESNO|MB_ICONQUESTION "The launcher requires DirectX 9 and Games for Windows Live.$\n$\nWould you like to install the missing dependencies now?$\n$\n(You can also install them later through the launcher)" IDYES InstallDeps IDNO SkipDeps
+        
+        InstallDeps:
+            StrCpy $InstallDependencies "1"
+            DetailPrint "User chose to install dependencies during setup"
+            
+            ; Install DirectX if not present
+            ${If} $DirectXInstalled == "0"
+                DetailPrint "DirectX 9 not found, downloading and installing..."
+                Call InstallDirectX
+            ${Else}
+                DetailPrint "DirectX 9 is already installed"
+            ${EndIf}
+            
+            ; Install GFWL if not present
+            ${If} $GFWLInstalled == "0"
+                DetailPrint "Games for Windows Live not found, downloading and installing..."
+                Call InstallGFWL
+            ${Else}
+                DetailPrint "Games for Windows Live is already installed"
+            ${EndIf}
+            
+            Goto DepsComplete
+        
+        SkipDeps:
+            StrCpy $InstallDependencies "0"
+            DetailPrint "User chose to skip dependency installation"
+            MessageBox MB_OK|MB_ICONINFORMATION "You can install these dependencies later through the launcher.$\n$\nThe launcher will prompt you to download them when needed."
+    ${Else}
+        DetailPrint "All required dependencies are already installed"
+        StrCpy $InstallDependencies "0"
+    ${EndIf}
+    
+    DepsComplete:
+    
+    ; Clean up temp directory
+    RMDir /r "$TempDir"
+!macroend
+
+; Function to check if DirectX 9 is installed
+Function CheckDirectX
+    Push $0
+    
+    ; Check for d3dx9_43.dll (DirectX June 2010)
+    IfFileExists "$SYSDIR\d3dx9_43.dll" dx_found dx_not_found
+    
+    dx_found:
+        DetailPrint "DirectX 9 detected"
+        StrCpy $0 "1"
+        Goto dx_done
+    
+    dx_not_found:
+        DetailPrint "DirectX 9 not detected"
+        StrCpy $0 "0"
+    
+    dx_done:
+    Pop $0
+    Push $0
+FunctionEnd
+
+; Function to check if GFWL is installed
+Function CheckGFWL
+    Push $0
+    Push $1
+    
+    ; Check registry for GFWL installation
+    ReadRegStr $1 HKLM "Software\Microsoft\GFWLive" "InstallDir"
+    
+    ${If} $1 != ""
+        ; Check if xlive.dll exists in the path
+        IfFileExists "$1\xlive.dll" gfwl_found gfwl_not_found
+    ${Else}
+        ; Also check default installation path
+        IfFileExists "$PROGRAMFILES\Microsoft Games for Windows - LIVE\Client\xlive.dll" gfwl_found gfwl_not_found
+    ${EndIf}
+    
+    gfwl_found:
+        DetailPrint "Games for Windows Live detected"
+        StrCpy $0 "1"
+        Goto gfwl_done
+    
+    gfwl_not_found:
+        DetailPrint "Games for Windows Live not detected"
+        StrCpy $0 "0"
+    
+    gfwl_done:
+    Pop $1
+    Pop $0
+    Push $0
+FunctionEnd
+
+; Function to install DirectX
+Function InstallDirectX
+    Push $0
+    Push $1
+    
+    DetailPrint "Downloading DirectX 9 June 2010 Redistributable..."
+    
+    ; Download DirectX installer
+    inetc::get /CAPTION "Downloading DirectX 9..." /CANCELTEXT "Cancel" "https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe" "$TempDir\directx_Jun2010_redist.exe" /END
+    Pop $0
+    
+    ${If} $0 == "OK"
+        DetailPrint "DirectX installer downloaded successfully"
+        DetailPrint "Installing DirectX 9... This may take a few minutes."
+        DetailPrint "A Windows installer window may appear."
+        
+        ; Run DirectX installer silently
+        ExecWait '"$TempDir\directx_Jun2010_redist.exe" /Q /T:"$TempDir\DirectX"' $1
+        
+        ${If} $1 == 0
+            DetailPrint "DirectX installer extracted successfully"
+            
+            ; Run the actual DirectX setup
+            ExecWait '"$TempDir\DirectX\DXSETUP.exe" /silent' $1
+            
+            ${If} $1 == 0
+                DetailPrint "DirectX 9 installed successfully"
+            ${Else}
+                DetailPrint "DirectX installation completed with code: $1"
+            ${EndIf}
+        ${Else}
+            DetailPrint "DirectX extraction failed with code: $1"
+        ${EndIf}
+        
+        ; Clean up
+        Delete "$TempDir\directx_Jun2010_redist.exe"
+        RMDir /r "$TempDir\DirectX"
+    ${Else}
+        DetailPrint "Failed to download DirectX: $0"
+        MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to download DirectX 9.$\n$\nYou can install it later through the launcher."
+    ${EndIf}
+    
+    Pop $1
+    Pop $0
+FunctionEnd
+
+; Function to install GFWL
+Function InstallGFWL
+    Push $0
+    Push $1
+    
+    DetailPrint "Downloading Games for Windows Live..."
+    
+    ; Download GFWL installer from your server
+    inetc::get /CAPTION "Downloading GFWL..." /CANCELTEXT "Cancel" "http://157.245.214.234/releases/gfwlivesetup.zip" "$TempDir\gfwlivesetup.zip" /END
+    Pop $0
+    
+    ${If} $0 == "OK"
+        DetailPrint "GFWL installer downloaded successfully"
+        
+        ; Extract the zip file
+        DetailPrint "Extracting GFWL installer..."
+        nsisunz::UnzipToLog "$TempDir\gfwlivesetup.zip" "$TempDir\GFWL"
+        Pop $1
+        
+        ${If} $1 == "success"
+            DetailPrint "GFWL installer extracted successfully"
+            DetailPrint "Installing Games for Windows Live..."
+            DetailPrint "A Windows installer window may appear."
+            
+            ; Run GFWL installer
+            ExecWait '"$TempDir\GFWL\gfwlivesetup.exe" /q' $1
+            
+            ${If} $1 == 0
+                DetailPrint "Games for Windows Live installed successfully"
+            ${Else}
+                DetailPrint "GFWL installation completed with code: $1"
+            ${EndIf}
+        ${Else}
+            DetailPrint "Failed to extract GFWL installer: $1"
+        ${EndIf}
+        
+        ; Clean up
+        Delete "$TempDir\gfwlivesetup.zip"
+        RMDir /r "$TempDir\GFWL"
+    ${Else}
+        DetailPrint "Failed to download GFWL: $0"
+        MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to download Games for Windows Live.$\n$\nYou can install it later through the launcher."
+    ${EndIf}
+    
+    Pop $1
+    Pop $0
+FunctionEnd
+
+; Custom uninstall macro
+!macro customUnInstall
+    ; Ask if user wants to keep settings
+    MessageBox MB_YESNO|MB_ICONQUESTION "Do you want to keep your launcher settings and game files?" IDYES KeepSettings
+    
+    ; User chose to delete everything
+    DetailPrint "Removing all launcher data..."
+    RMDir /r "$APPDATA\shadowrun-fps-launcher"
+    Goto UninstallComplete
+    
+    KeepSettings:
+        DetailPrint "Keeping launcher settings and game files"
+    
+    UninstallComplete:
+!macroend
+
+; Custom header text for pages
+!define MUI_WELCOMEPAGE_TITLE "Welcome to Shadowrun FPS Launcher Setup"
+!define MUI_WELCOMEPAGE_TEXT "This wizard will guide you through the installation of Shadowrun FPS Launcher.$\r$\n$\r$\nThe launcher provides easy installation, automatic updates, and game activation for Shadowrun (2007).$\r$\n$\r$\nClick Next to continue."
+
+!define MUI_FINISHPAGE_TITLE "Installation Complete"
+!define MUI_FINISHPAGE_TEXT "Shadowrun FPS Launcher has been successfully installed!$\r$\n$\r$\nYou can now launch the launcher to download and play Shadowrun.$\r$\n$\r$\nClick Finish to exit Setup."
+

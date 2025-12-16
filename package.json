@@ -1,16 +1,23 @@
 {
   "name": "shadowrun-fps-launcher",
   "productName": "Shadowrun FPS Launcher",
-  "version": "1.0.0",
+  "version": "0.9.3",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/3MERGx/shadowrun-launcher.git"
+  },
+  "publishConfig": {
+    "provider": "generic",
+    "url": "http://157.245.214.234/launcher"
+  },
   "description": "Community game launcher for Shadowrun FPS",
   "main": "app/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --watch && electron .",
-    "build": "npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --minify && electron-builder",
+    "start:dev": "electron . --dev",
     "build:win": "npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --minify && electron-builder --win",
-    "compile-registry-tool": "compile.bat",
-    "postbuild": "npm run compile-registry-tool && xcopy /Y RegistryWriter.exe dist\\win-unpacked\\resources\\"
+    "build:win:clean": "npm run build:win && npm run cleanup-build",
+    "cleanup-build": "node scripts/cleanup-build.js"
   },
   "author": "Sinful Hollowz",
   "license": "MIT",
@@ -21,7 +28,7 @@
     "tailwindcss": "^3.3.0"
   },
   "build": {
-    "appId": "com.yourdomain.shadowrunlauncher",
+    "appId": "com.shadowrunfps.shadowrunlauncher",
     "productName": "Shadowrun FPS Launcher",
     "directories": {
       "output": "dist"
@@ -33,6 +40,27 @@
         "filter": [
           "*.vbs",
           "*.wsf"
+        ]
+      },
+      {
+        "from": "xlive-helper.exe",
+        "to": ".",
+        "filter": [
+          "xlive-helper.exe"
+        ]
+      },
+      {
+        "from": "RegistryWriter.exe",
+        "to": ".",
+        "filter": [
+          "RegistryWriter.exe"
+        ]
+      },
+      {
+        "from": "audio-volume-helper.exe",
+        "to": ".",
+        "filter": [
+          "audio-volume-helper.exe"
         ]
       }
     ],
@@ -51,14 +79,33 @@
           ]
         }
       ],
-      "icon": "app/assets/icon2.ico"
+      "icon": "app/assets/icon2.ico",
+      "publisherName": "Sinful Hollowz",
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": false,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "differentialPackage": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "license": "LICENSE.txt",
+      "artifactName": "${productName} Setup ${version}.exe",
+      "installerHeader": "build/installerHeader.bmp",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerIcon": "build/uninstallerIcon.ico",
+      "installerIcon": "app/assets/icon2.ico",
+      "uninstallDisplayName": "${productName}",
+      "menuCategory": true,
+      "shortcutName": "Shadowrun FPS Launcher",
+      "include": "build/installer.nsh",
+      "warningsAsErrors": false
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "http://157.245.214.234/launcher"
     },
     "portable": {
       "artifactName": "${productName}.exe"
@@ -74,6 +121,7 @@
     "electron-dl": "^4.0.0",
     "electron-squirrel-startup": "^1.0.1",
     "electron-store": "^10.0.1",
+    "electron-updater": "^6.6.2",
     "express": "^5.1.0",
     "extract-zip": "^2.0.1",
     "node-addon-api": "^8.3.1",
