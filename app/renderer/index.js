@@ -538,6 +538,28 @@ closeSettingsButton.addEventListener("click", () => {
   // Don't do anything with the mod state when closing settings
 });
 
+// Diagnostics screen handlers
+const diagnosticsScreen = document.getElementById("diagnosticsScreen");
+const openDiagnosticsButton = document.getElementById("openDiagnosticsButton");
+const closeDiagnosticsButton = document.getElementById(
+  "closeDiagnosticsButton"
+);
+
+if (openDiagnosticsButton && diagnosticsScreen) {
+  openDiagnosticsButton.addEventListener("click", () => {
+    diagnosticsScreen.classList.add("visible");
+
+    // Auto-detect system info when diagnostics opens (silently, no toast)
+    detectAndDisplaySystemInfo(false);
+  });
+}
+
+if (closeDiagnosticsButton && diagnosticsScreen) {
+  closeDiagnosticsButton.addEventListener("click", () => {
+    diagnosticsScreen.classList.remove("visible");
+  });
+}
+
 // Add a cooldown mechanism for toggle switches
 function applyCooldown(toggleElement, duration = 1500) {
   // Disable the toggle
@@ -564,9 +586,11 @@ function updateSkipIntroButtonState(installed) {
   if (installed) {
     skipIntroButton.textContent = "Uninstall Mod";
     skipIntroButton.classList.add("installed");
+    skipIntroButton.disabled = false; // Ensure button is enabled
   } else {
     skipIntroButton.textContent = "Install Mod";
     skipIntroButton.classList.remove("installed");
+    skipIntroButton.disabled = false; // Ensure button is enabled if game is installed
   }
 }
 
@@ -976,89 +1000,7 @@ window.openFolder = function () {
   }
 };
 
-// Add this near the top of your file to make functions globally available
-console.log("Setting up PCID backup functions...");
-
-// Clean up and simplify the PCID backup click handler
-window.handlePcidBackupClick = async function () {
-  console.log("[Renderer] handlePcidBackupClick was CALLED!");
-  alert("PCID Backup Clicked!"); // Simple feedback
-  // Temporarily comment out the rest of the function's logic
-  /*
-  console.log(
-    "[Renderer] PCID Backup button clicked. Attempting to call window.api.backupPcid()."
-  );
-
-  // Get UI elements
-  const backupPcidButton = document.getElementById("backupPcidButton");
-  const pcidBackupFeedback = document.getElementById("pcidBackupFeedback");
-  const pcidBackupStatus = document.getElementById("pcidBackupStatus");
-  const currentPcidDisplay = document.getElementById("currentPcidDisplay");
-
-  // Disable the button to prevent multiple clicks
-  backupPcidButton.disabled = true;
-
-  // Show loading status
-  pcidBackupStatus.textContent = "Backing up PCID...";
-  currentPcidDisplay.textContent = ""; // Clear previous backup display
-
-  try {
-    console.log("[Renderer] Calling window.api.backupPcid()...");
-    const result = await window.api.backupPcid(); // This is the IPC call
-    console.log(
-      "[Renderer] window.api.backupPcid() returned:",
-      JSON.stringify(result, null, 2)
-    );
-
-    if (result && result.success) {
-      pcidBackupStatus.textContent = "PCID backed up successfully!";
-      if (result.backupPcid) {
-        currentPcidDisplay.textContent = `Backup Value: 0x${result.backupPcid}`;
-      } else if (result.verifiedValue) {
-        // From direct method
-        currentPcidDisplay.textContent = `Backup Value (verified): ${result.verifiedValue}`;
-      }
-      // Dialogs for success are now handled in main.js by registryDirectService
-    } else {
-      pcidBackupStatus.textContent =
-        "Backup failed. See details above or check logs.";
-      if (result && result.error) {
-        console.error("[Renderer] Backup failed with error:", result.error);
-        // Dialogs for failure are now handled in main.js
-      } else {
-        console.error(
-          "[Renderer] Backup failed with no specific error message from main process."
-        );
-      }
-    }
-  } catch (error) {
-    console.error(
-      "[Renderer] Exception during window.api.backupPcid() call:",
-      error
-    );
-    pcidBackupStatus.textContent = "Error during backup. Check console.";
-    // Show a generic error dialog from renderer if IPC itself fails badly
-    alert(`An error occurred while trying to backup PCID: ${error.message}`);
-  } finally {
-    // Re-enable the button
-    backupPcidButton.disabled = false;
-    console.log("[Renderer] PCID Backup process finished.");
-  }
-  */
-};
-
-// Make sure the button has a click handler
-document.addEventListener("DOMContentLoaded", function () {
-  const backupPcidButton = document.getElementById("backupPcidButton");
-  if (backupPcidButton) {
-    // The onclick="handlePcidBackupClick()" in HTML makes this redundant for the click
-    // but it's good for verifying the button exists.
-    // backupPcidButton.addEventListener("click", window.handlePcidBackupClick);
-    console.log("[Renderer] PCID Backup button found in DOM.");
-  } else {
-    console.error("[Renderer] BackupPcidButton not found in DOM!");
-  }
-});
+// PCID Backup button is handled by the function defined at the top of this file
 
 // Add this testing function at the end of your file
 console.log("Adding testing functions to window...");
@@ -1168,7 +1110,7 @@ window.api.onUpdateDownloadComplete(() => {
 });
 
 // ========================================
-// CUSTOM UPDATE DIALOG HANDLERS
+// SILENT UPDATE HANDLERS (Background Updates)
 // ========================================
 
 // Get update dialog elements
@@ -1185,8 +1127,31 @@ const updateAvailableIndicator = document.getElementById(
 
 // Store pending update data
 let pendingUpdateData = null;
+let updateToastId = null; // Track the update progress toast
 
-// Listen for update available from main process
+// Listen for SILENT update available (automatic background download)
+window.api.onUpdateAvailableSilent((data) => {
+  console.log("");
+  console.log("=================================================");
+  console.log("🔄 UPDATE AVAILABLE - DOWNLOADING IN BACKGROUND");
+  console.log("=================================================");
+  console.log("[Renderer] Current version:", data.currentVersion);
+  console.log("[Renderer] New version:", data.version);
+  console.log("[Renderer] Starting automatic download...");
+
+  // Store update data
+  pendingUpdateData = data;
+
+  // Show a persistent toast with progress
+  updateToastId = showUpdateToast(
+    `Downloading update v${data.version}... 0%`,
+    "info",
+    0, // 0 = persistent toast
+    true // show progress bar
+  );
+});
+
+// Listen for update available from manual check (show dialog for manual checks)
 window.api.onShowUpdateDialog((data) => {
   console.log("");
   console.log("=================================================");
@@ -1361,6 +1326,50 @@ window.api.onUpdateCheckDevMode(() => {
   console.log("=================================================");
 });
 
+// ========================================
+// SILENT UPDATE PROGRESS HANDLERS
+// ========================================
+
+// Listen for download progress and update the toast
+window.api.onUpdateDownloadProgress((progress) => {
+  console.log(`[Renderer] Update download progress: ${progress.percent}%`);
+
+  if (updateToastId) {
+    const messageEl = updateToastId.querySelector(".toast-message");
+    const progressFill = updateToastId.querySelector(".toast-progress-fill");
+
+    if (messageEl && pendingUpdateData) {
+      messageEl.textContent = `Downloading update v${pendingUpdateData.version}... ${progress.percent}%`;
+    }
+    if (progressFill) {
+      progressFill.style.width = `${progress.percent}%`;
+    }
+  }
+});
+
+// Listen for download complete
+window.api.onUpdateDownloadedSilent((data) => {
+  console.log("");
+  console.log("=================================================");
+  console.log("✅ UPDATE DOWNLOADED - INSTALLING SILENTLY");
+  console.log("=================================================");
+  console.log("[Renderer] Update will install automatically in 3 seconds");
+
+  // Remove the progress toast
+  if (updateToastId) {
+    updateToastId.classList.remove("show");
+    setTimeout(() => updateToastId.remove(), 300);
+    updateToastId = null;
+  }
+
+  // Show a completion toast
+  showToast(
+    `Update v${data.version} downloaded! Launcher will restart in 3 seconds...`,
+    "success",
+    3000
+  );
+});
+
 // Listen for update ready to install (one-click auto-install)
 window.api.onUpdateReadyToInstall((data) => {
   console.log("[Renderer] Update ready to install:", data);
@@ -1498,13 +1507,66 @@ function showToast(message, type = "info", duration = 4000) {
   // Trigger animation
   setTimeout(() => toast.classList.add("show"), 10);
 
-  // Auto-remove after duration
-  setTimeout(() => {
-    toast.classList.remove("show");
-    setTimeout(() => toast.remove(), 300);
-  }, duration);
+  // Auto-remove after duration (if duration > 0)
+  if (duration > 0) {
+    setTimeout(() => {
+      toast.classList.remove("show");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
 
   console.log(`[Toast] ${type.toUpperCase()}: ${message}`);
+  return toast; // Return toast element for updates
+}
+
+// Enhanced toast with progress bar for updates
+function showUpdateToast(
+  message,
+  type = "info",
+  duration = 0,
+  showProgress = false
+) {
+  const container = document.getElementById("toastContainer");
+  if (!container) {
+    console.error("Toast container not found");
+    return null;
+  }
+
+  const toast = document.createElement("div");
+  toast.className = `toast ${type} update-toast`;
+  toast.dataset.updateToast = "true"; // Mark as update toast
+
+  const icons = {
+    success: "✓",
+    info: "🔄",
+    warning: "⚠",
+    error: "✕",
+  };
+
+  toast.innerHTML = `
+    <div class="toast-icon">${icons[type] || icons.info}</div>
+    <div class="toast-content">
+      <div class="toast-message">${message}</div>
+      ${
+        showProgress
+          ? '<div class="toast-progress-bar"><div class="toast-progress-fill" style="width: 0%"></div></div>'
+          : ""
+      }
+    </div>
+  `;
+
+  container.appendChild(toast);
+  setTimeout(() => toast.classList.add("show"), 10);
+
+  if (duration > 0) {
+    setTimeout(() => {
+      toast.classList.remove("show");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  console.log(`[Update Toast] ${type.toUpperCase()}: ${message}`);
+  return toast;
 }
 
 // ============================================================================
@@ -1570,3 +1632,564 @@ function showToast(message, type = "info", duration = 4000) {
   console.log("==============================================");
   console.log("");
 })();
+
+// ============================================================================
+// DIAGNOSTICS AND ERROR FIXING BUTTONS
+// ============================================================================
+
+// Run System Diagnostics
+const runDiagnosticsButton = document.getElementById("runDiagnosticsButton");
+if (runDiagnosticsButton) {
+  runDiagnosticsButton.addEventListener("click", async () => {
+    console.log("[Diagnostics] Running system diagnostics...");
+    const originalText = runDiagnosticsButton.textContent;
+    runDiagnosticsButton.disabled = true;
+    runDiagnosticsButton.textContent = "Running...";
+
+    // Show loading toast
+    const loadingToast = showToast("🔍 Running diagnostics...", "info", 0);
+
+    try {
+      const result = await window.api.runDiagnostics();
+      console.log("[Diagnostics] Results:", result);
+
+      // Remove loading toast
+      if (loadingToast) {
+        loadingToast.classList.remove("show");
+        setTimeout(() => loadingToast.remove(), 300);
+      }
+
+      if (result.success) {
+        const diag = result.diagnostics;
+
+        // Create custom diagnostics result modal
+        showDiagnosticsResults(diag);
+      } else {
+        showToast(
+          `❌ Error running diagnostics: ${result.error}`,
+          "error",
+          5000
+        );
+      }
+    } catch (error) {
+      console.error("[Diagnostics] Error:", error);
+
+      // Remove loading toast
+      if (loadingToast) {
+        loadingToast.classList.remove("show");
+        setTimeout(() => loadingToast.remove(), 300);
+      }
+
+      showToast(
+        `❌ Failed to run diagnostics: ${error.message}`,
+        "error",
+        5000
+      );
+    } finally {
+      runDiagnosticsButton.disabled = false;
+      runDiagnosticsButton.textContent = originalText;
+    }
+  });
+}
+
+// Function to show diagnostics results in a nice modal
+function showDiagnosticsResults(diag) {
+  const modal = document.createElement("div");
+  modal.className = "modal-screen visible";
+  modal.style.zIndex = "2000";
+
+  const statusIcon = (status) => (status ? "✅" : "❌");
+  const statusText = (status) => (status ? "OK" : "Issue Detected");
+  const statusColor = (status) => (status ? "#10b981" : "#ef4444");
+
+  // NAT Type color coding
+  const getNatColor = (natType) => {
+    if (natType.includes("Open")) return "#10b981"; // Green
+    if (natType.includes("Moderate")) return "#f59e0b"; // Orange
+    if (natType.includes("Strict")) return "#ef4444"; // Red
+    return "#94a3b8"; // Gray
+  };
+
+  const gpuName = diag.gpuInfo.name;
+  const gpuDisplay =
+    gpuName.toUpperCase().includes(diag.gpuInfo.vendor.toUpperCase()) ||
+    gpuName.toUpperCase().includes("NVIDIA") ||
+    gpuName.toUpperCase().includes("RADEON")
+      ? gpuName
+      : `${diag.gpuInfo.vendor.toUpperCase()} - ${gpuName}`;
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 550px;">
+      <div class="modal-header" style="background: rgba(15, 23, 42, 0.95);">
+        <h2>🔍 Diagnostic Results</h2>
+        <button class="close-button" onclick="this.closest('.modal-screen').remove()">×</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        
+        <!-- System Components -->
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; color: #60a5fa; margin-bottom: 12px; font-weight: 600;">System Components</h3>
+          
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
+              diag.directX
+            )};">
+              <span style="font-size: 13px;">DirectX 9+</span>
+              <span style="color: ${statusColor(
+                diag.directX
+              )}; font-weight: 600;">${statusIcon(diag.directX)} ${statusText(
+    diag.directX
+  )}</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
+              diag.licenseManager
+            )};">
+              <span style="font-size: 13px;">License Manager Service</span>
+              <span style="color: ${statusColor(
+                diag.licenseManager
+              )}; font-weight: 600;">${statusIcon(diag.licenseManager)} ${
+    diag.licenseManager ? "Running" : "Not Running"
+  }</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
+              diag.xboxNetworking
+            )};">
+              <span style="font-size: 13px;">Xbox Live Networking Service</span>
+              <span style="color: ${statusColor(
+                diag.xboxNetworking
+              )}; font-weight: 600;">${statusIcon(diag.xboxNetworking)} ${
+    diag.xboxNetworking ? "Running" : "Not Running"
+  }</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
+              diag.gpuDrivers
+            )};">
+              <span style="font-size: 13px;">GPU Drivers</span>
+              <span style="color: ${statusColor(
+                diag.gpuDrivers
+              )}; font-weight: 600;">${statusIcon(
+    diag.gpuDrivers
+  )} ${statusText(diag.gpuDrivers)}</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
+              diag.dotNet.installed
+            )};">
+              <span style="font-size: 13px;">.NET Framework 3.5</span>
+              <span style="color: ${statusColor(
+                diag.dotNet.installed
+              )}; font-weight: 600;">${statusIcon(diag.dotNet.installed)} ${
+    diag.dotNet.installed ? diag.dotNet.version : "Not Installed"
+  }</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Network & Connectivity -->
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; color: #10b981; margin-bottom: 12px; font-weight: 600;">🌐 Network & Connectivity</h3>
+          
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div style="padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; text-align: center;">
+              <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Internet</div>
+              <div style="color: ${statusColor(
+                diag.network.online
+              )}; font-weight: 600; font-size: 13px;">${
+    diag.network.status
+  }</div>
+            </div>
+            
+            <div style="padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; text-align: center;">
+              <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Firewall</div>
+              <div style="color: ${
+                diag.firewall.enabled ? "#f59e0b" : "#10b981"
+              }; font-weight: 600; font-size: 13px;">${
+    diag.firewall.status
+  }</div>
+            </div>
+            
+            <div style="padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; text-align: center; grid-column: span 2;">
+              <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">NAT Type (P2P)</div>
+              <div style="color: ${getNatColor(
+                diag.natType.type
+              )}; font-weight: 600; font-size: 13px;">${diag.natType.type}</div>
+            </div>
+          </div>
+        </div>
+        
+        ${
+          diag.autoFixed.length > 0
+            ? `
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; color: #10b981; margin-bottom: 8px; font-weight: 600;">✅ Auto-Fixed</h3>
+          <div style="padding: 12px; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.3);">
+            ${diag.autoFixed
+              .map(
+                (fix) =>
+                  `<div style="font-size: 12px; margin-bottom: 4px;">• ${fix}</div>`
+              )
+              .join("")}
+          </div>
+        </div>
+        `
+            : ""
+        }
+        
+        ${
+          diag.issues.length > 0
+            ? `
+        <div style="margin-bottom: 20px;">
+          <h3 style="font-size: 14px; color: #f59e0b; margin-bottom: 8px; font-weight: 600;">⚠️ Issues Detected</h3>
+          <div style="padding: 12px; background: rgba(245, 158, 11, 0.1); border-radius: 6px; border: 1px solid rgba(245, 158, 11, 0.3);">
+            ${diag.issues
+              .map(
+                (issue) => `
+              <div style="margin-bottom: 12px;">
+                <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #fbbf24;">${
+                  issue.message
+                }</div>
+                ${
+                  issue.fix !== "auto-fixable"
+                    ? `<div style="font-size: 11px; color: #94a3b8;">Fix: ${issue.fix}</div>`
+                    : ""
+                }
+              </div>
+            `
+              )
+              .join("")}
+          </div>
+        </div>
+        `
+            : ""
+        }
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+}
+
+// Detect System Info (GPU + CPU + OS + NAT)
+const detectSystemButton = document.getElementById("detectSystemButton");
+const copySystemInfoButton = document.getElementById("copySystemInfoButton");
+const gpuInfo = document.getElementById("gpuInfo");
+const cpuInfo = document.getElementById("cpuInfo");
+const osInfo = document.getElementById("osInfo");
+const natInfo = document.getElementById("natInfo");
+
+let cachedSystemInfo = null;
+
+// Function to detect and display system info
+async function detectAndDisplaySystemInfo(shouldShowToast = true) {
+  if (detectSystemButton) detectSystemButton.disabled = true;
+  if (gpuInfo) gpuInfo.textContent = "Detecting...";
+  if (cpuInfo) cpuInfo.textContent = "Detecting...";
+  if (osInfo) osInfo.textContent = "Detecting...";
+  if (natInfo) natInfo.textContent = "Detecting...";
+
+  try {
+    const result = await window.api.getSystemInfo();
+    console.log("[System Detection]", result);
+
+    if (result.success) {
+      const system = result.system;
+      cachedSystemInfo = system;
+
+      if (gpuInfo) {
+        // Don't prepend vendor if GPU name already contains it
+        const gpuName = system.gpu.name;
+        const vendorUpper = system.gpu.vendor.toUpperCase();
+
+        if (
+          gpuName.toUpperCase().includes(vendorUpper) ||
+          gpuName.toUpperCase().includes("NVIDIA") ||
+          gpuName.toUpperCase().includes("RADEON") ||
+          gpuName.toUpperCase().includes("GEFORCE")
+        ) {
+          gpuInfo.textContent = gpuName;
+        } else {
+          gpuInfo.textContent = `${vendorUpper} - ${gpuName}`;
+        }
+      }
+      if (cpuInfo) {
+        cpuInfo.textContent = system.cpu.name;
+      }
+      if (osInfo) {
+        osInfo.textContent = system.os;
+      }
+      if (natInfo) {
+        natInfo.textContent = system.nat.type;
+
+        // Color code NAT type
+        if (system.nat.type.includes("Open")) {
+          natInfo.style.color = "#10b981"; // Green for Open
+        } else if (system.nat.type.includes("Moderate")) {
+          natInfo.style.color = "#f59e0b"; // Orange for Moderate
+        } else if (system.nat.type.includes("Strict")) {
+          natInfo.style.color = "#ef4444"; // Red for Strict
+        } else {
+          natInfo.style.color = "#94a3b8"; // Gray for Unknown
+        }
+      }
+
+      // Only show toast if explicitly requested (manual button click)
+      if (shouldShowToast) {
+        let vendorNote = "";
+        if (system.gpu.vendor === "amd") {
+          vendorNote =
+            "\n\nℹ️ AMD GPU detected: Enhanced FPS limiting is enabled for better compatibility.";
+        } else if (system.gpu.vendor === "nvidia") {
+          vendorNote =
+            "\n\nℹ️ NVIDIA GPU detected: Standard DXVK FPS limiting is being used.";
+        }
+
+        if (vendorNote) {
+          showToast(`System detected!${vendorNote}`, "info", 5000);
+        } else {
+          showToast("System information detected!", "success", 3000);
+        }
+      }
+    } else {
+      if (gpuInfo) gpuInfo.textContent = "Detection failed";
+      if (cpuInfo) cpuInfo.textContent = "Detection failed";
+      if (osInfo) osInfo.textContent = "Detection failed";
+      if (natInfo) natInfo.textContent = "Detection failed";
+      if (shouldShowToast) {
+        alert(`Error detecting system: ${result.error}`);
+      }
+    }
+  } catch (error) {
+    console.error("[System Detection] Error:", error);
+    if (gpuInfo) gpuInfo.textContent = "Detection failed";
+    if (cpuInfo) cpuInfo.textContent = "Detection failed";
+    if (osInfo) osInfo.textContent = "Detection failed";
+    if (natInfo) natInfo.textContent = "Detection failed";
+    if (shouldShowToast) {
+      alert(`Failed to detect system: ${error.message}`);
+    }
+  } finally {
+    if (detectSystemButton) {
+      detectSystemButton.disabled = false;
+    }
+  }
+}
+
+// Detect System button handler (shows toast on manual click)
+if (detectSystemButton) {
+  detectSystemButton.addEventListener("click", () =>
+    detectAndDisplaySystemInfo(true)
+  );
+}
+
+// Copy System Info button handler
+if (copySystemInfoButton) {
+  copySystemInfoButton.addEventListener("click", () => {
+    if (!cachedSystemInfo) {
+      alert("Please detect system information first!");
+      return;
+    }
+
+    // Format GPU name (don't duplicate vendor)
+    const gpuName = cachedSystemInfo.gpu.name;
+    const vendorUpper = cachedSystemInfo.gpu.vendor.toUpperCase();
+    let gpuDisplay = gpuName;
+
+    if (
+      !gpuName.toUpperCase().includes(vendorUpper) &&
+      !gpuName.toUpperCase().includes("NVIDIA") &&
+      !gpuName.toUpperCase().includes("RADEON") &&
+      !gpuName.toUpperCase().includes("GEFORCE")
+    ) {
+      gpuDisplay = `${vendorUpper} - ${gpuName}`;
+    }
+
+    const systemText = `GPU: ${gpuDisplay}\nCPU: ${cachedSystemInfo.cpu.name}\nOS: ${cachedSystemInfo.os}\nNAT Type: ${cachedSystemInfo.nat.type}`;
+
+    // Copy to clipboard
+    navigator.clipboard
+      .writeText(systemText)
+      .then(() => {
+        showToast("✅ System info copied to clipboard!", "success", 3000);
+      })
+      .catch((error) => {
+        console.error("[Copy] Error:", error);
+
+        // Fallback method
+        const textArea = document.createElement("textarea");
+        textArea.value = systemText;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand("copy");
+          showToast("✅ System info copied to clipboard!", "success", 3000);
+        } catch (err) {
+          alert(
+            "Failed to copy to clipboard. Please copy manually:\n\n" +
+              systemText
+          );
+        }
+        document.body.removeChild(textArea);
+      });
+  });
+}
+
+// Fix License Manager
+const fixLicenseManagerButton = document.getElementById(
+  "fixLicenseManagerButton"
+);
+if (fixLicenseManagerButton) {
+  fixLicenseManagerButton.addEventListener("click", async () => {
+    console.log("[License Manager] Attempting fix...");
+    const originalText = fixLicenseManagerButton.textContent;
+    fixLicenseManagerButton.disabled = true;
+    fixLicenseManagerButton.textContent = "Fixing...";
+
+    try {
+      const result = await window.api.fixLicenseManager();
+      console.log("[License Manager] Result:", result);
+
+      if (result.success) {
+        if (result.alreadyRunning) {
+          showToast(
+            "✅ License Manager service is already running!",
+            "success",
+            4000
+          );
+        } else {
+          showToast(
+            "✅ Successfully started Windows License Manager service!",
+            "success",
+            4000
+          );
+        }
+      } else {
+        if (result.needsAdmin) {
+          alert(
+            `⚠️ Administrator privileges required\n\n${result.message}\n\nPlease run the launcher as Administrator or manually start the service through services.msc`
+          );
+        } else {
+          alert(`❌ Error: ${result.message || result.error}`);
+        }
+      }
+    } catch (error) {
+      console.error("[License Manager] Error:", error);
+      alert(`Failed to fix License Manager: ${error.message}`);
+    } finally {
+      fixLicenseManagerButton.disabled = false;
+      fixLicenseManagerButton.textContent = originalText;
+    }
+  });
+}
+
+// Restart Xbox Live Networking Service
+const restartXboxNetworkingButton = document.getElementById(
+  "restartXboxNetworkingButton"
+);
+if (restartXboxNetworkingButton) {
+  restartXboxNetworkingButton.addEventListener("click", async () => {
+    console.log("[Xbox Networking] Attempting restart...");
+    const originalText = restartXboxNetworkingButton.textContent;
+    restartXboxNetworkingButton.disabled = true;
+    restartXboxNetworkingButton.textContent = "Requesting UAC...";
+
+    try {
+      const result = await window.api.restartXboxNetworking();
+      console.log("[Xbox Networking] Result:", result);
+
+      if (result.success) {
+        // Show detailed success message with status transition
+        const message =
+          result.message ||
+          "Successfully restarted Xbox Live Networking service!";
+        showToast(`✅ ${message}`, "success", 5000);
+      } else if (result.cancelled) {
+        // User cancelled UAC prompt
+        showToast("⚠️ UAC prompt was cancelled", "warning", 3000);
+      } else if (result.isDisabled) {
+        // Service is disabled
+        alert(
+          `⚠️ Service is Disabled\n\n${result.message}\n\nHow to enable:\n1. Press Win + R and type: services.msc\n2. Find "Xbox Live Networking Service"\n3. Right-click → Properties\n4. Set "Startup type" to "Manual" or "Automatic"\n5. Click "Apply", then "Start"\n6. Click "OK"`
+        );
+      } else {
+        // Other error
+        alert(`❌ Error\n\n${result.message || result.error}`);
+      }
+    } catch (error) {
+      console.error("[Xbox Networking] Error:", error);
+      alert(`Failed to restart Xbox Live Networking service: ${error.message}`);
+    } finally {
+      restartXboxNetworkingButton.disabled = false;
+      restartXboxNetworkingButton.textContent = originalText;
+    }
+  });
+}
+
+// Run SFC Scan
+const runSfcScanButton = document.getElementById("runSfcScanButton");
+if (runSfcScanButton) {
+  runSfcScanButton.addEventListener("click", async () => {
+    console.log("[SFC] Running System File Checker...");
+
+    const confirm = window.confirm(
+      "This will open a Command Prompt window and run the System File Checker.\n\n" +
+        "⚠️ This requires Administrator privileges and may take 10-15 minutes.\n\n" +
+        "The scan will check for corrupted Windows system files and repair them.\n\n" +
+        "Continue?"
+    );
+
+    if (!confirm) return;
+
+    try {
+      const result = await window.api.runSfcScan();
+      console.log("[SFC] Result:", result);
+
+      if (result.success) {
+        showToast(
+          "✅ System File Checker launched! Check the Command Prompt window.",
+          "success",
+          6000
+        );
+      } else if (result.needsAdmin) {
+        alert(
+          "⚠️ Administrator privileges required\n\nPlease run the launcher as Administrator to use System File Checker."
+        );
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      console.error("[SFC] Error:", error);
+      alert(`Failed to run SFC scan: ${error.message}`);
+    }
+  });
+}
+
+// Open Windows Update
+const openWindowsUpdateButton = document.getElementById(
+  "openWindowsUpdateButton"
+);
+if (openWindowsUpdateButton) {
+  openWindowsUpdateButton.addEventListener("click", async () => {
+    console.log("[Windows Update] Opening Windows Update settings...");
+
+    try {
+      const result = await window.api.openWindowsUpdate();
+      if (result.success) {
+        showToast(
+          "✅ Opening Windows Update... Check for Optional Updates for GPU drivers.",
+          "info",
+          5000
+        );
+      } else {
+        alert(`Error opening Windows Update: ${result.error}`);
+      }
+    } catch (error) {
+      console.error("[Windows Update] Error:", error);
+      alert(`Failed to open Windows Update: ${error.message}`);
+    }
+  });
+}

@@ -273,8 +273,8 @@ function createWindow() {
   // Set app icon path (use .ico for Windows)
   const iconPath = path.join(__dirname, "assets/icon2.ico");
 
-  // Check if running in dev mode
-  const isDevMode = process.argv.includes("--dev") || !app.isPackaged;
+  // Check if running in dev mode (only with --dev flag)
+  const isDevMode = process.argv.includes("--dev");
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -567,16 +567,75 @@ function setDefaultGameConfig() {
   }
 }
 
-// Update the launch-game handler to track the game process
-ipcMain.handle("launch-game", async (event, gameSettings) => {
+// Extract launch logic into reusable function
+async function launchGameLogic(gameSettings, source = "unknown") {
   try {
+    // Safety check: Never auto-launch if AUTO_LAUNCH_AFTER_DOWNLOAD is false
+    if (source === "auto-launch" && !AUTO_LAUNCH_AFTER_DOWNLOAD) {
+      console.warn(
+        "[Launch] Blocked auto-launch attempt - AUTO_LAUNCH_AFTER_DOWNLOAD is false"
+      );
+      return { success: false, error: "Auto-launch is disabled" };
+    }
+
+    // Run pre-launch diagnostics to detect and auto-fix common issues
+    const diagnostics = await runPreLaunchDiagnostics();
+
+    // Check for critical issues that would prevent game launch
+    const criticalIssues = diagnostics.issues.filter(
+      (issue) => issue.severity === "critical"
+    );
+    if (criticalIssues.length > 0) {
+      console.error("[Launch] ❌ Critical issues detected, cannot launch game");
+      const errorMessages = criticalIssues
+        .map((issue) => issue.message)
+        .join("\n");
+
+      // Send detailed error to renderer
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("launch-error", {
+          critical: true,
+          issues: criticalIssues,
+          autoFixed: diagnostics.autoFixed,
+        });
+      }
+
+      return {
+        success: false,
+        error: "Critical system requirements not met",
+        details: criticalIssues,
+      };
+    }
+
+    // Notify user of any auto-fixes
+    if (diagnostics.autoFixed.length > 0) {
+      console.log(
+        `[Launch] ✅ Auto-fixed ${diagnostics.autoFixed.length} issue(s):`
+      );
+      diagnostics.autoFixed.forEach((fix) => console.log(`  - ${fix}`));
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("show-notification", {
+          message: `✅ Auto-fixed: ${diagnostics.autoFixed.join(", ")}`,
+          type: "success",
+        });
+      }
+    }
+
+    // Detect GPU vendor for optimized FPS limiting
+    const gpuInfo = diagnostics.gpuInfo || (await detectGPUVendor());
+    console.log(
+      `[Launch] Using GPU: ${gpuInfo.vendor.toUpperCase()} - ${gpuInfo.name}`
+    );
+
     // Get actual FPS from dxvk.conf instead of using the one from settings object
     const actualFps = readCurrentFpsFromDxvkConf() || gameSettings.maxFrameRate;
 
     // Log with the correct FPS value
-    console.log("Launching game from main process with settings:", {
+    console.log(`[Launch] Launching game from ${source} with settings:`, {
       ...gameSettings,
       maxFrameRate: actualFps,
+      gpu: gpuInfo.vendor,
     });
 
     // Path to the Shadowrun executable
@@ -594,21 +653,72 @@ ipcMain.handle("launch-game", async (event, gameSettings) => {
     playerInGame = true;
     updateDiscordActivity(true);
 
+    // Get GPU-specific environment variables for enhanced FPS limiting
+    const dxvkEnvVars = getEnhancedDxvkEnvVars(actualFps, gpuInfo.vendor);
+
     // Launch the game and store the process
     gameProcess = exec(
       `"${gameExePath}"`,
       {
         cwd: GAME_INSTALL_DIR,
+        env: {
+          ...process.env,
+          // Bypass Windows compatibility dialogs and Program Compatibility Assistant (PCA)
+          __COMPAT_LAYER: "RunAsInvoker DisablePCA",
+          // Apply GPU-specific DXVK optimizations (especially for AMD)
+          ...dxvkEnvVars,
+        },
       },
-      (error, stdout, stderr) => {
+      async (error, stdout, stderr) => {
         if (error) {
           console.error("Error launching game:", error);
         }
 
         // When game closes
+        console.log("[Game Close] Game process has exited");
         playerInGame = false;
         gameProcess = null;
         updateDiscordActivity(false);
+
+        // Auto-restore original PCID when game closes
+        try {
+          const backupExists = await registryUtils.checkSrPcidBackupExists();
+          if (backupExists) {
+            // Get current PCID and backup PCID to compare
+            const currentPcid = await registryUtils.getPcidFromRegistry();
+            const backupPcid =
+              await registryUtils.getSrPcidBackupFromRegistry();
+
+            if (currentPcid && backupPcid) {
+              // Compare the hex values (normalize to uppercase for comparison)
+              const currentHex = currentPcid
+                .toString(16)
+                .toUpperCase()
+                .padStart(16, "0");
+              const backupHex = backupPcid.toUpperCase().replace(/,/g, "");
+
+              if (currentHex !== backupHex) {
+                console.log("[Game Close] Restoring original PCID...");
+                await restoreOriginalPcid();
+                console.log("[Game Close] ✅ PCID restored");
+
+                // Notify user
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                  mainWindow.webContents.send("show-notification", {
+                    message: "✅ Original PCID automatically restored",
+                    type: "success",
+                  });
+                }
+              }
+            }
+          }
+        } catch (restoreError) {
+          console.error(
+            "[Game Close] Error restoring PCID:",
+            restoreError.message
+          );
+          // Non-fatal error, don't block game close handling
+        }
 
         // Notify renderer that game is no longer running
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -623,14 +733,27 @@ ipcMain.handle("launch-game", async (event, gameSettings) => {
     // Set game audio volume to 50% using native helper
     // This runs in the background and doesn't block game launch
     try {
-      const audioHelperPath = path.join(
-        app.getAppPath(),
-        "resources",
-        "audio-volume-helper.exe"
-      );
-      if (fs.existsSync(audioHelperPath)) {
+      // Try multiple possible paths for the audio helper
+      const possiblePaths = [
+        // Production path (packaged with electron-builder)
+        path.join(process.resourcesPath, "audio-volume-helper.exe"),
+        // Development path (root of project)
+        path.join(app.getAppPath(), "audio-volume-helper.exe"),
+        // Legacy path
+        path.join(app.getAppPath(), "resources", "audio-volume-helper.exe"),
+      ];
+
+      let audioHelperPath = null;
+      for (const testPath of possiblePaths) {
+        if (fs.existsSync(testPath)) {
+          audioHelperPath = testPath;
+          break;
+        }
+      }
+
+      if (audioHelperPath) {
         console.log(
-          "[Audio] Launching audio volume helper to set game volume to 50%..."
+          `[Audio] Launching audio volume helper from: ${audioHelperPath}`
         );
         // Spawn the helper in detached mode so it doesn't block
         const audioHelper = spawn(audioHelperPath, ["Shadowrun.exe", "50"], {
@@ -642,7 +765,7 @@ ipcMain.handle("launch-game", async (event, gameSettings) => {
         console.log("[Audio] Audio volume helper launched");
       } else {
         console.log(
-          "[Audio] Audio volume helper not found, skipping volume adjustment"
+          "[Audio] Audio volume helper not found at any expected location, skipping volume adjustment"
         );
       }
     } catch (audioError) {
@@ -665,19 +788,74 @@ ipcMain.handle("launch-game", async (event, gameSettings) => {
     log.error("Error launching game", error);
     return { success: false, error: error.message };
   }
+}
+
+// Update the launch-game handler to track the game process
+ipcMain.handle("launch-game", async (event, gameSettings) => {
+  return await launchGameLogic(gameSettings, "user-click");
 });
 
 // Helper function to check if DirectX 9 is installed
 function isDX9Installed() {
   return new Promise((resolve) => {
-    // Check registry keys for DirectX 9
+    console.log("[DirectX Check] Checking for DirectX 9+ installation...");
+
+    // Check registry keys for DirectX
     const command = 'reg query "HKLM\\SOFTWARE\\Microsoft\\DirectX" /v Version';
-    exec(command, (error, stdout) => {
-      if (!error && stdout && stdout.includes("9.")) {
-        resolve(true);
-      } else {
-        resolve(false);
+    console.log(`[DirectX Check] Running command: ${command}`);
+
+    exec(command, (error, stdout, stderr) => {
+      if (!error && stdout) {
+        // Check for DirectX 9 specifically (version 4.09.x.x)
+        if (stdout.includes("4.09") || stdout.includes("9.")) {
+          resolve(true);
+          return;
+        }
+
+        // Check for any DirectX version present (Windows 10/11 have DirectX 12 built-in)
+        if (stdout.includes("REG_SZ") || stdout.includes("Version")) {
+          resolve(true);
+          return;
+        }
       }
+
+      // Fallback 1: Check for d3d9.dll in System32 (DirectX 9 DLL - present on all Windows with DX9+)
+      const dx9DllPath = path.join(
+        process.env.SystemRoot || "C:\\Windows",
+        "System32",
+        "d3d9.dll"
+      );
+
+      if (fs.existsSync(dx9DllPath)) {
+        resolve(true);
+        return;
+      }
+
+      // Fallback 2: Check for d3d11.dll (DirectX 11 - present on Windows 7+)
+      const dx11DllPath = path.join(
+        process.env.SystemRoot || "C:\\Windows",
+        "System32",
+        "d3d11.dll"
+      );
+
+      if (fs.existsSync(dx11DllPath)) {
+        resolve(true);
+        return;
+      }
+
+      // Fallback 3: On Windows 10/11, DirectX 12 is built-in
+      const osVersion = os.release();
+      const majorVersion = parseInt(osVersion.split(".")[0]);
+      if (majorVersion >= 10) {
+        console.log(
+          "[DirectX Check] ✅ Windows 10+ detected - DirectX 12 is built-in (includes DX9)"
+        );
+        resolve(true);
+        return;
+      }
+
+      console.log("[DirectX Check] ❌ DirectX 9+ not found");
+      resolve(false);
     });
   });
 }
@@ -685,15 +863,853 @@ function isDX9Installed() {
 // Helper function to check if GFWL is installed
 function isGFWLInstalled() {
   return new Promise((resolve) => {
-    // Check for GFWL installation
+    // Check for GFWL directory
     const gfwlPath =
       "C:\\Program Files (x86)\\Microsoft Games for Windows - LIVE";
-    if (fs.existsSync(gfwlPath)) {
-      resolve(true);
-    } else {
+
+    if (!fs.existsSync(gfwlPath)) {
       resolve(false);
+      return;
+    }
+
+    // Check for actual GFWL executable files (more reliable than just directory)
+    const gfwlExecutables = [
+      path.join(gfwlPath, "Client", "gfwlclient.exe"),
+      path.join(gfwlPath, "Client", "GFWLClient.exe"),
+    ];
+
+    let foundExecutable = false;
+    for (const exePath of gfwlExecutables) {
+      if (fs.existsSync(exePath)) {
+        foundExecutable = true;
+        break;
+      }
+    }
+
+    resolve(foundExecutable);
+  });
+}
+
+// ============================================================================
+// GPU DETECTION AND FPS LIMITING
+// ============================================================================
+
+// Helper function to detect GPU vendor (AMD, NVIDIA, Intel)
+async function detectGPUVendor() {
+  return new Promise((resolve) => {
+    console.log("[GPU Detection] Detecting GPU vendor...");
+
+    // Use WMIC to query GPU information
+    const command = "wmic path win32_VideoController get name";
+
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error("[GPU Detection] Error detecting GPU:", error.message);
+        resolve({ vendor: "unknown", name: "Unknown GPU" });
+        return;
+      }
+
+      console.log("[GPU Detection] GPU Output:", stdout);
+
+      let vendor = "unknown";
+      let gpuName = "Unknown GPU";
+
+      // Extract GPU name from output - get first discrete GPU (usually the gaming GPU)
+      const lines = stdout.split("\n").filter((line) => {
+        const trimmed = line.trim();
+        return (
+          trimmed &&
+          !trimmed.includes("Name") &&
+          !trimmed.toLowerCase().includes("microsoft basic")
+        );
+      });
+
+      if (lines.length > 0) {
+        gpuName = lines[0].trim();
+      }
+
+      // Detect vendor from the specific GPU name, not the entire output
+      const gpuLower = gpuName.toLowerCase();
+      if (
+        gpuLower.includes("amd") ||
+        gpuLower.includes("radeon") ||
+        gpuLower.includes("advanced micro devices")
+      ) {
+        vendor = "amd";
+      } else if (
+        gpuLower.includes("nvidia") ||
+        gpuLower.includes("geforce") ||
+        gpuLower.includes("quadro") ||
+        gpuLower.includes("rtx")
+      ) {
+        vendor = "nvidia";
+      } else if (
+        gpuLower.includes("intel") ||
+        gpuLower.includes("uhd") ||
+        gpuLower.includes("iris") ||
+        gpuLower.includes("arc")
+      ) {
+        vendor = "intel";
+      }
+
+      console.log(
+        `[GPU Detection] ✅ Detected: ${vendor.toUpperCase()} - ${gpuName}`
+      );
+      resolve({ vendor, name: gpuName });
+    });
+  });
+}
+
+// Helper function to detect CPU
+async function detectCPU() {
+  return new Promise((resolve) => {
+    console.log("[CPU Detection] Detecting CPU...");
+
+    // Use WMIC to query CPU information
+    const command = "wmic cpu get name";
+
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error("[CPU Detection] Error detecting CPU:", error.message);
+        resolve({ name: "Unknown CPU" });
+        return;
+      }
+
+      console.log("[CPU Detection] CPU Output:", stdout);
+
+      // Extract CPU name from output
+      const lines = stdout
+        .split("\n")
+        .filter((line) => line.trim() && !line.includes("Name"));
+      let cpuName = "Unknown CPU";
+
+      if (lines.length > 0) {
+        cpuName = lines[0].trim();
+
+        // Clean up CPU name - remove processor core count and extra details
+        // Example: "AMD Ryzen 7 7800X3D 8-Core Processor" -> "AMD Ryzen 7 7800X3D"
+        cpuName = cpuName.replace(/\s+\d+-Core\s+Processor$/i, "");
+        cpuName = cpuName.replace(/\s+CPU\s+@\s+[\d.]+GHz$/i, "");
+      }
+
+      console.log(`[CPU Detection] ✅ Detected: ${cpuName}`);
+      resolve({ name: cpuName });
+    });
+  });
+}
+
+// Helper function to detect NAT type
+async function detectNATType() {
+  return new Promise((resolve) => {
+    // Use netsh to check NAT type via UPnP status
+    const command = "netsh interface ipv4 show interfaces";
+
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        resolve({ type: "Unknown", status: "Unable to detect" });
+        return;
+      }
+
+      // Check Windows Firewall and UPnP status
+      const upnpCommand = "netsh advfirewall show allprofiles state";
+
+      exec(upnpCommand, (upnpError, upnpStdout) => {
+        let natType = "Unknown";
+
+        if (!upnpError && upnpStdout) {
+          // Check if firewall is on/off - affects NAT strictness
+          const firewallOff =
+            upnpStdout.toLowerCase().includes("state") &&
+            upnpStdout.toLowerCase().includes("off");
+
+          if (firewallOff) {
+            natType = "Open (Likely)";
+          } else {
+            // Firewall on - likely Moderate or Strict
+            natType = "Moderate/Strict";
+          }
+        }
+
+        resolve({
+          type: natType,
+          status: "Detected via firewall analysis",
+        });
+      });
+    });
+  });
+}
+
+// Get system information (GPU + CPU + NAT)
+async function getSystemInfo() {
+  const gpuInfo = await detectGPUVendor();
+  const cpuInfo = await detectCPU();
+  const natInfo = await detectNATType();
+
+  // Clean up OS display
+  let osDisplay = os.type();
+  if (osDisplay === "Windows_NT") {
+    const release = os.release();
+    const version = parseInt(release.split(".")[0]);
+    // Windows 10 is version 10.0.x, Windows 11 is 10.0.22000+
+    if (version === 10) {
+      const build = parseInt(release.split(".")[2] || "0");
+      osDisplay = build >= 22000 ? "Windows 11" : "Windows 10";
+    } else {
+      osDisplay = `Windows ${version}`;
+    }
+  }
+
+  return {
+    gpu: gpuInfo,
+    cpu: cpuInfo,
+    os: osDisplay,
+    nat: natInfo,
+  };
+}
+
+// Enhanced FPS limiting for AMD GPUs using DXVK environment variables
+function getEnhancedDxvkEnvVars(fps, gpuVendor) {
+  const envVars = {};
+
+  // Base DXVK configuration for all GPUs
+  envVars.DXVK_HUD = "0"; // Disable HUD
+  envVars.DXVK_LOG_LEVEL = "warn"; // Reduce logging
+
+  // AMD-specific optimizations for FPS limiting
+  if (gpuVendor === "amd") {
+    // Force DXVK to use more aggressive frame pacing for AMD
+    envVars.DXVK_FRAME_RATE = fps.toString();
+    envVars.DXVK_STATE_CACHE = "1";
+    envVars.RADV_PERFTEST = "nggc"; // AMD-specific optimizations
+
+    // Use VK_LAYER for frame limiting (works better on AMD)
+    envVars.VK_ICD_FILENAMES = process.env.VK_ICD_FILENAMES || "";
+  }
+
+  return envVars;
+}
+
+// ============================================================================
+// ERROR DETECTION AND AUTO-FIX
+// ============================================================================
+
+// Check if Windows License Manager Service is running
+async function checkWindowsLicenseManagerService() {
+  return new Promise((resolve) => {
+    exec("sc query LicenseManager", (error, stdout, stderr) => {
+      if (error) {
+        resolve({ running: false, exists: false });
+        return;
+      }
+
+      const isRunning = stdout.includes("RUNNING");
+      const isStopped = stdout.includes("STOPPED");
+
+      if (isRunning) {
+        resolve({ running: true, exists: true });
+      } else if (isStopped) {
+        resolve({ running: false, exists: true });
+      } else {
+        resolve({ running: false, exists: true });
+      }
+    });
+  });
+}
+
+// Auto-start Windows License Manager Service
+async function startWindowsLicenseManagerService() {
+  return new Promise((resolve) => {
+    console.log(
+      "[Service Fix] Attempting to start Windows License Manager Service..."
+    );
+
+    // Try to start the service (may require admin privileges)
+    exec("sc start LicenseManager", (error, stdout, stderr) => {
+      if (error) {
+        // Check if it's already running
+        if (
+          stderr.includes("1056") ||
+          stdout.includes("already been started")
+        ) {
+          console.log("[Service Fix] ✅ Service is already running");
+          resolve({ success: true, message: "Service is already running" });
+          return;
+        }
+
+        // Check if we need admin privileges
+        if (stderr.includes("1058") || stderr.includes("disabled")) {
+          console.log(
+            "[Service Fix] ❌ Service is disabled - needs manual intervention"
+          );
+          resolve({
+            success: false,
+            needsAdmin: true,
+            message:
+              "Service is disabled. Please run services.msc and set LicenseManager to Automatic startup type.",
+          });
+          return;
+        }
+
+        console.error(
+          "[Service Fix] ❌ Failed to start service:",
+          error.message
+        );
+        resolve({
+          success: false,
+          needsAdmin: true,
+          message:
+            "Failed to start service. You may need administrator privileges.",
+        });
+        return;
+      }
+
+      console.log(
+        "[Service Fix] ✅ Successfully started Windows License Manager Service"
+      );
+      resolve({ success: true, message: "Service started successfully" });
+    });
+  });
+}
+
+// Check Xbox Live Networking Service status
+async function checkXboxLiveNetworkingService() {
+  return new Promise((resolve) => {
+    exec("sc query XboxNetApiSvc", (error, stdout, stderr) => {
+      if (error) {
+        resolve({ running: false, exists: false });
+        return;
+      }
+
+      const isRunning = stdout.includes("RUNNING");
+      const isStopped = stdout.includes("STOPPED");
+
+      if (isRunning) {
+        resolve({ running: true, exists: true });
+      } else if (isStopped) {
+        resolve({ running: false, exists: true });
+      } else {
+        resolve({ running: false, exists: true });
+      }
+    });
+  });
+}
+
+// Restart Xbox Live Networking Service with UAC elevation
+async function restartXboxLiveNetworkingServiceWithElevation() {
+  return new Promise((resolve) => {
+    console.log(
+      "[Service Fix] Attempting to restart Xbox Live Networking Service with UAC elevation..."
+    );
+
+    // Create VBScript to elevate PowerShell (more reliable than nested PowerShell)
+    const fs = require("fs");
+    const os = require("os");
+    const path = require("path");
+
+    const tempDir = os.tmpdir();
+    const psScriptPath = path.join(tempDir, "xbox_service_restart.ps1");
+    const vbsScriptPath = path.join(tempDir, "xbox_service_restart.vbs");
+    const logPath = path.join(tempDir, "xbox_service_restart_log.txt");
+
+    // Delete old log if it exists
+    try {
+      if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
+    } catch (e) {
+      /* ignore */
+    }
+
+    // PowerShell script content with detailed logging
+    const psScript = `
+$logFile = "${logPath.replace(/\\/g, "\\\\")}"
+$service = Get-Service -Name XboxNetApiSvc -ErrorAction SilentlyContinue
+
+if ($null -eq $service) {
+    "NOT_FOUND" | Out-File -FilePath $logFile -Encoding UTF8
+    exit 1
+}
+
+if ($service.StartType -eq 'Disabled') {
+    "DISABLED" | Out-File -FilePath $logFile -Encoding UTF8
+    exit 2
+}
+
+try {
+    $initialStatus = $service.Status
+    "INITIAL_STATUS:$initialStatus" | Out-File -FilePath $logFile -Encoding UTF8
+    
+    if ($service.Status -eq 'Running') {
+        "STOPPING_SERVICE" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+        Stop-Service -Name XboxNetApiSvc -Force -ErrorAction Stop
+        "SERVICE_STOPPED" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+        Start-Sleep -Milliseconds 1000
+        "STARTING_SERVICE" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+        Start-Service -Name XboxNetApiSvc -ErrorAction Stop
+        "RESTARTED" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    } else {
+        "STARTING_SERVICE" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+        Start-Service -Name XboxNetApiSvc -ErrorAction Stop
+        "STARTED" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    }
+    
+    $finalStatus = (Get-Service -Name XboxNetApiSvc).Status
+    "FINAL_STATUS:$finalStatus" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    exit 0
+} catch {
+    "ERROR:$($_.Exception.Message)" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    exit 3
+}
+`;
+
+    // VBScript to run PowerShell with UAC elevation
+    const vbsScript = `Set UAC = CreateObject("Shell.Application")
+UAC.ShellExecute "powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File ""${psScriptPath.replace(
+      /\\/g,
+      "\\\\"
+    )}""", "", "runas", 0
+WScript.Sleep 3000`;
+
+    try {
+      // Write scripts to temp files
+      fs.writeFileSync(psScriptPath, psScript, "utf8");
+      fs.writeFileSync(vbsScriptPath, vbsScript, "utf8");
+
+      // Execute VBScript (triggers UAC)
+      exec(
+        `cscript //nologo "${vbsScriptPath}"`,
+        { timeout: 10000 },
+        (error, stdout, stderr) => {
+          // Clean up temp files
+          try {
+            if (fs.existsSync(psScriptPath)) fs.unlinkSync(psScriptPath);
+            if (fs.existsSync(vbsScriptPath)) fs.unlinkSync(vbsScriptPath);
+          } catch (cleanupError) {
+            console.warn(
+              "[Service Fix] Could not clean up temp files:",
+              cleanupError.message
+            );
+          }
+
+          if (error) {
+            console.error("[Service Fix] ❌ Execution error:", error.message);
+            resolve({
+              success: false,
+              message:
+                "Failed to execute restart script. The service may be disabled or require manual intervention.",
+            });
+            return;
+          }
+
+          // Wait for the elevated script to complete, then read the log
+          setTimeout(() => {
+            try {
+              if (fs.existsSync(logPath)) {
+                const logContent = fs.readFileSync(logPath, "utf8").trim();
+                console.log("[Service Fix] Restart log:", logContent);
+
+                // Clean up log file
+                try {
+                  fs.unlinkSync(logPath);
+                } catch (e) {
+                  /* ignore */
+                }
+
+                if (logContent.includes("NOT_FOUND")) {
+                  console.log("[Service Fix] ❌ Service not found");
+                  resolve({
+                    success: false,
+                    error:
+                      "Xbox Live Networking Service not found on this system.",
+                  });
+                } else if (logContent.includes("DISABLED")) {
+                  console.log("[Service Fix] ❌ Service is disabled");
+                  resolve({
+                    success: false,
+                    isDisabled: true,
+                    message:
+                      "Xbox Live Networking Service is disabled. Please enable it in services.msc.",
+                  });
+                } else if (logContent.includes("RESTARTED")) {
+                  const lines = logContent.split("\n");
+                  const initialStatus =
+                    lines
+                      .find((l) => l.startsWith("INITIAL_STATUS:"))
+                      ?.split(":")[1] || "Unknown";
+                  const finalStatus =
+                    lines
+                      .find((l) => l.startsWith("FINAL_STATUS:"))
+                      ?.split(":")[1] || "Unknown";
+                  console.log(
+                    `[Service Fix] ✅ Service successfully restarted! (${initialStatus} → Stopped → ${finalStatus})`
+                  );
+                  resolve({
+                    success: true,
+                    message: `Service restarted successfully (${initialStatus} → Stopped → ${finalStatus})`,
+                  });
+                } else if (logContent.includes("STARTED")) {
+                  const finalStatus =
+                    logContent
+                      .split("\n")
+                      .find((l) => l.startsWith("FINAL_STATUS:"))
+                      ?.split(":")[1] || "Running";
+                  console.log(
+                    `[Service Fix] ✅ Service started successfully! (was stopped, now ${finalStatus})`
+                  );
+                  resolve({
+                    success: true,
+                    message: `Service started successfully (now ${finalStatus})`,
+                  });
+                } else if (logContent.includes("ERROR:")) {
+                  const errorMsg =
+                    logContent.split("ERROR:")[1] || "Unknown error";
+                  console.error("[Service Fix] ❌ Script error:", errorMsg);
+                  resolve({
+                    success: false,
+                    message: `Failed to restart service: ${errorMsg}`,
+                  });
+                } else {
+                  console.warn(
+                    "[Service Fix] ⚠️  Unknown log content:",
+                    logContent
+                  );
+                  resolve({
+                    success: false,
+                    message: "Unknown result from restart operation.",
+                  });
+                }
+              } else {
+                // Log file doesn't exist - UAC was probably cancelled or script didn't run
+                console.warn(
+                  "[Service Fix] ⚠️  No log file found - UAC may have been cancelled"
+                );
+                resolve({
+                  success: false,
+                  cancelled: true,
+                  message: "UAC prompt may have been cancelled.",
+                });
+              }
+            } catch (readError) {
+              console.error(
+                "[Service Fix] Error reading log:",
+                readError.message
+              );
+              resolve({
+                success: false,
+                message: "Could not verify service status after restart.",
+              });
+            }
+          }, 3500);
+        }
+      );
+    } catch (fileError) {
+      console.error(
+        "[Service Fix] ❌ Failed to create temp scripts:",
+        fileError.message
+      );
+      resolve({
+        success: false,
+        message: "Failed to create temporary scripts for elevation.",
+      });
     }
   });
+}
+
+// Check for GPU driver issues
+async function checkGPUDrivers() {
+  return new Promise((resolve) => {
+    exec(
+      "wmic path win32_VideoController get driverVersion,name",
+      (error, stdout) => {
+        if (error) {
+          resolve({ hasDrivers: false, drivers: [] });
+          return;
+        }
+
+        const lines = stdout.split("\n").filter((line) => {
+          const trimmed = line.trim();
+          return (
+            trimmed &&
+            !trimmed.startsWith("Name") &&
+            !trimmed.startsWith("DriverVersion")
+          );
+        });
+
+        const drivers = lines.map((line) => {
+          const parts = line.trim().split(/\s{2,}/);
+          return {
+            name: parts[0] || "Unknown",
+            version: parts[1] || "Unknown",
+          };
+        });
+
+        resolve({ hasDrivers: drivers.length > 0, drivers });
+      }
+    );
+  });
+}
+
+// Check Windows Firewall status
+async function checkWindowsFirewall() {
+  return new Promise((resolve) => {
+    exec("netsh advfirewall show allprofiles state", (error, stdout) => {
+      if (error) {
+        resolve({ enabled: null, status: "Unknown" });
+        return;
+      }
+
+      // Check if any profile has firewall ON
+      const firewallOn =
+        stdout.toLowerCase().includes("state") &&
+        stdout.toLowerCase().includes("on");
+
+      resolve({ enabled: firewallOn, status: firewallOn ? "ON" : "OFF" });
+    });
+  });
+}
+
+// Check network connectivity
+async function checkNetworkConnectivity() {
+  return new Promise((resolve) => {
+    // Ping Google DNS
+    exec("ping -n 1 8.8.8.8", (error, stdout) => {
+      if (error) {
+        resolve({ online: false, status: "Offline" });
+        return;
+      }
+
+      const success =
+        stdout.toLowerCase().includes("reply from") ||
+        stdout.toLowerCase().includes("bytes=");
+      resolve({ online: success, status: success ? "Online" : "Offline" });
+    });
+  });
+}
+
+// Check .NET Framework
+async function checkDotNetFramework() {
+  return new Promise((resolve) => {
+    exec(
+      'reg query "HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v3.5" /v Install',
+      (error, stdout) => {
+        if (error || !stdout.includes("0x1")) {
+          resolve({ installed: false, version: "Not Installed" });
+          return;
+        }
+
+        resolve({ installed: true, version: "3.5+" });
+      }
+    );
+  });
+}
+
+// Comprehensive pre-launch diagnostics
+async function runPreLaunchDiagnostics() {
+  console.log("\n========================================");
+  console.log("🔍 RUNNING PRE-LAUNCH DIAGNOSTICS");
+  console.log("========================================");
+
+  const diagnostics = {
+    directX: false,
+    licenseManager: false,
+    xboxNetworking: false,
+    gpuDrivers: false,
+    gpuInfo: { vendor: "unknown", name: "Unknown" },
+    natType: { type: "Unknown" },
+    firewall: { enabled: null, status: "Unknown" },
+    network: { online: false, status: "Unknown" },
+    dotNet: { installed: false, version: "Unknown" },
+    os: "Unknown",
+    issues: [],
+    autoFixed: [],
+  };
+
+  // Check DirectX
+  try {
+    diagnostics.directX = await isDX9Installed();
+    if (!diagnostics.directX) {
+      diagnostics.issues.push({
+        type: "directx",
+        severity: "critical",
+        message:
+          "DirectX 9 is not installed. This will cause 'Unable to create Direct3D Device' errors.",
+        fix: "Install DirectX 9 from the launcher's setup options.",
+      });
+    } else {
+      console.log("[Diagnostics] ✅ DirectX: OK");
+    }
+  } catch (error) {
+    console.error("[Diagnostics] Error checking DirectX:", error.message);
+  }
+
+  // Check Windows License Manager Service
+  try {
+    const serviceStatus = await checkWindowsLicenseManagerService();
+    diagnostics.licenseManager = serviceStatus.running;
+
+    if (serviceStatus.exists && !serviceStatus.running) {
+      diagnostics.issues.push({
+        type: "license_manager",
+        severity: "high",
+        message:
+          "Windows License Manager Service is not running. This may cause error 0x80072746.",
+        fix: "auto-fixable",
+      });
+
+      // Attempt auto-fix
+      console.log(
+        "[Diagnostics] Attempting to auto-start Windows License Manager..."
+      );
+      const fixResult = await startWindowsLicenseManagerService();
+
+      if (fixResult.success) {
+        diagnostics.autoFixed.push("Started Windows License Manager Service");
+        diagnostics.licenseManager = true;
+        console.log(
+          "[Diagnostics] ✅ Auto-fixed: License Manager Service started"
+        );
+      } else {
+        console.log(
+          "[Diagnostics] ⚠️  Could not auto-start License Manager (may need admin)"
+        );
+      }
+    } else if (serviceStatus.running) {
+      console.log("[Diagnostics] ✅ License Manager Service: OK");
+    }
+  } catch (error) {
+    console.error(
+      "[Diagnostics] Error checking License Manager:",
+      error.message
+    );
+  }
+
+  // Check Xbox Live Networking Service
+  try {
+    const xboxServiceStatus = await checkXboxLiveNetworkingService();
+    diagnostics.xboxNetworking = xboxServiceStatus.running;
+
+    if (xboxServiceStatus.exists && !xboxServiceStatus.running) {
+      diagnostics.issues.push({
+        type: "xbox_networking",
+        severity: "high",
+        message:
+          "Xbox Live Networking Service is not running. This may cause P2P connection issues.",
+        fix: "Restart the service using the 'Restart Xbox Live Networking' button in diagnostics.",
+      });
+    }
+
+    if (xboxServiceStatus.running) {
+      console.log("[Diagnostics] ✅ Xbox Live Networking Service: OK");
+    } else if (xboxServiceStatus.exists) {
+      console.log(
+        "[Diagnostics] ⚠️  Xbox Live Networking Service: Not Running"
+      );
+    }
+  } catch (error) {
+    console.error(
+      "[Diagnostics] Error checking Xbox Live Networking:",
+      error.message
+    );
+  }
+
+  // Check GPU and drivers
+  try {
+    const gpuInfo = await detectGPUVendor();
+    diagnostics.gpuInfo = gpuInfo;
+
+    const driverInfo = await checkGPUDrivers();
+    diagnostics.gpuDrivers = driverInfo.hasDrivers;
+
+    if (!driverInfo.hasDrivers) {
+      diagnostics.issues.push({
+        type: "gpu_drivers",
+        severity: "critical",
+        message:
+          "GPU drivers may be missing or outdated. This can cause graphics errors.",
+        fix: "Update your GPU drivers through Windows Update (Optional Updates) or from your GPU manufacturer's website.",
+      });
+    } else {
+      console.log(`[Diagnostics] ✅ GPU Drivers: OK (${gpuInfo.name})`);
+    }
+  } catch (error) {
+    console.error("[Diagnostics] Error checking GPU:", error.message);
+  }
+
+  // Check NAT Type (important for P2P!)
+  try {
+    const natInfo = await detectNATType();
+    diagnostics.natType = natInfo;
+    console.log(`[Diagnostics] NAT Type: ${natInfo.type}`);
+  } catch (error) {
+    console.error("[Diagnostics] Error checking NAT:", error.message);
+  }
+
+  // Check Windows Firewall
+  try {
+    const firewallInfo = await checkWindowsFirewall();
+    diagnostics.firewall = firewallInfo;
+    console.log(`[Diagnostics] Firewall: ${firewallInfo.status}`);
+  } catch (error) {
+    console.error("[Diagnostics] Error checking firewall:", error.message);
+  }
+
+  // Check Network Connectivity
+  try {
+    const networkInfo = await checkNetworkConnectivity();
+    diagnostics.network = networkInfo;
+    if (!networkInfo.online) {
+      diagnostics.issues.push({
+        type: "network",
+        severity: "critical",
+        message:
+          "No internet connection detected. Online multiplayer requires internet access.",
+        fix: "Check your internet connection.",
+      });
+    }
+    console.log(`[Diagnostics] Network: ${networkInfo.status}`);
+  } catch (error) {
+    console.error("[Diagnostics] Error checking network:", error.message);
+  }
+
+  // Check .NET Framework
+  try {
+    const dotNetInfo = await checkDotNetFramework();
+    diagnostics.dotNet = dotNetInfo;
+    if (!dotNetInfo.installed) {
+      diagnostics.issues.push({
+        type: "dotnet",
+        severity: "high",
+        message:
+          ".NET Framework 3.5 is not installed. GFWL requires .NET Framework 3.5.",
+        fix: "Install .NET Framework 3.5 through Windows Features.",
+      });
+    }
+    console.log(`[Diagnostics] .NET Framework: ${dotNetInfo.version}`);
+  } catch (error) {
+    console.error("[Diagnostics] Error checking .NET:", error.message);
+  }
+
+  // Get OS info
+  try {
+    let osDisplay = os.type();
+    if (osDisplay === "Windows_NT") {
+      const release = os.release();
+      const version = parseInt(release.split(".")[0]);
+      if (version === 10) {
+        const build = parseInt(release.split(".")[2] || "0");
+        osDisplay = build >= 22000 ? "Windows 11" : "Windows 10";
+      }
+    }
+    diagnostics.os = osDisplay;
+  } catch (error) {
+    console.error("[Diagnostics] Error getting OS:", error.message);
+  }
+
+  console.log("========================================");
+  console.log(
+    `[Diagnostics] Found ${diagnostics.issues.length} issue(s), auto-fixed ${diagnostics.autoFixed.length}`
+  );
+  console.log("========================================\n");
+
+  return diagnostics;
 }
 
 // Add this handler
@@ -726,16 +1742,42 @@ ipcMain.handle("download-game", async () => {
     );
 
     // STEP 1: Check for existing components FIRST
-    console.log("[Download] Checking for existing components...");
+    console.log("\n========================================");
+    console.log("📋 CHECKING EXISTING COMPONENTS");
+    console.log("========================================");
     const dx9Installed = await isDX9Installed();
     const gfwlInstalled = await isGFWLInstalled();
+    const gameFilesAlreadyPresent = checkGameFilesExist();
+
+    console.log(
+      `[Component Check] DirectX 9+: ${
+        dx9Installed
+          ? "✅ INSTALLED (will skip)"
+          : "⬇️  MISSING (will download)"
+      }`
+    );
+    console.log(
+      `[Component Check] GFWL: ${
+        gfwlInstalled
+          ? "✅ INSTALLED (will skip)"
+          : "⬇️  MISSING (will download)"
+      }`
+    );
+    console.log(
+      `[Component Check] Game Files: ${
+        gameFilesAlreadyPresent
+          ? "✅ PRESENT (will skip)"
+          : "⬇️  MISSING (will download)"
+      }`
+    );
+    console.log("========================================\n");
 
     // Update UI immediately for GFWL and DirectX status
     if (gfwlInstalled) {
       mainWindow.webContents.send("gfwl-progress", 100);
       mainWindow.webContents.send(
         "download-message",
-        "✓ Games for Windows Live is already installed"
+        "✅ GFWL already installed - skipping"
       );
     } else {
       mainWindow.webContents.send("gfwl-progress", 0);
@@ -745,10 +1787,18 @@ ipcMain.handle("download-game", async () => {
       mainWindow.webContents.send("dx-progress", 100);
       mainWindow.webContents.send(
         "download-message",
-        "✓ DirectX 9 is already installed"
+        "✅ DirectX 9 already installed - skipping"
       );
     } else {
       mainWindow.webContents.send("dx-progress", 0);
+    }
+
+    if (gameFilesAlreadyPresent) {
+      mainWindow.webContents.send("game-progress", 100);
+      mainWindow.webContents.send(
+        "download-message",
+        "✅ Game files already present - skipping"
+      );
     }
 
     // STEP 2: Download and install GFWL FIRST (if needed) - BEFORE Shadowrun download
@@ -802,16 +1852,42 @@ ipcMain.handle("download-game", async () => {
         return { success: false, error: "Failed to extract GFWL" };
       }
 
-      // Run GFWL installer
+      // Run GFWL installer SILENTLY
+      console.log("\n========================================");
+      console.log("🎮 INSTALLING GFWL SILENTLY");
+      console.log("========================================");
+
       const gfwlInstallerPath = path.join(GAME_FILES_TEMP, "gfwlivesetup.exe");
+      console.log(
+        `[GFWL Install] Checking for installer at: ${gfwlInstallerPath}`
+      );
+      console.log(
+        `[GFWL Install] File exists: ${fs.existsSync(gfwlInstallerPath)}`
+      );
+
       if (fs.existsSync(gfwlInstallerPath)) {
         mainWindow.webContents.send(
           "download-message",
-          "Running GFWL installer..."
+          "⚙️ Installing GFWL silently in background..."
         );
-        await runInstaller(gfwlInstallerPath);
-        mainWindow.webContents.send("gfwl-progress", 100);
+
+        console.log("[GFWL Install] Running silent installation...");
+        try {
+          await runSilentInstaller(gfwlInstallerPath);
+          console.log("[GFWL Install] ✅ Installation completed");
+          mainWindow.webContents.send("gfwl-progress", 100);
+        } catch (error) {
+          console.error(
+            `[GFWL Install] ❌ Installation error: ${error.message}`
+          );
+          console.error(`[GFWL Install] Stack: ${error.stack}`);
+          // Continue anyway - GFWL install errors are non-fatal
+          mainWindow.webContents.send("gfwl-progress", 100);
+        }
+      } else {
+        console.warn("[GFWL Install] ⚠️  Installer not found, skipping");
       }
+      console.log("========================================\n");
     }
 
     // STEP 3: Download and install DirectX 9 FIRST (if needed) - BEFORE Shadowrun download
@@ -846,12 +1922,25 @@ ipcMain.handle("download-game", async () => {
         return { success: false, error: "Failed to download DirectX 9" };
       }
 
-      // Install DirectX 9
+      // Install DirectX 9 SILENTLY
+      console.log("\n========================================");
+      console.log("🎮 INSTALLING DIRECTX 9 SILENTLY");
+      console.log("========================================");
+      console.log(`[DX9 Install] Installer path: ${dx9Path}`);
+
       mainWindow.webContents.send(
         "download-message",
-        "⚙️ Installing DirectX 9... This may take a minute or two."
+        "⚙️ Installing DirectX 9 silently in background..."
       );
-      await runInstaller(dx9Path);
+
+      try {
+        await runSilentInstaller(dx9Path);
+        console.log("[DX9 Install] ✅ Installation completed");
+      } catch (error) {
+        console.error(`[DX9 Install] ❌ Installation error: ${error.message}`);
+        // Continue anyway - DX9 install errors are non-fatal
+      }
+      console.log("========================================\n");
       mainWindow.webContents.send("dx-progress", 100);
     }
 
@@ -1283,31 +2372,18 @@ d3d9.maxFrameRate = 85
     mainWindow.webContents.send("dx-progress", 100);
     console.log("[Download] Sent all progress bars to 100%");
 
-    // Update game installation status BEFORE sending download-complete
-    // This ensures the UI knows the game is installed
-    console.log("[Download] Verifying game installation...");
-    try {
-      const installationStatus = await checkExistingInstallation();
-      console.log(
-        `[Download] Installation check result: ${installationStatus}`
-      );
-    } catch (checkError) {
-      console.error("[Download] Error checking installation:", checkError);
-    }
-
     // Notify renderer that download is complete and game is installed
-    console.log("[Download] Sending download-complete event...");
+    console.log("[Download] Sending completion events...");
     mainWindow.webContents.send("download-complete");
-    console.log("[Download] Sending game-installation-status event...");
     mainWindow.webContents.send("game-installation-status", {
       installed: true,
     });
-    console.log("[Download] All completion events sent successfully");
 
     // Clean up downloads
     downloadInProgress = false;
 
-    // Auto-launch game if enabled
+    // Auto-launch is DISABLED - game will NOT launch automatically after download
+    // To enable auto-launch, set AUTO_LAUNCH_AFTER_DOWNLOAD = true at line 66
     if (AUTO_LAUNCH_AFTER_DOWNLOAD) {
       console.log("[Download] Auto-launch enabled, launching game...");
       setTimeout(async () => {
@@ -1317,9 +2393,10 @@ d3d9.maxFrameRate = 85
         }
         // Launch the game (use the same settings that would be used from the Play button)
         const defaultSettings = await loadSettingsFromDisk();
-        ipcMain.emit("launch-game", null, defaultSettings);
+        await launchGameLogic(defaultSettings, "auto-launch");
       }, 2000);
     }
+    // No else block - silently skip auto-launch when disabled
 
     return { success: true };
   } catch (error) {
@@ -1568,39 +2645,65 @@ function runSilentInstaller(installerPath) {
   return new Promise((resolve, reject) => {
     let installCommand;
 
-    if (installerPath.includes("directx9")) {
+    if (
+      installerPath.includes("directx9") ||
+      installerPath.includes("directx_Jun2010")
+    ) {
       // Silent DirectX installation
+      console.log("[Silent Installer] Detected DirectX installer");
       installCommand = `"${installerPath}" /Q /C /T:"${GAME_FILES_TEMP}\\dxtemp" && "${GAME_FILES_TEMP}\\dxtemp\\DXSETUP.exe" /silent`;
     } else if (installerPath.includes("gfwlivesetup")) {
-      // Silent GFWL installation
-      installCommand = `"${installerPath}" /q /norestart`;
+      // Silent GFWL installation - run the bootstrapper setup.exe
+      console.log("[Silent Installer] Detected GFWL installer");
+      console.log(
+        "[Silent Installer] Running gfwlivesetup.exe bootstrapper to install all GFWL components"
+      );
+      // Note: GFWL installer may briefly show a progress window - this is unavoidable
+      // The gfwlivesetup.exe installer doesn't support fully hidden installation
+      installCommand = `"${installerPath}" /quiet /norestart`;
     } else {
-      installCommand = `"${installerPath}"`;
+      console.log("[Silent Installer] Using default silent flags");
+      installCommand = `"${installerPath}" /silent /quiet /qn /norestart`;
     }
 
-    console.log(`Running silent install: ${installCommand}`);
+    console.log(`[Silent Installer] Command: ${installCommand}`);
+    console.log(`[Silent Installer] Starting installation...`);
 
-    const child = exec(installCommand, (error) => {
+    const child = exec(installCommand, (error, stdout, stderr) => {
+      if (stdout) console.log(`[Silent Installer] STDOUT: ${stdout}`);
+      if (stderr) console.error(`[Silent Installer] STDERR: ${stderr}`);
+
       if (error) {
-        console.error("Install error:", error);
-        reject(error);
+        console.error(`[Silent Installer] Error code: ${error.code}`);
+        console.error(`[Silent Installer] Error message: ${error.message}`);
+        // Don't reject - installer errors are often non-fatal
+        resolve();
       } else {
+        console.log("[Silent Installer] Installation completed successfully");
         resolve();
       }
     });
 
     // Set a timeout to avoid indefinite waiting
     const timeout = setTimeout(() => {
+      console.warn(
+        "[Silent Installer] Installation timeout (5 min) - continuing anyway"
+      );
       try {
         process.kill(child.pid);
-        console.log("Killed installer process after timeout");
+        console.log(
+          "[Silent Installer] Killed installer process after timeout"
+        );
       } catch (e) {
-        console.warn("Could not kill installer process:", e);
+        console.warn(
+          `[Silent Installer] Could not kill installer process: ${e.message}`
+        );
       }
       resolve(); // Continue anyway
     }, 5 * 60 * 1000); // 5 minutes max
 
-    child.on("exit", () => {
+    child.on("exit", (code) => {
+      console.log(`[Silent Installer] Process exited with code: ${code}`);
       clearTimeout(timeout);
     });
   });
@@ -1629,11 +2732,20 @@ ipcMain.handle("activate-game", async () => {
   const PRODUCT_KEY = "R9GJT-87T6K-6KV49-XTX8G-6VBWW";
 
   try {
-    console.log("Starting game activation...");
+    console.log("========================================");
+    console.log("🎮 STARTING GAME ACTIVATION PROCESS");
+    console.log("========================================");
+    console.log(`[Activation] Product Key: ${PRODUCT_KEY}`);
+    console.log(`[Activation] Game Install Dir: ${GAME_INSTALL_DIR}`);
+    console.log(`[Activation] Time: ${new Date().toLocaleTimeString()}`);
 
     // 2.1 Registry Accessibility Check
+    console.log("\n[Step 1/6] Checking registry accessibility...");
     const canAccessRegistry = await registryUtils.checkPathAccess();
+    console.log(`[Step 1/6] Registry accessible: ${canAccessRegistry}`);
     if (!canAccessRegistry) {
+      console.error("[Step 1/6] ❌ FAILED: Cannot access registry");
+      console.log("========================================\n");
       dialog.showMessageBox(mainWindow, {
         type: "error",
         title: "Activation Failed",
@@ -1649,8 +2761,12 @@ ipcMain.handle("activate-game", async () => {
     }
 
     // 3.1 Check PCID Exists
+    console.log("\n[Step 2/6] Checking if PCID exists in registry...");
     const pcidExists = await registryUtils.checkPcidInRegistry();
+    console.log(`[Step 2/6] PCID exists: ${pcidExists}`);
     if (!pcidExists) {
+      console.error("[Step 2/6] ❌ FAILED: PCID not found");
+      console.log("========================================\n");
       dialog.showMessageBox(mainWindow, {
         type: "error",
         title: "Activation Failed",
@@ -1666,8 +2782,16 @@ ipcMain.handle("activate-game", async () => {
     }
 
     // 3.2 Read Current PCID
+    console.log("\n[Step 3/6] Reading current PCID from registry...");
     const currentPcid = await registryUtils.getPcidFromRegistry();
+    console.log(
+      `[Step 3/6] PCID retrieved: ${
+        currentPcid ? `0x${currentPcid.toString(16).toUpperCase()}` : "FAILED"
+      }`
+    );
     if (!currentPcid) {
+      console.error("[Step 3/6] ❌ FAILED: Could not read PCID value");
+      console.log("========================================\n");
       dialog.showMessageBox(mainWindow, {
         type: "error",
         title: "Activation Failed",
@@ -1682,16 +2806,23 @@ ipcMain.handle("activate-game", async () => {
     }
 
     // 3.3 Check for Existing Backup & Create if Needed
+    console.log("\n[Step 4/6] Checking for PCID backup...");
     const backupExists = await registryUtils.checkSrPcidBackupExists();
+    console.log(`[Step 4/6] Backup exists: ${backupExists}`);
     if (!backupExists) {
-      console.log(
-        "[Activation] PCID backup not found - creating mandatory backup..."
-      );
+      console.log("[Step 4/6] Creating PCID backup...");
       const backupResult = await registryUtils.backupPcidToRegistryViaRegFile(
         currentPcid
       );
+      console.log(
+        `[Step 4/6] Backup result: ${
+          backupResult ? JSON.stringify(backupResult) : "NULL"
+        }`
+      );
 
       if (!backupResult || !backupResult.success) {
+        console.error("[Step 4/6] ❌ FAILED: Could not create PCID backup");
+        console.log("========================================\n");
         dialog.showMessageBox(mainWindow, {
           type: "error",
           title: "Activation Failed",
@@ -1705,30 +2836,43 @@ ipcMain.handle("activate-game", async () => {
           error: "Failed to create PCID backup",
         };
       }
-      console.log("[Activation] PCID backup created successfully");
+      console.log("[Step 4/6] ✅ PCID backup created successfully");
     } else {
-      console.log(
-        "[Activation] PCID backup already exists - skipping backup step"
-      );
+      console.log("[Step 4/6] ✅ Backup already exists - skipping");
     }
 
     // 4. Registry-Based Game Activation
     try {
+      console.log("\n[Step 5/6] Applying registry-based game activation...");
+      console.log(`[Step 5/6] Using game directory: ${GAME_INSTALL_DIR}`);
+      console.log(`[Step 5/6] Using product key: ${PRODUCT_KEY}`);
+
       const activationRegResult = await registryUtils.activateGameInRegistry(
         GAME_INSTALL_DIR,
         PRODUCT_KEY
       );
 
+      console.log(
+        `[Step 5/6] Activation result: ${
+          activationRegResult ? JSON.stringify(activationRegResult) : "NULL"
+        }`
+      );
+
       if (!activationRegResult || !activationRegResult.success) {
-        throw new Error(
+        const errorMsg =
           (activationRegResult && activationRegResult.error) ||
-            "Failed to apply registry settings for activation."
-        );
+          "Failed to apply registry settings for activation.";
+        console.error(`[Step 5/6] ❌ FAILED: ${errorMsg}`);
+        console.log("========================================\n");
+        throw new Error(errorMsg);
       }
 
-      console.log("[Activation] Registry activation completed successfully");
+      console.log("[Step 5/6] ✅ Registry activation completed successfully");
 
       // 5. Native Token Injection (xlive.dll) - Best-Effort
+      console.log(
+        "\n[Step 6/6] Attempting native token injection via xlive-helper.exe..."
+      );
       let tokenInjectionSuccess = false;
       try {
         const helperPath = path.join(
@@ -1736,106 +2880,181 @@ ipcMain.handle("activate-game", async () => {
           "resources",
           "xlive-helper.exe"
         );
+        console.log(`[Step 6/6] Checking path 1: ${helperPath}`);
+        console.log(`[Step 6/6] Path 1 exists: ${fs.existsSync(helperPath)}`);
 
         // Fallback to checking in app directory if not in resources
         const helperPathFallback = path.join(
           process.resourcesPath || app.getAppPath(),
           "xlive-helper.exe"
         );
+        console.log(`[Step 6/6] Checking path 2: ${helperPathFallback}`);
+        console.log(
+          `[Step 6/6] Path 2 exists: ${fs.existsSync(helperPathFallback)}`
+        );
 
         let actualHelperPath = null;
         if (fs.existsSync(helperPath)) {
           actualHelperPath = helperPath;
+          console.log(`[Step 6/6] Using path 1`);
         } else if (fs.existsSync(helperPathFallback)) {
           actualHelperPath = helperPathFallback;
+          console.log(`[Step 6/6] Using path 2`);
         } else {
           // Try in the same directory as the main executable
           const exeDir = path.dirname(process.execPath);
           const exeDirHelper = path.join(exeDir, "xlive-helper.exe");
+          console.log(`[Step 6/6] Checking path 3: ${exeDirHelper}`);
+          console.log(
+            `[Step 6/6] Path 3 exists: ${fs.existsSync(exeDirHelper)}`
+          );
           if (fs.existsSync(exeDirHelper)) {
             actualHelperPath = exeDirHelper;
+            console.log(`[Step 6/6] Using path 3`);
           }
         }
 
         if (actualHelperPath) {
           console.log(
-            `[Activation] Calling xlive-helper.exe: ${actualHelperPath}`
+            `[Step 6/6] ✅ Found xlive-helper.exe at: ${actualHelperPath}`
           );
+          console.log(`[Step 6/6] Executing with args: [${PRODUCT_KEY}]`);
 
           const helperResult = await new Promise((resolve) => {
+            console.log(`[Step 6/6] Spawning process...`);
             const helperProcess = spawn(actualHelperPath, [PRODUCT_KEY], {
               stdio: ["ignore", "pipe", "pipe"],
               windowsHide: true,
             });
+            console.log(
+              `[Step 6/6] Process spawned with PID: ${helperProcess.pid}`
+            );
 
             let stdout = "";
             let stderr = "";
 
             helperProcess.stdout.on("data", (data) => {
-              stdout += data.toString();
+              const output = data.toString();
+              stdout += output;
+              console.log(`[Step 6/6] STDOUT: ${output.trim()}`);
             });
 
             helperProcess.stderr.on("data", (data) => {
-              stderr += data.toString();
+              const error = data.toString();
+              stderr += error;
+              console.error(`[Step 6/6] STDERR: ${error.trim()}`);
             });
 
             helperProcess.on("close", (code) => {
+              console.log(`[Step 6/6] Process exited with code: ${code}`);
               resolve({ code, stdout, stderr });
             });
 
             helperProcess.on("error", (error) => {
+              console.error(`[Step 6/6] Process error: ${error.message}`);
               resolve({ code: -1, error: error.message });
             });
           });
 
+          console.log(
+            `[Step 6/6] Helper result: ${JSON.stringify(helperResult)}`
+          );
+
           if (helperResult.code === 0) {
             tokenInjectionSuccess = true;
-            console.log("[Activation] Token injection via xlive.dll succeeded");
+            console.log(
+              "[Step 6/6] ✅ Token injection via xlive.dll SUCCEEDED"
+            );
+            if (helperResult.stdout) {
+              console.log(`[Step 6/6] Output: ${helperResult.stdout.trim()}`);
+            }
           } else {
             console.warn(
-              `[Activation] Token injection failed (exit code: ${helperResult.code})`
+              `[Step 6/6] ⚠️  Token injection FAILED (exit code: ${helperResult.code})`
             );
             if (helperResult.stderr) {
               console.warn(
-                `[Activation] Helper stderr: ${helperResult.stderr}`
+                `[Step 6/6] Error output: ${helperResult.stderr.trim()}`
               );
+            }
+            if (helperResult.error) {
+              console.warn(`[Step 6/6] Error message: ${helperResult.error}`);
             }
           }
         } else {
           console.warn(
-            "[Activation] xlive-helper.exe not found - skipping token injection"
+            "[Step 6/6] ⚠️  xlive-helper.exe not found in any checked location"
           );
+          console.warn("[Step 6/6] Skipping token injection");
         }
       } catch (helperError) {
-        console.warn(
-          "[Activation] Error calling xlive-helper.exe:",
-          helperError.message
+        console.error(
+          `[Step 6/6] ❌ Exception calling xlive-helper.exe: ${helperError.message}`
         );
+        console.error(`[Step 6/6] Stack trace: ${helperError.stack}`);
       }
 
-      // Show warning if token injection failed (non-fatal)
+      // Show warning if token injection failed (non-fatal) with manual key option
       if (!tokenInjectionSuccess) {
-        dialog.showMessageBox(mainWindow, {
+        const result = await dialog.showMessageBox(mainWindow, {
           type: "warning",
           title: "Token Injection Warning",
           message:
             "Registry activation succeeded, but automatic token injection failed.",
-          detail:
-            "The game may still activate normally. If you experience issues, try launching the game.",
-          buttons: ["OK"],
+          detail: `The game may still activate normally. If you experience issues, use the manual key below.\n\nProduct Key: ${PRODUCT_KEY}\n\nClick "Copy Key" to copy it to your clipboard, then paste it into the game's activation window.`,
+          buttons: ["Copy Key", "OK"],
+          defaultId: 0,
+          cancelId: 1,
         });
+
+        // If user clicked "Copy Key", copy to clipboard
+        if (result.response === 0) {
+          const { clipboard } = require("electron");
+          clipboard.writeText(PRODUCT_KEY);
+          console.log("[Activation] Product key copied to clipboard");
+
+          // Show confirmation
+          dialog.showMessageBox(mainWindow, {
+            type: "info",
+            title: "Key Copied",
+            message: "Product key copied to clipboard!",
+            detail: `${PRODUCT_KEY}\n\nPaste this key into the game's activation window (Ctrl+V).`,
+            buttons: ["OK"],
+          });
+        }
       }
 
       // 6. Token File Cleanup
+      console.log("\n[Cleanup] Deleting token cache files...");
       const tokenDeletionResult = await registryUtils.deleteTokenFiles();
       if (!tokenDeletionResult || !tokenDeletionResult.success) {
+        console.warn("[Cleanup] ⚠️  Could not delete all token files");
         console.warn(
-          "Could not delete all token files during activation:",
-          tokenDeletionResult.errors
+          `[Cleanup] Errors: ${JSON.stringify(tokenDeletionResult?.errors)}`
         );
+      } else {
+        console.log("[Cleanup] ✅ Token files deleted successfully");
       }
 
       // 7. Success Completion
+      console.log("\n========================================");
+      console.log("✅ ACTIVATION PROCESS COMPLETED");
+      console.log("========================================");
+      console.log("Summary:");
+      console.log(`  - Registry activation: SUCCESS`);
+      console.log(`  - PCID backup: SUCCESS`);
+      console.log(
+        `  - Token injection: ${
+          tokenInjectionSuccess ? "SUCCESS" : "FAILED (manual key required)"
+        }`
+      );
+      console.log(
+        `  - Token cleanup: ${
+          tokenDeletionResult?.success ? "SUCCESS" : "PARTIAL"
+        }`
+      );
+      console.log("========================================\n");
+
       dialog.showMessageBox(mainWindow, {
         type: "info",
         title: "Activation Successful",
@@ -1846,7 +3065,12 @@ ipcMain.handle("activate-game", async () => {
       });
       return { success: true, message: "Game activated successfully." };
     } catch (error) {
-      console.error("Error during activation steps:", error);
+      console.error("\n========================================");
+      console.error("❌ ACTIVATION FAILED");
+      console.error("========================================");
+      console.error(`Error during activation: ${error.message}`);
+      console.error(`Stack trace: ${error.stack}`);
+      console.error("========================================\n");
       dialog.showMessageBox(mainWindow, {
         type: "error",
         title: "Activation Error",
@@ -1874,8 +3098,8 @@ ipcMain.handle("activate-game", async () => {
 });
 
 ipcMain.handle("open-discord", async () => {
-  // Open Discord link
-  await shell.openExternal("https://discord.gg/Shadowrun");
+  // Open Discord invite link - browser will handle opening Discord app if installed
+  await shell.openExternal("https://discord.gg/p9uzqbNPEK");
   return { success: true };
 });
 
@@ -2164,6 +3388,170 @@ ipcMain.handle("save-settings", async (event, newSettings) => {
   }
 });
 
+// ============================================================================
+// IPC HANDLERS FOR DIAGNOSTICS AND ERROR HANDLING
+// ============================================================================
+
+// Run system diagnostics
+ipcMain.handle("run-diagnostics", async () => {
+  try {
+    const diagnostics = await runPreLaunchDiagnostics();
+    return { success: true, diagnostics };
+  } catch (error) {
+    console.error("[IPC] Error running diagnostics:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get GPU information (legacy - keeping for backwards compatibility)
+ipcMain.handle("get-gpu-info", async () => {
+  try {
+    const gpuInfo = await detectGPUVendor();
+    return { success: true, gpu: gpuInfo };
+  } catch (error) {
+    console.error("[IPC] Error getting GPU info:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get full system information (GPU + CPU + OS)
+ipcMain.handle("get-system-info", async () => {
+  try {
+    const systemInfo = await getSystemInfo();
+    return { success: true, system: systemInfo };
+  } catch (error) {
+    console.error("[IPC] Error getting system info:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Check and start Windows License Manager Service
+ipcMain.handle("fix-license-manager", async () => {
+  try {
+    const serviceStatus = await checkWindowsLicenseManagerService();
+
+    if (!serviceStatus.exists) {
+      return {
+        success: false,
+        error: "Windows License Manager Service not found on this system",
+      };
+    }
+
+    if (serviceStatus.running) {
+      return {
+        success: true,
+        message: "Service is already running",
+        alreadyRunning: true,
+      };
+    }
+
+    const result = await startWindowsLicenseManagerService();
+    return result;
+  } catch (error) {
+    console.error("[IPC] Error fixing License Manager:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Restart Xbox Live Networking Service with UAC elevation
+ipcMain.handle("restart-xbox-networking", async () => {
+  try {
+    const serviceStatus = await checkXboxLiveNetworkingService();
+
+    if (!serviceStatus.exists) {
+      return {
+        success: false,
+        error: "Xbox Live Networking Service not found on this system",
+      };
+    }
+
+    // Use elevated version which prompts for UAC
+    const result = await restartXboxLiveNetworkingServiceWithElevation();
+    return result;
+  } catch (error) {
+    console.error(
+      "[IPC] Error restarting Xbox Live Networking Service:",
+      error
+    );
+    return { success: false, error: error.message };
+  }
+});
+
+// Check DirectX installation
+ipcMain.handle("check-directx", async () => {
+  try {
+    const installed = await isDX9Installed();
+    return { success: true, installed };
+  } catch (error) {
+    console.error("[IPC] Error checking DirectX:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Check GPU drivers
+ipcMain.handle("check-gpu-drivers", async () => {
+  try {
+    const driverInfo = await checkGPUDrivers();
+    return { success: true, drivers: driverInfo };
+  } catch (error) {
+    console.error("[IPC] Error checking GPU drivers:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Run Windows System File Checker (for error 1603/1722)
+ipcMain.handle("run-sfc-scan", async () => {
+  try {
+    console.log("[SFC] User requested System File Checker scan");
+
+    // Check if running as admin
+    const isAdmin = await isRunningAsAdmin();
+
+    if (!isAdmin) {
+      return {
+        success: false,
+        needsAdmin: true,
+        error: "Administrator privileges required to run System File Checker",
+      };
+    }
+
+    // Open command prompt as admin with SFC command
+    exec(
+      'start cmd.exe /k "echo Running System File Checker... && sfc /scannow"',
+      (error) => {
+        if (error) {
+          console.error("[SFC] Error opening cmd:", error);
+        }
+      }
+    );
+
+    return {
+      success: true,
+      message:
+        "System File Checker launched in new window. This may take several minutes to complete.",
+    };
+  } catch (error) {
+    console.error("[IPC] Error running SFC scan:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Open Windows Update (for driver updates)
+ipcMain.handle("open-windows-update", async () => {
+  try {
+    console.log("[Windows Update] Opening Windows Update settings");
+    exec("start ms-settings:windowsupdate", (error) => {
+      if (error) {
+        console.error("[Windows Update] Error opening settings:", error);
+      }
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("[IPC] Error opening Windows Update:", error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Add this to enable Skip Intro functionality in the UI (update the setting-item)
 
 // Add this function to read FPS from the dxvk.conf file
@@ -2378,19 +3766,16 @@ function initDiscord() {
 
     // Handle connection errors gracefully
     rpc.on("error", (error) => {
-      console.log(
-        "Discord RPC error (Discord may not be running):",
-        error.message
-      );
-      // Don't try to reconnect - Discord probably isn't running
+      // Only log if it's not a common "Discord not running" error
+      if (error.message !== "RPC_CONNECTION_TIMEOUT") {
+        console.log("Discord RPC error:", error.message);
+      }
       rpc = null;
     });
 
     // Connect with timeout to avoid hanging if Discord isn't running
     const connectionTimeout = setTimeout(() => {
-      console.log(
-        "Discord RPC connection timed out - Discord may not be running"
-      );
+      // Silent timeout - Discord is simply not running, which is normal
       rpc = null;
     }, 5000);
 
@@ -2402,7 +3787,10 @@ function initDiscord() {
       })
       .catch((error) => {
         clearTimeout(connectionTimeout);
-        console.log("Discord RPC connection failed:", error.message);
+        // Only log non-timeout errors
+        if (error.message !== "RPC_CONNECTION_TIMEOUT") {
+          console.log("Discord RPC connection failed:", error.message);
+        }
         rpc = null;
       });
   } catch (error) {
@@ -2431,7 +3819,7 @@ function updateDiscordActivity(playing) {
           },
           {
             label: "💬 Join Discord",
-            url: "https://discord.gg/BPcxwJwfKv",
+            url: "https://discord.gg/p9uzqbNPEK",
           },
         ],
         instance: false,
@@ -2450,7 +3838,7 @@ function updateDiscordActivity(playing) {
           },
           {
             label: "💬 Join Discord",
-            url: "https://discord.gg/BPcxwJwfKv",
+            url: "https://discord.gg/p9uzqbNPEK",
           },
         ],
         instance: false,
@@ -2547,70 +3935,72 @@ async function findGameInstallation() {
     path.join(app.getPath("appData"), "Shadowrun"),
   ];
 
-  console.log("Searching for Shadowrun installation...");
-
   // Check each location
   for (const location of possibleLocations) {
     if (fs.existsSync(path.join(location, "Shadowrun.exe"))) {
-      console.log(`Found Shadowrun installation at: ${location}`);
       return location;
     }
   }
 
-  console.log("Could not find Shadowrun installation in common locations");
   return null;
 }
 
-// Update the checkExistingInstallation function to ensure it properly reports status
+// Update the checkExistingInstallation function to check ALL dependencies
 async function checkExistingInstallation() {
   try {
-    // Try to find the game
+    // Check 1: Game files
     const foundLocation = await findGameInstallation();
+    const gameFilesExist = foundLocation !== null;
+
+    // Check 2: GFWL
+    const gfwlInstalled = await isGFWLInstalled();
+
+    // Check 3: DirectX 9+
+    const dx9Installed = await isDX9Installed();
+
+    // Game is only considered "ready to play" if ALL dependencies are met
+    const allDependenciesMet = gameFilesExist && gfwlInstalled && dx9Installed;
+
+    // Simple summary log (using plain text to avoid encoding issues)
+    console.log(
+      `[Install Check] Game: ${gameFilesExist ? "OK" : "MISSING"} | GFWL: ${
+        gfwlInstalled ? "OK" : "MISSING"
+      } | DirectX: ${dx9Installed ? "OK" : "MISSING"} | Status: ${
+        allDependenciesMet ? "READY" : "MISSING"
+      }`
+    );
 
     if (foundLocation) {
-      console.log(`Game found at ${foundLocation}, updating paths...`);
-
-      // Update the global path
+      // Update the global path even if dependencies are missing
       GAME_INSTALL_DIR = foundLocation;
-
-      // Update dependent paths
       RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
-
-      // Game is installed if we found the executable
-      const gameInstalled = true;
-
-      console.log(
-        `Game installation status: ${
-          gameInstalled ? "Installed" : "Not installed"
-        }`
-      );
-
-      // Send the status to the renderer process
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        console.log("Sending installation status to renderer:", gameInstalled);
-        mainWindow.webContents.send("game-installation-status", {
-          installed: gameInstalled,
-          path: GAME_INSTALL_DIR,
-        });
-      }
-
-      return gameInstalled;
-    } else {
-      console.log("Game not found, reporting as not installed");
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("game-installation-status", {
-          installed: false,
-          path: null,
-        });
-      }
-      return false;
     }
+
+    // Send the status to the renderer process
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("game-installation-status", {
+        installed: allDependenciesMet,
+        path: foundLocation,
+        dependencies: {
+          gameFiles: gameFilesExist,
+          gfwl: gfwlInstalled,
+          dx9: dx9Installed,
+        },
+      });
+    }
+
+    return allDependenciesMet;
   } catch (error) {
     console.error("Error checking installation:", error);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("game-installation-status", {
         installed: false,
         path: null,
+        dependencies: {
+          gameFiles: false,
+          gfwl: false,
+          dx9: false,
+        },
       });
     }
     return false;
@@ -3529,14 +4919,21 @@ ipcMain.handle("show-logs", () => {
 // AUTO-UPDATER IMPLEMENTATION
 // ========================================
 
+// Track whether the current check is manual (from button) or automatic (on startup)
+let isManualUpdateCheck = false;
+
 // Function to check for updates
-function checkForUpdates() {
+function checkForUpdates(manual = false) {
+  isManualUpdateCheck = manual;
+
   if (!mainWindow || mainWindow.isDestroyed()) {
     console.log("[Updater] Main window not ready, skipping update check");
     return;
   }
 
-  console.log("[Updater] Checking for updates...");
+  console.log(
+    `[Updater] Checking for updates... (${manual ? "MANUAL" : "AUTOMATIC"})`
+  );
   console.log("[Updater] Current version:", app.getVersion());
   console.log("[Updater] Update server:", UPDATE_SERVER_URL);
 
@@ -3552,14 +4949,33 @@ autoUpdater.on("update-available", (info) => {
   console.log("[Updater] Update available:", info.version);
   console.log("[Updater] Release notes:", info.releaseNotes);
 
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    // No window, start download anyway
+    autoUpdater.downloadUpdate();
+    return;
+  }
 
-  // Send update notification to renderer for custom styled dialog
-  mainWindow.webContents.send("show-update-dialog", {
-    version: info.version,
-    releaseNotes: info.releaseNotes,
-    currentVersion: app.getVersion(),
-  });
+  // If this is a manual check, show the full dialog
+  if (isManualUpdateCheck) {
+    console.log("[Updater] Manual check - showing dialog");
+    mainWindow.webContents.send("show-update-dialog", {
+      version: info.version,
+      releaseNotes: info.releaseNotes,
+      currentVersion: app.getVersion(),
+    });
+  } else {
+    // Automatic check - show minimal toast and auto-download
+    console.log("[Updater] Automatic check - silent download");
+    mainWindow.webContents.send("update-available-silent", {
+      version: info.version,
+      releaseNotes: info.releaseNotes,
+      currentVersion: app.getVersion(),
+    });
+
+    // Automatically start downloading in background
+    console.log("[Updater] Starting automatic background download...");
+    autoUpdater.downloadUpdate();
+  }
 });
 
 // When no update is available
@@ -3601,22 +5017,30 @@ autoUpdater.on("update-downloaded", (info) => {
 
   if (!mainWindow || mainWindow.isDestroyed()) {
     // If window is destroyed, just quit and install
-    autoUpdater.quitAndInstall(false, true);
+    autoUpdater.quitAndInstall(true, true);
     return;
   }
 
-  // Send update ready notification to renderer for custom dialog
-  mainWindow.webContents.send("update-ready-to-install", {
+  // Send toast notification to renderer
+  mainWindow.webContents.send("update-downloaded-silent", {
     version: info.version,
   });
 
-  // Auto-install after brief delay (one-click experience)
+  // Auto-install after brief delay (silent one-click install)
   setTimeout(() => {
-    console.log("[Updater] Auto-installing update...");
+    console.log("[Updater] Auto-installing update silently...");
+    if (gameProcess) {
+      console.log("[Updater] Closing game before update...");
+      try {
+        gameProcess.kill();
+      } catch (e) {
+        console.error("[Updater] Error closing game:", e);
+      }
+    }
     // quitAndInstall(isSilent, isForceRunAfter)
-    // false = not silent (show progress), true = force run after update
-    autoUpdater.quitAndInstall(false, true);
-  }, 2000); // 2 second delay so user sees the "Installing..." message
+    // true = silent install (no window), true = force run after update
+    autoUpdater.quitAndInstall(true, true);
+  }, 3000); // 3 second delay so user sees the toast
 
   /* OLD CODE - Required user to click "Restart Now"
   dialog
@@ -3804,8 +5228,8 @@ ipcMain.handle("check-for-updates", async () => {
       );
     }
 
-    // Production mode - check for normal updates
-    checkForUpdates();
+    // Production mode - check for normal updates (mark as manual)
+    checkForUpdates(true); // true = manual check
     return { success: true, devMode: false, rollback: false };
   } catch (error) {
     console.error("[Updater] Manual update check error:", error);

@@ -124,6 +124,17 @@ contextBridge.exposeInMainWorld("api", {
   // Add this to your exposed API
   restartAsAdmin: () => ipcRenderer.invoke("restart-as-admin"),
 
+  // Diagnostics and error handling methods
+  runDiagnostics: () => ipcRenderer.invoke("run-diagnostics"),
+  getGpuInfo: () => ipcRenderer.invoke("get-gpu-info"),
+  getSystemInfo: () => ipcRenderer.invoke("get-system-info"),
+  fixLicenseManager: () => ipcRenderer.invoke("fix-license-manager"),
+  restartXboxNetworking: () => ipcRenderer.invoke("restart-xbox-networking"),
+  checkDirectX: () => ipcRenderer.invoke("check-directx"),
+  checkGpuDrivers: () => ipcRenderer.invoke("check-gpu-drivers"),
+  runSfcScan: () => ipcRenderer.invoke("run-sfc-scan"),
+  openWindowsUpdate: () => ipcRenderer.invoke("open-windows-update"),
+
   // Auto-updater methods
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
@@ -160,6 +171,13 @@ contextBridge.exposeInMainWorld("api", {
   },
   onUpdateDownloadComplete: (callback) => {
     ipcRenderer.on("update-download-complete", callback);
+  },
+  // Silent update handlers
+  onUpdateAvailableSilent: (callback) => {
+    ipcRenderer.on("update-available-silent", (event, data) => callback(data));
+  },
+  onUpdateDownloadedSilent: (callback) => {
+    ipcRenderer.on("update-downloaded-silent", (event, data) => callback(data));
   },
 
   // For receiving messages from main (if you use them)

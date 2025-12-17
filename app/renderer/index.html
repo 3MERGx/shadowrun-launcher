@@ -253,7 +253,7 @@
         <div class="settings-section">
           <h3 class="settings-section-title">Advanced</h3>
 
-          <!-- Check for Updates Button (RECREATED FRESH) -->
+          <!-- Check for Updates Button -->
           <div class="setting-item">
             <div class="setting-label-group">
               <label>Check for Updates</label>
@@ -265,6 +265,82 @@
               Check for Updates
             </button>
           </div>
+
+          <!-- System Diagnostics Button -->
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>System Diagnostics</label>
+              <span class="setting-description"
+                >Troubleshoot common issues and check system health</span
+              >
+            </div>
+            <button id="openDiagnosticsButton" class="settings-action-button">
+              Open Diagnostics
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnostics screen (hidden by default) -->
+    <div id="diagnosticsScreen" class="settings-screen">
+      <div class="settings-header">
+        <h2>System Diagnostics</h2>
+        <button id="closeDiagnosticsButton" class="close-settings-button">
+          ×
+        </button>
+      </div>
+
+      <div class="settings-content">
+        <!-- Warning Notice -->
+        <div style="background: rgba(234, 179, 8, 0.1); border-left: 3px solid rgba(234, 179, 8, 0.6); padding: 8px 12px; margin-bottom: 16px; border-radius: 2px;">
+          <div style="font-size: 11px; color: #fbbf24;">
+            ⚠️ Use at your own risk.
+          </div>
+        </div>
+
+        <!-- Run All Diagnostics Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Quick Diagnostics</h3>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>Run System Check</label>
+              <span class="setting-description"
+                >Check DirectX, GPU drivers, and Windows services for common issues</span
+              >
+            </div>
+            <button id="runDiagnosticsButton" class="settings-action-button">
+              Run Diagnostics
+            </button>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-label-group" style="width: 100%;">
+              <label>System Information</label>
+              <div style="display: flex; gap: 16px; margin-top: 12px; align-items: flex-start;">
+                <div id="systemInfoDisplay" style="flex: 1; font-size: 12px;">
+                  <div style="margin-bottom: 6px;"><strong style="color: #60a5fa; min-width: 50px; display: inline-block;">GPU:</strong> <span id="gpuInfo" style="color: #e5e7eb;">Detecting...</span></div>
+                  <div style="margin-bottom: 6px;"><strong style="color: #60a5fa; min-width: 50px; display: inline-block;">CPU:</strong> <span id="cpuInfo" style="color: #e5e7eb;">Detecting...</span></div>
+                  <div style="margin-bottom: 6px;"><strong style="color: #60a5fa; min-width: 50px; display: inline-block;">OS:</strong> <span id="osInfo" style="color: #e5e7eb;">Detecting...</span></div>
+                  <div><strong style="color: #10b981; min-width: 50px; display: inline-block;">NAT:</strong> <span id="natInfo" style="color: #e5e7eb;">Detecting...</span></div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  <button id="detectSystemButton" class="settings-action-button" style="white-space: nowrap; min-width: 140px;">
+                    Detect System
+                  </button>
+                  <button id="copySystemInfoButton" class="settings-action-button" style="white-space: nowrap; min-width: 140px;">
+                    Copy to Clipboard
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PCID Management Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">PCID Management</h3>
 
           <div class="setting-item">
             <div class="setting-label-group">
@@ -280,7 +356,7 @@
                 class="settings-action-button"
                 onclick="handlePcidBackupClick()"
               >
-                Backup Current PCID
+                Backup PCID
               </button>
               <div id="pcidBackupFeedback" class="setting-progress-indicator">
                 <div class="progress-spinner-row">
@@ -290,6 +366,64 @@
                 <div id="currentPcidDisplay" class="current-pcid-display"></div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Error Fixes Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Common Error Fixes</h3>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>Fix License Manager Error</label>
+              <span class="setting-description"
+                >Fixes error 0x80072746 by starting Windows License Manager Service</span
+              >
+            </div>
+            <button id="fixLicenseManagerButton" class="settings-action-button">
+              Fix License Manager
+            </button>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>Restart Xbox Live Networking</label>
+              <span class="setting-description"
+                >Restarts Xbox Live Networking Service to fix connection issues</span
+              >
+            </div>
+            <button id="restartXboxNetworkingButton" class="settings-action-button">
+              Restart Service
+            </button>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>System File Checker</label>
+              <span class="setting-description"
+                >Runs Windows SFC scan to fix corrupted system files (fixes errors 1603/1722)</span
+              >
+            </div>
+            <button id="runSfcScanButton" class="settings-action-button">
+              Run SFC Scan
+            </button>
+          </div>
+        </div>
+
+        <!-- Driver Updates Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Driver Updates</h3>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>Update GPU Drivers</label>
+              <span class="setting-description"
+                >Opens Windows Update to install optional driver updates</span
+              >
+            </div>
+            <button id="openWindowsUpdateButton" class="settings-action-button">
+              Open Windows Update
+            </button>
           </div>
         </div>
       </div>
