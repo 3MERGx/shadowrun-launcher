@@ -14,6 +14,10 @@ const playerTracker = require("./utils/playerTracking");
 const { spawn } = require("child_process");
 const { autoUpdater } = require("electron-updater");
 
+// Fix Electron cache permission errors
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+app.commandLine.appendSwitch('disk-cache-size', '0');
+
 // Simplified logging utility
 const log = {
   info: (message) => console.log(message),
