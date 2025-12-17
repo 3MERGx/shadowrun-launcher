@@ -78,13 +78,8 @@ const registryUtils = {
             )
           );
           if (match && match[1]) {
-            console.log(`Found PCID value line: ${stdout.trim()}`);
-            console.log(`Extracted PCID hex value: ${match[1]}`);
             resolve(match[1]);
           } else {
-            console.warn(
-              `PCID value not found or in unexpected format in stdout: ${stdout}`
-            );
             resolve(null);
           }
         }
@@ -168,18 +163,14 @@ const registryUtils = {
   // Convert decimal to hex format
   decimalToHexFormat: (value) => {
     try {
-      console.log("Converting value to hex format:", value);
-
       // Check if the value is already a hex string (contains letters a-f)
       const isAlreadyHex = /[a-f]/i.test(value);
 
       let hexString;
       if (isAlreadyHex) {
-        console.log("Value is already in hex format");
         // Remove 0x prefix if present
         hexString = value.replace(/^0x/, "");
       } else {
-        console.log("Converting from decimal to hex");
         // Convert from decimal to hex
         hexString = BigInt(value).toString(16);
       }
@@ -189,8 +180,6 @@ const registryUtils = {
         hexString = "0" + hexString;
       }
 
-      console.log("Hex string:", hexString);
-
       // Create pairs in the correct order (little-endian format)
       const pairs = [];
       for (let i = 0; i < hexString.length; i += 2) {
@@ -199,7 +188,6 @@ const registryUtils = {
       }
 
       const result = pairs.join(",");
-      console.log("Formatted hex result:", result);
       return result;
     } catch (error) {
       console.error("Error in decimalToHexFormat:", error);
@@ -211,55 +199,37 @@ const registryUtils = {
   // Add this function to get the backup PCID
   getSrPcidBackupFromRegistry: () => {
     return new Promise((resolve) => {
-      console.log("Checking for SRPCIDBACKUP in registry...");
-
       exec(
         `reg query "${REGISTRY_PATH_XLIVE}" /v "${PCID_BACKUP_VALUE_NAME}"`,
         (error, stdout) => {
           if (error) {
-            console.error("Error querying SRPCIDBACKUP:", error.message);
             resolve(null);
             return;
           }
 
-          console.log("Registry query output:", stdout);
-
           if (!stdout.includes(PCID_BACKUP_VALUE_NAME)) {
-            console.log("SRPCIDBACKUP not found in registry output");
             resolve(null);
             return;
           }
 
           try {
-            // Extract the decimal value from the output
             const lines = stdout.split("\n");
-            console.log("Split lines:", lines);
-
             const valueLine = lines.find((line) =>
               line.trim().startsWith(PCID_BACKUP_VALUE_NAME)
             );
 
-            console.log("Found value line:", valueLine);
-
             if (valueLine) {
               const parts = valueLine.trim().split(/\s+/).filter(Boolean);
-              console.log("Parts:", parts);
 
               if (parts.length >= 3) {
                 const hexValue = parts[parts.length - 1].replace("0x", "");
-                console.log("Extracted hex value:", hexValue);
-
-                // Convert to the format needed
                 const backupPcid = registryUtils.decimalToHexFormat(hexValue);
-                console.log("Formatted backup PCID:", backupPcid);
                 resolve(backupPcid);
                 return;
               }
             }
-            console.log("Could not parse SRPCIDBACKUP value");
             resolve(null);
           } catch (e) {
-            console.error("Error parsing backup PCID:", e);
             resolve(null);
           }
         }

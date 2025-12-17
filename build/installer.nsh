@@ -2,6 +2,10 @@
 ; Simple customization for shortcuts
 
 !include "MUI2.nsh"
+!include "FileFunc.nsh"
+
+; Insert GetParent function
+!insertmacro GetParent
 
 ; Variables for shortcut selection
 Var Dialog
@@ -60,5 +64,38 @@ FunctionEnd
 !macro customInit
     ; Force current user installation only
     SetShellVarContext current
+    
+    ; Automatically uninstall previous versions
+    Call UninstallPreviousVersion
 !macroend
+
+; Function to uninstall previous version
+Function UninstallPreviousVersion
+    Push $0
+    Push $1
+    Push $2
+    
+    ; Check if a previous version is installed (look for uninstaller)
+    ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "UninstallString"
+    
+    ${If} $0 != ""
+        DetailPrint "Found previous installation, uninstalling..."
+        
+        ; Extract the uninstaller path (remove quotes if present)
+        ${GetParent} $0 $1
+        
+        ; Run the uninstaller silently
+        ExecWait '"$0" /S _?=$1' $2
+        
+        ; Clean up any remaining files
+        Delete "$0"
+        RMDir "$1"
+        
+        DetailPrint "Previous version uninstalled"
+    ${EndIf}
+    
+    Pop $2
+    Pop $1
+    Pop $0
+FunctionEnd
 

@@ -229,7 +229,15 @@ body::after {
 
 .settings-content {
   padding: 16px 20px 32px 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: calc(85vh - 60px);
+}
+
+/* Settings window specifically should not scroll (fewer items) */
+#settingsScreen .settings-content {
   overflow: hidden;
+  max-height: none;
 }
 
 .settings-section {
@@ -1439,7 +1447,7 @@ button:focus {
   background-color: #2d3748;
 }
 
-/* Custom Update Dialog Styles */
+/* Custom Update Dialog Styles - Matches Settings Window */
 .update-dialog-overlay {
   display: none;
   position: fixed;
@@ -1447,8 +1455,8 @@ button:focus {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(3px);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
   z-index: 10000;
   align-items: center;
   justify-content: center;
@@ -1459,15 +1467,16 @@ button:focus {
 }
 
 .update-dialog {
-  background: #1a1a2e;
-  border-radius: 12px;
+  background-color: rgba(30, 41, 59, 0.95);
+  border-radius: 8px;
   padding: 0;
-  max-width: 450px;
+  max-width: 500px;
   width: 90%;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 107, 0, 0.4);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  border: none;
   overflow: hidden;
   animation: slideIn 0.3s ease-out;
+  backdrop-filter: blur(8px);
 }
 
 @keyframes slideIn {
@@ -1482,14 +1491,14 @@ button:focus {
 }
 
 .update-dialog-header {
-  background: rgba(255, 107, 0, 0.1);
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 107, 0, 0.3);
+  background-color: rgba(15, 23, 42, 0.8);
+  padding: 15px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .update-dialog-header h2 {
   margin: 0;
-  color: #ff6b00;
+  color: #ffffff;
   font-size: 18px;
   font-weight: 600;
 }
@@ -1525,13 +1534,13 @@ button:focus {
 }
 
 .version-new {
-  border-color: rgba(255, 107, 0, 0.3);
-  background: rgba(255, 107, 0, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .version-label {
   font-size: 11px;
-  color: #888;
+  color: #94a3b8;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 6px;
@@ -1544,12 +1553,12 @@ button:focus {
 }
 
 .version-new .version-number {
-  color: #ff6b00;
+  color: #3b82f6;
 }
 
 .version-arrow {
   font-size: 32px;
-  color: #ff6b00;
+  color: #3b82f6;
   font-weight: bold;
 }
 
@@ -1598,27 +1607,27 @@ button:focus {
 }
 
 .update-release-notes::-webkit-scrollbar-thumb {
-  background: rgba(255, 107, 0, 0.5);
+  background: rgba(59, 130, 246, 0.5);
   border-radius: 4px;
 }
 
 .update-release-notes::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 107, 0, 0.7);
+  background: rgba(59, 130, 246, 0.7);
 }
 
 .update-dialog-actions {
   display: flex;
   gap: 12px;
   padding: 16px 20px;
-  background: rgba(0, 0, 0, 0.15);
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(15, 23, 42, 0.8);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .update-button {
   flex: 1;
   padding: 12px 20px;
-  border-radius: 8px;
-  font-size: 16px;
+  border-radius: 6px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1626,29 +1635,30 @@ button:focus {
 }
 
 .update-button-secondary {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .update-button-secondary:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
 }
 
 .update-button-primary {
-  background: linear-gradient(90deg, #ff6b00 0%, #ff8533 100%);
+  background: #3b82f6;
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(255, 107, 0, 0.4);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
 .update-button-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(255, 107, 0, 0.6);
+  background: #2563eb;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
 .update-button-primary:active {
-  transform: translateY(0);
+  transform: scale(0.98);
 }
 
 /* Rollback Dialog Specific Styles */
@@ -1792,4 +1802,26 @@ button:focus {
 .toast-close:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #ffffff;
+}
+
+/* Update toast with progress bar */
+.update-toast {
+  min-width: 350px;
+}
+
+.toast-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.toast-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff6b00 0%, #ff8533 100%);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 10px rgba(255, 107, 0, 0.5);
 }

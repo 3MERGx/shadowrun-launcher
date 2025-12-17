@@ -1,7 +1,7 @@
 {
   "name": "shadowrun-fps-launcher",
   "productName": "Shadowrun FPS Launcher",
-  "version": "0.9.3",
+  "version": "0.9.5",
   "repository": {
     "type": "git",
     "url": "https://github.com/3MERGx/shadowrun-launcher.git"
@@ -101,7 +101,8 @@
       "menuCategory": true,
       "shortcutName": "Shadowrun FPS Launcher",
       "include": "build/installer.nsh",
-      "warningsAsErrors": false
+      "warningsAsErrors": false,
+      "guid": "d3f14c58-8b2e-4a3d-9f7c-1e4b2c3a5d6e"
     },
     "publish": {
       "provider": "generic",
