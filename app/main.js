@@ -15,8 +15,8 @@ const { spawn } = require("child_process");
 const { autoUpdater } = require("electron-updater");
 
 // Fix Electron cache permission errors
-app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
-app.commandLine.appendSwitch('disk-cache-size', '0');
+app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+app.commandLine.appendSwitch("disk-cache-size", "0");
 
 // Simplified logging utility
 const log = {
@@ -390,6 +390,287 @@ function createWindow() {
   });
 }
 
+// Create custom themed activation success dialog
+function showActivationSuccessDialog(productKey, clearAfterSeconds) {
+  const iconPath = path.join(__dirname, "assets/icon2.ico");
+
+  const activationDialog = new BrowserWindow({
+    width: 700,
+    height: 340,
+    frame: false,
+    transparent: false,
+    parent: mainWindow,
+    modal: true,
+    resizable: false,
+    backgroundColor: "#1e293b",
+    icon: iconPath,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
+
+  // Build the custom HTML for the dialog
+  const dialogHTML = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #ffffff;
+      overflow: hidden;
+      user-select: none;
+    }
+    .dialog-container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .dialog-header {
+      background: rgba(15, 23, 42, 0.9);
+      padding: 20px;
+      border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: relative;
+    }
+    .success-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
+      50% { box-shadow: 0 0 30px rgba(16, 185, 129, 0.8); }
+    }
+    .dialog-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #ffffff;
+      flex: 1;
+    }
+    .close-button {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 24px;
+      height: 24px;
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+    .close-button:hover {
+      color: #ffffff;
+      transform: scale(1.1);
+    }
+    .dialog-content {
+      flex: 1;
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+    }
+    .key-container {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      position: relative;
+    }
+    .key-label {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+    .key-value-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    .key-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #3b82f6;
+      font-family: "Courier New", monospace;
+      letter-spacing: 2px;
+      text-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+      white-space: nowrap;
+    }
+    .copy-button {
+      width: 36px;
+      height: 36px;
+      background: rgba(59, 130, 246, 0.2);
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      border-radius: 6px;
+      color: #3b82f6;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+    .copy-button:hover {
+      background: rgba(59, 130, 246, 0.3);
+      border-color: rgba(59, 130, 246, 0.6);
+      transform: scale(1.05);
+    }
+    .copy-button:active {
+      transform: scale(0.95);
+    }
+    .copy-button svg {
+      width: 18px;
+      height: 18px;
+    }
+    .info-text {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.7);
+      text-align: center;
+      line-height: 1.6;
+    }
+    .timer-text {
+      font-size: 12px;
+      color: rgba(251, 191, 36, 0.9);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .dialog-footer {
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.8);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: center;
+    }
+    .ok-button {
+      background: #3b82f6;
+      color: #ffffff;
+      border: none;
+      padding: 12px 40px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+    .ok-button:hover {
+      background: #2563eb;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
+      transform: translateY(-1px);
+    }
+    .ok-button:active {
+      transform: translateY(0);
+    }
+    .copied-feedback {
+      position: absolute;
+      top: -30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(16, 185, 129, 0.9);
+      color: white;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .copied-feedback.show {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="dialog-container">
+    <div class="dialog-header">
+      <div class="success-icon">✓</div>
+      <div class="dialog-title">Activation Successful</div>
+      <button class="close-button" onclick="window.close()">×</button>
+    </div>
+    <div class="dialog-content">
+      <div class="key-container">
+        <div class="copied-feedback" id="copiedFeedback">Copied!</div>
+        <div class="key-label">Product Key (Copied to Clipboard)</div>
+        <div class="key-value-row">
+          <div class="key-value">${productKey}</div>
+          <button class="copy-button" onclick="copyKey()" title="Copy key again">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="info-text">
+        The key is in your clipboard. Paste it (Ctrl+V) into the game if needed.
+      </div>
+      <div class="timer-text">
+        <span>🔒</span>
+        <span>Key will auto-clear from clipboard in ${clearAfterSeconds} seconds</span>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="ok-button" onclick="window.close()">OK</button>
+    </div>
+  </div>
+  <script>
+    function copyKey() {
+      navigator.clipboard.writeText('${productKey}').then(() => {
+        const feedback = document.getElementById('copiedFeedback');
+        feedback.classList.add('show');
+        setTimeout(() => {
+          feedback.classList.remove('show');
+        }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>`;
+
+  activationDialog.loadURL(
+    "data:text/html;charset=utf-8," + encodeURIComponent(dialogHTML)
+  );
+
+  activationDialog.once("ready-to-show", () => {
+    activationDialog.show();
+  });
+
+  activationDialog.on("closed", () => {
+    // Dialog closed
+  });
+}
+
 // Only enable Discord RPC if we find the module
 function setupDiscordIntegration() {
   try {
@@ -705,14 +986,7 @@ async function launchGameLogic(gameSettings, source = "unknown") {
                 console.log("[Game Close] Restoring original PCID...");
                 await restoreOriginalPcid();
                 console.log("[Game Close] ✅ PCID restored");
-
-                // Notify user
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                  mainWindow.webContents.send("show-notification", {
-                    message: "✅ Original PCID automatically restored",
-                    type: "success",
-                  });
-                }
+                // Toast notification removed per user request
               }
             }
           }
@@ -1505,6 +1779,211 @@ async function checkDotNetFramework() {
   });
 }
 
+// Check .NET 6.0 Desktop Runtime x86 (required for XLiveActivateHelper.exe)
+async function checkDotNet6x86Runtime() {
+  return new Promise((resolve) => {
+    // Check for .NET 6.0 Desktop Runtime x86 in registry
+    // Path: HKLM\SOFTWARE\WOW6432Node\dotnet\Setup\InstalledVersions\x86\sharedhost (on 64-bit)
+    // Path: HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x86\sharedhost (on 32-bit)
+
+    // Check if running on 64-bit Windows first
+    exec(
+      'reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment" /v PROCESSOR_ARCHITECTURE',
+      (error, stdout) => {
+        const is64bit = stdout && stdout.includes("AMD64");
+        const registryPath = is64bit
+          ? "HKLM\\SOFTWARE\\WOW6432Node\\dotnet\\Setup\\InstalledVersions\\x86\\sharedhost"
+          : "HKLM\\SOFTWARE\\dotnet\\Setup\\InstalledVersions\\x86\\sharedhost";
+
+        exec(`reg query "${registryPath}" /v Version`, (error, stdout) => {
+          if (error || !stdout) {
+            resolve({ installed: false, version: "Not Installed" });
+            return;
+          }
+
+          // Extract version from registry output
+          const versionMatch = stdout.match(/Version\s+REG_SZ\s+([\d.]+)/);
+          if (versionMatch && versionMatch[1]) {
+            resolve({ installed: true, version: versionMatch[1] });
+          } else {
+            resolve({ installed: false, version: "Not Installed" });
+          }
+        });
+      }
+    );
+  });
+}
+
+// Download and install .NET 6.0 Desktop Runtime x86 silently
+async function downloadAndInstallDotNet6() {
+  return new Promise(async (resolve) => {
+    try {
+      console.log("[.NET 6.0 Installer] Starting download and installation...");
+
+      // .NET 6.0 Desktop Runtime x86 (32-bit) - Latest LTS
+      const DOTNET6_URL =
+        "https://download.visualstudio.microsoft.com/download/pr/bf0c50ea-2394-40af-a5a7-6cee0cef5572/31d359c30ff370525e06e43f92ab26aa/windowsdesktop-runtime-6.0.36-win-x86.exe";
+      const installerPath = path.join(os.tmpdir(), "dotnet6-installer.exe");
+
+      // Show progress message to user
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("show-notification", {
+          message: "⬇️ Downloading .NET 6.0 Runtime...",
+          type: "info",
+        });
+      }
+
+      console.log("[.NET 6.0 Installer] Downloading from Microsoft CDN...");
+      console.log(`[.NET 6.0 Installer] Destination: ${installerPath}`);
+
+      // Download the installer
+      const downloadSuccess = await new Promise((downloadResolve) => {
+        const file = fs.createWriteStream(installerPath);
+        const request = https.get(DOTNET6_URL, (response) => {
+          if (response.statusCode !== 200) {
+            console.error(
+              `[.NET 6.0 Installer] Download failed: HTTP ${response.statusCode}`
+            );
+            downloadResolve(false);
+            return;
+          }
+
+          const totalSize = parseInt(response.headers["content-length"], 10);
+          let downloadedSize = 0;
+
+          response.on("data", (chunk) => {
+            downloadedSize += chunk.length;
+            const progress = Math.round((downloadedSize / totalSize) * 100);
+
+            // Log progress every 10%
+            if (progress % 10 === 0) {
+              console.log(
+                `[.NET 6.0 Installer] Download progress: ${progress}%`
+              );
+            }
+          });
+
+          response.pipe(file);
+
+          file.on("finish", () => {
+            file.close(() => {
+              console.log("[.NET 6.0 Installer] ✅ Download complete");
+              downloadResolve(true);
+            });
+          });
+        });
+
+        request.on("error", (error) => {
+          console.error(
+            `[.NET 6.0 Installer] Download error: ${error.message}`
+          );
+          fs.unlink(installerPath, () => {});
+          downloadResolve(false);
+        });
+
+        file.on("error", (error) => {
+          console.error(
+            `[.NET 6.0 Installer] File write error: ${error.message}`
+          );
+          fs.unlink(installerPath, () => {});
+          downloadResolve(false);
+        });
+      });
+
+      if (!downloadSuccess) {
+        resolve({
+          success: false,
+          error: "Failed to download .NET 6.0 installer",
+        });
+        return;
+      }
+
+      // Show installation message
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("show-notification", {
+          message: "⚙️ Installing .NET 6.0 Runtime (1-2 min)...",
+          type: "info",
+        });
+      }
+
+      console.log("[.NET 6.0 Installer] Starting silent installation...");
+      console.log(
+        "[.NET 6.0 Installer] Running installer with /install /quiet /norestart flags..."
+      );
+
+      // Run installer silently
+      exec(
+        `"${installerPath}" /install /quiet /norestart`,
+        { timeout: 300000 }, // 5 minute timeout
+        (error, stdout, stderr) => {
+          // Clean up installer file
+          try {
+            fs.unlinkSync(installerPath);
+            console.log("[.NET 6.0 Installer] Cleaned up installer file");
+          } catch (cleanupError) {
+            // Ignore cleanup errors
+          }
+
+          if (error) {
+            console.error(
+              `[.NET 6.0 Installer] Installation error: ${error.message}`
+            );
+            console.error(`[.NET 6.0 Installer] Exit code: ${error.code}`);
+
+            // Check if it's a "success with reboot required" code
+            if (error.code === 1641 || error.code === 3010) {
+              console.log(
+                "[.NET 6.0 Installer] ✅ Installation succeeded (reboot recommended but not required)"
+              );
+
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send("show-notification", {
+                  message: "✅ .NET 6.0 installed successfully!",
+                  type: "success",
+                });
+              }
+
+              resolve({ success: true, rebootRecommended: true });
+            } else {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send("show-notification", {
+                  message: "❌ .NET 6.0 installation failed",
+                  type: "error",
+                });
+              }
+
+              resolve({
+                success: false,
+                error: `Installation failed with exit code ${error.code}`,
+              });
+            }
+            return;
+          }
+
+          console.log(
+            "[.NET 6.0 Installer] ✅ Installation completed successfully"
+          );
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("show-notification", {
+              message: "✅ .NET 6.0 installed successfully!",
+              type: "success",
+            });
+          }
+
+          resolve({ success: true });
+        }
+      );
+    } catch (error) {
+      console.error(`[.NET 6.0 Installer] Unexpected error: ${error.message}`);
+      resolve({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+}
+
 // Comprehensive pre-launch diagnostics
 async function runPreLaunchDiagnostics() {
   console.log("\n========================================");
@@ -1814,9 +2293,16 @@ ipcMain.handle("download-game", async () => {
         "📥 Downloading Games for Windows Live (required for online play)..."
       );
 
-      const gfwlSuccess = await downloadFile(GFWL_URL, gfwlPath, (progress) => {
-        mainWindow.webContents.send("gfwl-progress", progress);
-      });
+      const gfwlSuccess = await downloadFile(
+        GFWL_URL,
+        gfwlPath,
+        (progress, statusMessage) => {
+          mainWindow.webContents.send("gfwl-progress", progress);
+          if (statusMessage) {
+            mainWindow.webContents.send("download-message", statusMessage);
+          }
+        }
+      );
 
       if (cancelDownloadRequested) {
         downloadInProgress = false;
@@ -1903,9 +2389,16 @@ ipcMain.handle("download-game", async () => {
         "📥 Downloading DirectX 9 (required graphics library)..."
       );
 
-      const dx9Success = await downloadFile(DX9_URL, dx9Path, (progress) => {
-        mainWindow.webContents.send("dx-progress", progress);
-      });
+      const dx9Success = await downloadFile(
+        DX9_URL,
+        dx9Path,
+        (progress, statusMessage) => {
+          mainWindow.webContents.send("dx-progress", progress);
+          if (statusMessage) {
+            mainWindow.webContents.send("download-message", statusMessage);
+          }
+        }
+      );
 
       if (cancelDownloadRequested) {
         downloadInProgress = false;
@@ -2225,8 +2718,11 @@ try {
       const gameFilesSuccess = await downloadFile(
         GAME_FILES_URL,
         gameFilesPath,
-        (progress) => {
+        (progress, statusMessage) => {
           mainWindow.webContents.send("game-files-progress", progress);
+          if (statusMessage) {
+            mainWindow.webContents.send("download-message", statusMessage);
+          }
         }
       );
 
@@ -2277,6 +2773,40 @@ try {
         console.log(
           `[Download] Extraction completed, result: ${extractSuccess}`
         );
+
+        // Check if extraction created a nested "build" folder
+        const nestedBuildPath = path.join(GAME_INSTALL_DIR, "build");
+        if (fs.existsSync(nestedBuildPath)) {
+          console.log(
+            "[Download] Detected nested 'build' folder, moving contents up one level..."
+          );
+
+          // Move all files from nested build folder to root
+          const files = fs.readdirSync(nestedBuildPath);
+          for (const file of files) {
+            const srcPath = path.join(nestedBuildPath, file);
+            const destPath = path.join(GAME_INSTALL_DIR, file);
+
+            // Skip if file already exists at destination
+            if (!fs.existsSync(destPath)) {
+              console.log(`[Download] Moving: ${file}`);
+              fs.renameSync(srcPath, destPath);
+            } else {
+              console.log(`[Download] Skipping existing file: ${file}`);
+            }
+          }
+
+          // Remove the now-empty nested build folder
+          try {
+            fs.rmdirSync(nestedBuildPath);
+            console.log("[Download] Removed nested build folder");
+          } catch (rmdirError) {
+            console.warn(
+              "[Download] Could not remove nested build folder (may not be empty):",
+              rmdirError.message
+            );
+          }
+        }
       } catch (extractError) {
         console.error("[Download] Extraction threw an error:", extractError);
         extractSuccess = false;
@@ -2455,10 +2985,17 @@ async function runInstaller(installerPath) {
 async function downloadFile(url, destination, progressCallback) {
   return new Promise((resolve) => {
     console.log(`Downloading file from ${url} to ${destination}`);
+
+    // Report "connecting" immediately
+    if (progressCallback) {
+      progressCallback(0, "Connecting to server...");
+    }
+
     const file = fs.createWriteStream(destination);
     let isCancelled = false;
     let isFinished = false;
     let isResolved = false;
+    let firstChunkReceived = false;
 
     // Helper to safely resolve
     const safeResolve = (success) => {
@@ -2473,8 +3010,29 @@ async function downloadFile(url, destination, progressCallback) {
     const request = httpModule.get(url, (response) => {
       console.log(`Download response status: ${response.statusCode}`);
 
+      // Report that connection established
+      if (progressCallback && response.statusCode === 200) {
+        progressCallback(0, "Download starting...");
+      }
+
+      // Set up a timeout warning if first chunk takes too long
+      const firstChunkTimeout = setTimeout(() => {
+        if (!firstChunkReceived && !isCancelled && !isFinished) {
+          console.warn(
+            `[Download] Warning: No data received after 10 seconds. Server may be slow or preparing large file.`
+          );
+          if (progressCallback) {
+            progressCallback(
+              0,
+              "Waiting for server response... (this may take a minute for large files)"
+            );
+          }
+        }
+      }, 10000); // 10 second warning
+
       // Helper to cleanup streams (defined inside callback to access response)
       const cleanup = () => {
+        clearTimeout(firstChunkTimeout);
         if (!isFinished) {
           try {
             response.destroy();
@@ -2510,6 +3068,22 @@ async function downloadFile(url, destination, progressCallback) {
 
       // Manually handle data chunks for better cancellation control
       response.on("data", (chunk) => {
+        // Log first chunk arrival
+        if (!firstChunkReceived) {
+          firstChunkReceived = true;
+          clearTimeout(firstChunkTimeout);
+          console.log(
+            `[Download] First data chunk received (${chunk.length} bytes)`
+          );
+          console.log(
+            `[Download] Total file size: ${totalSize} bytes (${(
+              totalSize /
+              1024 /
+              1024
+            ).toFixed(2)} MB)`
+          );
+        }
+
         // Check if download was cancelled
         if (cancelDownloadRequested && !isCancelled) {
           isCancelled = true;
@@ -2537,7 +3111,12 @@ async function downloadFile(url, destination, progressCallback) {
           // Calculate and report progress if callback provided
           if (progressCallback && totalSize) {
             const percent = Math.floor((downloadedSize / totalSize) * 100);
-            progressCallback(percent);
+            const mbDownloaded = (downloadedSize / 1024 / 1024).toFixed(2);
+            const mbTotal = (totalSize / 1024 / 1024).toFixed(2);
+            progressCallback(
+              percent,
+              `Downloading: ${mbDownloaded} MB / ${mbTotal} MB`
+            );
           }
         } catch (err) {
           if (!isCancelled) {
@@ -2732,14 +3311,212 @@ function getHttpModule(url) {
   return url.startsWith("https:") ? https : http;
 }
 
-ipcMain.handle("activate-game", async () => {
-  const PRODUCT_KEY = "R9GJT-87T6K-6KV49-XTX8G-6VBWW";
+// Validation function for activation key entries (1 key with multiple PCIDs)
+function validateActivationKey(keyEntry, index) {
+  const errors = [];
 
+  // Validate ID
+  if (typeof keyEntry.id !== "number") {
+    errors.push(`Key ${index + 1}: 'id' must be a number`);
+  }
+
+  // Validate name (optional, but if present must be string)
+  if (keyEntry.name !== undefined && typeof keyEntry.name !== "string") {
+    errors.push(`Key ${index + 1}: 'name' must be a string if provided`);
+  }
+
+  // Validate product key format (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX)
+  if (!keyEntry.productKey || typeof keyEntry.productKey !== "string") {
+    errors.push(
+      `Key ${index + 1}: 'productKey' is required and must be a string`
+    );
+  } else if (
+    !/^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$/i.test(
+      keyEntry.productKey
+    )
+  ) {
+    errors.push(
+      `Key ${
+        index + 1
+      }: 'productKey' must follow format XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`
+    );
+  }
+
+  // Validate PCIDs array
+  if (!keyEntry.pcids || !Array.isArray(keyEntry.pcids)) {
+    errors.push(`Key ${index + 1}: 'pcids' must be an array`);
+  } else {
+    if (keyEntry.pcids.length === 0) {
+      errors.push(`Key ${index + 1}: 'pcids' array cannot be empty`);
+    } else if (keyEntry.pcids.length > 15) {
+      errors.push(
+        `Key ${index + 1}: 'pcids' array cannot have more than 15 PCIDs (got ${
+          keyEntry.pcids.length
+        })`
+      );
+    }
+
+    // Validate each PCID format
+    keyEntry.pcids.forEach((pcid, pcidIndex) => {
+      if (typeof pcid !== "string") {
+        errors.push(
+          `Key ${index + 1}, PCID ${pcidIndex + 1}: must be a string`
+        );
+      } else if (!/^[0-9A-Fa-f]{16}$/.test(pcid)) {
+        errors.push(
+          `Key ${index + 1}, PCID ${
+            pcidIndex + 1
+          }: must be exactly 16 hexadecimal characters (got: '${pcid}')`
+        );
+      }
+    });
+
+    // Check for duplicate PCIDs within this key entry
+    const uniquePcids = [...new Set(keyEntry.pcids)];
+    if (uniquePcids.length !== keyEntry.pcids.length) {
+      errors.push(`Key ${index + 1}: contains duplicate PCIDs`);
+    }
+  }
+
+  return errors;
+}
+
+ipcMain.handle("activate-game", async () => {
   try {
+    // Load activation keys configuration
+    const configPath = path.join(
+      app.getAppPath(),
+      "app",
+      "config",
+      "activationKeys.json"
+    );
+    let activationConfig;
+
+    try {
+      const configData = fs.readFileSync(configPath, "utf8");
+      activationConfig = JSON.parse(configData);
+    } catch (configError) {
+      console.error(
+        "[Activation] Failed to load activation keys config:",
+        configError
+      );
+      dialog.showMessageBox(mainWindow, {
+        type: "error",
+        title: "Configuration Error",
+        message: "Failed to Load Activation Keys",
+        detail:
+          "Could not load the activation keys configuration file. Please check that app/config/activationKeys.json exists.",
+        buttons: ["OK"],
+      });
+      return { success: false, error: "Failed to load activation config" };
+    }
+
+    // Validate configuration structure
+    if (
+      !activationConfig.activationKeys ||
+      !Array.isArray(activationConfig.activationKeys)
+    ) {
+      console.error(
+        "[Activation] Invalid config: activationKeys must be an array"
+      );
+      dialog.showMessageBox(mainWindow, {
+        type: "error",
+        title: "Configuration Error",
+        message: "Invalid Activation Keys Configuration",
+        detail: 'The configuration file is missing the "activationKeys" array.',
+        buttons: ["OK"],
+      });
+      return { success: false, error: "Invalid config structure" };
+    }
+
+    if (activationConfig.activationKeys.length === 0) {
+      console.error("[Activation] No activation keys defined in config");
+      dialog.showMessageBox(mainWindow, {
+        type: "error",
+        title: "Configuration Error",
+        message: "No Activation Keys Configured",
+        detail: "The configuration file does not contain any activation keys.",
+        buttons: ["OK"],
+      });
+      return { success: false, error: "No activation keys configured" };
+    }
+
+    // Validate each activation key entry
+    const allErrors = [];
+    activationConfig.activationKeys.forEach((keyEntry, index) => {
+      const errors = validateActivationKey(keyEntry, index);
+      allErrors.push(...errors);
+    });
+
+    if (allErrors.length > 0) {
+      console.error("[Activation] Validation errors:", allErrors);
+      dialog.showMessageBox(mainWindow, {
+        type: "error",
+        title: "Configuration Validation Failed",
+        message: "Invalid Activation Key Data",
+        detail:
+          "The following validation errors were found:\n\n" +
+          allErrors.join("\n"),
+        buttons: ["OK"],
+      });
+      return { success: false, error: "Config validation failed" };
+    }
+
+    // Count total available PCIDs across all keys
+    const totalPcids = activationConfig.activationKeys.reduce(
+      (sum, key) => sum + key.pcids.length,
+      0
+    );
+    console.log(
+      `[Activation] Loaded ${activationConfig.activationKeys.length} activation key(s) with ${totalPcids} total PCID(s)`
+    );
+
+    // Log all available keys
+    activationConfig.activationKeys.forEach((key, idx) => {
+      console.log(
+        `[Activation]   Key ${idx + 1}: ID=${key.id}, PCIDs=${
+          key.pcids.length
+        }${key.name ? `, Name="${key.name}"` : ""}`
+      );
+    });
+
+    // RANDOMLY SELECT an activation key
+    const randomKeyIndex = Math.floor(
+      Math.random() * activationConfig.activationKeys.length
+    );
+    const selectedKey = activationConfig.activationKeys[randomKeyIndex];
+
+    // RANDOMLY SELECT a PCID from that key's PCIDs array
+    const randomPcidIndex = Math.floor(
+      Math.random() * selectedKey.pcids.length
+    );
+    const ACTIVATION_PCID_HEX_STRING = selectedKey.pcids[randomPcidIndex];
+    const PRODUCT_KEY = selectedKey.productKey;
+
+    console.log(`[Activation] Random selection process:`);
+    console.log(
+      `[Activation]   - Selected key index: ${randomKeyIndex} (out of ${activationConfig.activationKeys.length})`
+    );
+    console.log(
+      `[Activation]   - Selected PCID index: ${randomPcidIndex} (out of ${selectedKey.pcids.length})`
+    );
+    console.log(`[Activation]   - PCID to use: ${ACTIVATION_PCID_HEX_STRING}`);
+    console.log(`[Activation]   - Product key: ${PRODUCT_KEY}`);
+
     console.log("========================================");
     console.log("🎮 STARTING GAME ACTIVATION PROCESS");
     console.log("========================================");
+    console.log(
+      `[Activation] Randomly selected: Key ID ${selectedKey.id}${
+        selectedKey.name ? ` (${selectedKey.name})` : ""
+      }`
+    );
     console.log(`[Activation] Product Key: ${PRODUCT_KEY}`);
+    console.log(
+      `[Activation] Activation PCID: ${ACTIVATION_PCID_HEX_STRING} (${
+        randomPcidIndex + 1
+      } of ${selectedKey.pcids.length})`
+    );
     console.log(`[Activation] Game Install Dir: ${GAME_INSTALL_DIR}`);
     console.log(`[Activation] Time: ${new Date().toLocaleTimeString()}`);
 
@@ -2850,6 +3627,25 @@ ipcMain.handle("activate-game", async () => {
       console.log("\n[Step 5/6] Applying registry-based game activation...");
       console.log(`[Step 5/6] Using game directory: ${GAME_INSTALL_DIR}`);
       console.log(`[Step 5/6] Using product key: ${PRODUCT_KEY}`);
+      console.log(
+        `[Step 5/6] Using activation PCID: ${ACTIVATION_PCID_HEX_STRING}`
+      );
+
+      // Set activation PCID paired with this key
+      // The PCID is stored as a QWORD (64-bit) hexadecimal value in the registry
+      // Format: 16-character hex string (e.g., "4550b3e602efbbf6")
+      console.log(
+        `[Step 5/6] Setting activation PCID: ${ACTIVATION_PCID_HEX_STRING}`
+      );
+      const pcidSetResult = await registryUtils.setPcidInRegistry(
+        ACTIVATION_PCID_HEX_STRING
+      );
+
+      if (!pcidSetResult || !pcidSetResult.success) {
+        console.error(`[Step 5/6] ❌ FAILED to set activation PCID`);
+        throw new Error("Failed to set activation PCID");
+      }
+      console.log(`[Step 5/6] ✅ Activation PCID set successfully`);
 
       const activationRegResult = await registryUtils.activateGameInRegistry(
         GAME_INSTALL_DIR,
@@ -2873,60 +3669,148 @@ ipcMain.handle("activate-game", async () => {
 
       console.log("[Step 5/6] ✅ Registry activation completed successfully");
 
-      // 5. Native Token Injection (xlive.dll) - Best-Effort
+      // 5.5. Delete Token Cache Files BEFORE Native Token Injection
       console.log(
-        "\n[Step 6/6] Attempting native token injection via xlive-helper.exe..."
+        "\n[Pre-Step 6/6] Deleting token cache files (required before injection)..."
+      );
+      const tokenDeletionResult = await registryUtils.deleteTokenFiles();
+      if (!tokenDeletionResult || !tokenDeletionResult.success) {
+        console.warn("[Pre-Step 6/6] ⚠️  Could not delete all token files");
+        console.warn(
+          `[Pre-Step 6/6] Errors: ${JSON.stringify(
+            tokenDeletionResult?.errors
+          )}`
+        );
+      } else {
+        console.log("[Pre-Step 6/6] ✅ Token files deleted successfully");
+      }
+
+      // 6. Native Token Injection via XLiveActivateHelper.exe (x86)
+      console.log(
+        "\n[Step 6/6] Attempting native token injection via XLiveActivateHelper.exe..."
       );
       let tokenInjectionSuccess = false;
       try {
-        const helperPath = path.join(
-          app.getAppPath(),
-          "resources",
-          "xlive-helper.exe"
-        );
-        console.log(`[Step 6/6] Checking path 1: ${helperPath}`);
-        console.log(`[Step 6/6] Path 1 exists: ${fs.existsSync(helperPath)}`);
-
-        // Fallback to checking in app directory if not in resources
-        const helperPathFallback = path.join(
-          process.resourcesPath || app.getAppPath(),
-          "xlive-helper.exe"
-        );
-        console.log(`[Step 6/6] Checking path 2: ${helperPathFallback}`);
+        // Check if .NET 6.0 Desktop Runtime x86 is installed (REQUIRED for helper)
         console.log(
-          `[Step 6/6] Path 2 exists: ${fs.existsSync(helperPathFallback)}`
+          "[Step 6/6] Checking for .NET 6.0 Desktop Runtime (x86)..."
+        );
+        const dotnet6Check = await checkDotNet6x86Runtime();
+        console.log(
+          `[Step 6/6] .NET 6.0 x86 Runtime: ${
+            dotnet6Check.installed
+              ? `✅ Installed (${dotnet6Check.version})`
+              : "❌ Not Installed"
+          }`
         );
 
-        let actualHelperPath = null;
-        if (fs.existsSync(helperPath)) {
-          actualHelperPath = helperPath;
-          console.log(`[Step 6/6] Using path 1`);
-        } else if (fs.existsSync(helperPathFallback)) {
-          actualHelperPath = helperPathFallback;
-          console.log(`[Step 6/6] Using path 2`);
-        } else {
-          // Try in the same directory as the main executable
-          const exeDir = path.dirname(process.execPath);
-          const exeDirHelper = path.join(exeDir, "xlive-helper.exe");
-          console.log(`[Step 6/6] Checking path 3: ${exeDirHelper}`);
-          console.log(
-            `[Step 6/6] Path 3 exists: ${fs.existsSync(exeDirHelper)}`
+        if (!dotnet6Check.installed) {
+          console.warn(
+            "[Step 6/6] ⚠️  .NET 6.0 Desktop Runtime (x86) is NOT installed"
           );
-          if (fs.existsSync(exeDirHelper)) {
-            actualHelperPath = exeDirHelper;
-            console.log(`[Step 6/6] Using path 3`);
+          console.warn(
+            "[Step 6/6]    XLiveActivateHelper.exe requires .NET 6.0 to run"
+          );
+          console.warn(
+            "[Step 6/6]    Registry activation succeeded, but token injection will be skipped"
+          );
+
+          // Show custom dialog offering to install .NET 6.0
+          const installDotnet = await dialog.showMessageBox(mainWindow, {
+            type: "warning",
+            title: "Missing .NET 6.0 Runtime",
+            message: ".NET 6.0 Desktop Runtime (x86) Not Found",
+            detail:
+              "The activation helper requires .NET 6.0 Desktop Runtime (x86) to inject the product key automatically.\n\n" +
+              "Would you like to install it now? (Recommended)\n\n" +
+              "Installation will take 1-2 minutes and happen in the background.",
+            buttons: ["Install .NET 6.0", "Skip (Use Manual Key)"],
+            defaultId: 0,
+            cancelId: 1,
+          });
+
+          if (installDotnet.response === 0) {
+            // User wants to install .NET 6.0
+            console.log("[Step 6/6] User confirmed .NET 6.0 installation");
+            console.log("[Step 6/6] Downloading and installing .NET 6.0...");
+
+            try {
+              // Download and install .NET 6.0 silently
+              const installResult = await downloadAndInstallDotNet6();
+
+              if (installResult.success) {
+                console.log("[Step 6/6] ✅ .NET 6.0 installed successfully!");
+                console.log("[Step 6/6] Continuing with token injection...");
+                // Don't throw error - continue to token injection below
+              } else {
+                console.warn(
+                  "[Step 6/6] ⚠️  .NET 6.0 installation failed or was cancelled"
+                );
+                console.warn(`[Step 6/6]    Error: ${installResult.error}`);
+                throw new Error("DOTNET_INSTALL_FAILED");
+              }
+            } catch (installError) {
+              console.error(
+                "[Step 6/6] ❌ Error during .NET 6.0 installation:",
+                installError
+              );
+              throw new Error("DOTNET_INSTALL_ERROR");
+            }
+          } else {
+            console.log("[Step 6/6] User chose to skip .NET 6.0 installation");
+            // Skip token injection, continue to show product key
+            throw new Error("DOTNET_NOT_INSTALLED");
           }
         }
 
-        if (actualHelperPath) {
+        // Look for XLiveActivateHelper.exe (BlackAnt's KeyWriter)
+        // Try multiple locations (dev vs production)
+        const possibleHelperPaths = [
+          // Production (packaged app)
+          path.join(
+            process.resourcesPath || app.getAppPath(),
+            "XLiveActivateHelper.exe"
+          ),
+          // Development (project root - where we copied it)
+          path.join(app.getAppPath(), "XLiveActivateHelper.exe"),
+          // Development (built location)
+          path.join(
+            app.getAppPath(),
+            "resources",
+            "XLiveActivateHelper",
+            "XLIVEActivateHelper",
+            "bin",
+            "Release",
+            "net6.0",
+            "win-x86",
+            "XLIVEActivateHelper.exe"
+          ),
+          // Alternative dev location (relative to __dirname)
+          path.join(__dirname, "..", "XLiveActivateHelper.exe"),
+        ];
+
+        let helperPath = null;
+        for (const possiblePath of possibleHelperPaths) {
+          console.log(`[Step 6/6] Checking path: ${possiblePath}`);
+          if (fs.existsSync(possiblePath)) {
+            helperPath = possiblePath;
+            console.log(`[Step 6/6] ✅ Found helper at: ${possiblePath}`);
+            break;
+          }
+        }
+
+        if (helperPath) {
+          console.log(`[Step 6/6] ✅ Found XLiveActivateHelper.exe`);
           console.log(
-            `[Step 6/6] ✅ Found xlive-helper.exe at: ${actualHelperPath}`
+            `[Step 6/6] Calling XLiveSetSponsorToken via x86 helper...`
           );
-          console.log(`[Step 6/6] Executing with args: [${PRODUCT_KEY}]`);
+          console.log(`[Step 6/6] Product Key: ${PRODUCT_KEY}`);
+          console.log(`[Step 6/6] Title ID: 1297287126 (0x4D5307D6)`);
 
           const helperResult = await new Promise((resolve) => {
-            console.log(`[Step 6/6] Spawning process...`);
-            const helperProcess = spawn(actualHelperPath, [PRODUCT_KEY], {
+            // Set working directory to game directory so xlive.dll can be found
+            const helperProcess = spawn(helperPath, [PRODUCT_KEY], {
+              cwd: GAME_INSTALL_DIR,
               stdio: ["ignore", "pipe", "pipe"],
               windowsHide: true,
             });
@@ -2940,17 +3824,23 @@ ipcMain.handle("activate-game", async () => {
             helperProcess.stdout.on("data", (data) => {
               const output = data.toString();
               stdout += output;
-              console.log(`[Step 6/6] STDOUT: ${output.trim()}`);
+              console.log(`[Step 6/6] ${output.trim()}`);
             });
 
             helperProcess.stderr.on("data", (data) => {
               const error = data.toString();
               stderr += error;
-              console.error(`[Step 6/6] STDERR: ${error.trim()}`);
+              console.error(`[Step 6/6] ${error.trim()}`);
             });
 
             helperProcess.on("close", (code) => {
-              console.log(`[Step 6/6] Process exited with code: ${code}`);
+              console.log(`[Step 6/6] Helper exited with code: ${code}`);
+              if (stdout) {
+                console.log(`[Step 6/6] Full stdout:\n${stdout}`);
+              }
+              if (stderr) {
+                console.error(`[Step 6/6] Full stderr:\n${stderr}`);
+              }
               resolve({ code, stdout, stderr });
             });
 
@@ -2960,84 +3850,105 @@ ipcMain.handle("activate-game", async () => {
             });
           });
 
-          console.log(
-            `[Step 6/6] Helper result: ${JSON.stringify(helperResult)}`
-          );
-
+          // Check exit code
           if (helperResult.code === 0) {
             tokenInjectionSuccess = true;
+            console.log("[Step 6/6] ✅ XLiveSetSponsorToken succeeded!");
             console.log(
-              "[Step 6/6] ✅ Token injection via xlive.dll SUCCEEDED"
+              "[Step 6/6] Native token injection completed successfully"
             );
-            if (helperResult.stdout) {
-              console.log(`[Step 6/6] Output: ${helperResult.stdout.trim()}`);
-            }
+          } else if (helperResult.code === 1) {
+            console.warn("[Step 6/6] ⚠️  Invalid arguments passed to helper");
+            console.warn(`[Step 6/6]    Exit Code: 1 (EXIT_INVALID_ARGS)`);
+            console.warn(`[Step 6/6]    Product key may be malformed`);
+          } else if (helperResult.code === 2) {
+            console.warn(
+              "[Step 6/6] ⚠️  xlive.dll not found - GFWL may not be installed"
+            );
+            console.warn(`[Step 6/6]    Exit Code: 2 (EXIT_DLL_NOT_FOUND)`);
+            console.warn(
+              `[Step 6/6]    Check GFWL installation or xlive.dll presence`
+            );
+          } else if (helperResult.code === 3) {
+            console.warn("[Step 6/6] ⚠️  XLiveSetSponsorToken call failed");
+            console.warn(`[Step 6/6]    Exit Code: 3 (EXIT_CALL_FAILED)`);
+            console.warn(`[Step 6/6]    The DLL function returned an error`);
+          } else if (helperResult.code === -1) {
+            console.warn("[Step 6/6] ⚠️  Helper process failed to start");
+            console.warn(
+              `[Step 6/6]    Error: ${helperResult.error || "Unknown"}`
+            );
           } else {
             console.warn(
-              `[Step 6/6] ⚠️  Token injection FAILED (exit code: ${helperResult.code})`
+              `[Step 6/6] ⚠️  Helper failed with exit code: ${helperResult.code}`
             );
-            if (helperResult.stderr) {
-              console.warn(
-                `[Step 6/6] Error output: ${helperResult.stderr.trim()}`
-              );
-            }
-            if (helperResult.error) {
-              console.warn(`[Step 6/6] Error message: ${helperResult.error}`);
-            }
+            console.warn(`[Step 6/6]    This is an unexpected error code`);
           }
         } else {
           console.warn(
-            "[Step 6/6] ⚠️  xlive-helper.exe not found in any checked location"
+            "[Step 6/6] ⚠️  XLiveActivateHelper.exe not found in any location:"
           );
-          console.warn("[Step 6/6] Skipping token injection");
+          possibleHelperPaths.forEach((p) => console.warn(`  - ${p}`));
+          console.warn(
+            "[Step 6/6] Registry activation should still be effective"
+          );
         }
       } catch (helperError) {
-        console.error(
-          `[Step 6/6] ❌ Exception calling xlive-helper.exe: ${helperError.message}`
-        );
-        console.error(`[Step 6/6] Stack trace: ${helperError.stack}`);
-      }
-
-      // Show warning if token injection failed (non-fatal) with manual key option
-      if (!tokenInjectionSuccess) {
-        const result = await dialog.showMessageBox(mainWindow, {
-          type: "warning",
-          title: "Token Injection Warning",
-          message:
-            "Registry activation succeeded, but automatic token injection failed.",
-          detail: `The game may still activate normally. If you experience issues, use the manual key below.\n\nProduct Key: ${PRODUCT_KEY}\n\nClick "Copy Key" to copy it to your clipboard, then paste it into the game's activation window.`,
-          buttons: ["Copy Key", "OK"],
-          defaultId: 0,
-          cancelId: 1,
-        });
-
-        // If user clicked "Copy Key", copy to clipboard
-        if (result.response === 0) {
-          const { clipboard } = require("electron");
-          clipboard.writeText(PRODUCT_KEY);
-          console.log("[Activation] Product key copied to clipboard");
-
-          // Show confirmation
-          dialog.showMessageBox(mainWindow, {
-            type: "info",
-            title: "Key Copied",
-            message: "Product key copied to clipboard!",
-            detail: `${PRODUCT_KEY}\n\nPaste this key into the game's activation window (Ctrl+V).`,
-            buttons: ["OK"],
-          });
+        if (helperError.message === "DOTNET_NOT_INSTALLED") {
+          console.log(
+            "[Step 6/6] ⚠️  Skipping token injection - .NET 6.0 not installed"
+          );
+          console.log(
+            "[Step 6/6]    User will receive product key for manual entry"
+          );
+        } else if (helperError.message === "DOTNET_INSTALL_FAILED") {
+          console.warn(
+            "[Step 6/6] ⚠️  .NET 6.0 installation failed or was cancelled"
+          );
+          console.warn(
+            "[Step 6/6]    User will receive product key for manual entry"
+          );
+        } else if (helperError.message === "DOTNET_INSTALL_ERROR") {
+          console.error(
+            "[Step 6/6] ❌ Error occurred during .NET 6.0 installation"
+          );
+          console.error(
+            "[Step 6/6]    User will receive product key for manual entry"
+          );
+        } else {
+          console.error(
+            `[Step 6/6] ❌ Exception calling XLiveActivateHelper: ${helperError.message}`
+          );
         }
       }
 
-      // 6. Token File Cleanup
-      console.log("\n[Cleanup] Deleting token cache files...");
-      const tokenDeletionResult = await registryUtils.deleteTokenFiles();
-      if (!tokenDeletionResult || !tokenDeletionResult.success) {
-        console.warn("[Cleanup] ⚠️  Could not delete all token files");
-        console.warn(
-          `[Cleanup] Errors: ${JSON.stringify(tokenDeletionResult?.errors)}`
+      // Show warning if token injection failed (non-fatal) - auto-copy key to clipboard
+      if (!tokenInjectionSuccess) {
+        // AUTOMATICALLY copy the product key to clipboard
+        const { clipboard } = require("electron");
+        clipboard.writeText(PRODUCT_KEY);
+        console.log(
+          "[Activation] Product key automatically copied to clipboard"
         );
-      } else {
-        console.log("[Cleanup] ✅ Token files deleted successfully");
+
+        // Setup clipboard auto-clear if configured
+        const clearAfterSeconds =
+          activationConfig.settings?.clearClipboardAfterSeconds || 30;
+        let clipboardClearTimer = null;
+
+        if (clearAfterSeconds > 0) {
+          clipboardClearTimer = setTimeout(() => {
+            // Only clear if it's still our key in the clipboard
+            if (clipboard.readText() === PRODUCT_KEY) {
+              clipboard.clear();
+              console.log("[Activation] Clipboard auto-cleared after timeout");
+              // Toast notification removed per user request
+            }
+          }, clearAfterSeconds * 1000);
+        }
+
+        // Show custom themed activation success dialog
+        showActivationSuccessDialog(PRODUCT_KEY, clearAfterSeconds);
       }
 
       // 7. Success Completion
@@ -3047,26 +3958,26 @@ ipcMain.handle("activate-game", async () => {
       console.log("Summary:");
       console.log(`  - Registry activation: SUCCESS`);
       console.log(`  - PCID backup: SUCCESS`);
+      console.log(`  - Activation PCID set: SUCCESS`);
       console.log(
-        `  - Token injection: ${
-          tokenInjectionSuccess ? "SUCCESS" : "FAILED (manual key required)"
-        }`
-      );
-      console.log(
-        `  - Token cleanup: ${
+        `  - Token cache cleanup (pre-injection): ${
           tokenDeletionResult?.success ? "SUCCESS" : "PARTIAL"
         }`
       );
+      console.log(
+        `  - Native token injection: ${
+          tokenInjectionSuccess ? "SUCCESS" : "FAILED (manual key required)"
+        }`
+      );
+      console.log("========================================\n");
+      console.log("NOTE: Activation PCID remains set for game activation.");
+      console.log(
+        "      Your original PCID backup is safely stored and can be restored later if needed."
+      );
       console.log("========================================\n");
 
-      dialog.showMessageBox(mainWindow, {
-        type: "info",
-        title: "Activation Successful",
-        message: "Game activation process completed.",
-        detail:
-          "Registry activation applied, PCID safely backed up, and token cache cleared. Please try launching the game.",
-        buttons: ["OK"],
-      });
+      // Success dialog and clipboard are only shown if token injection FAILED
+      // (already handled above in the `if (!tokenInjectionSuccess)` block)
       return { success: true, message: "Game activated successfully." };
     } catch (error) {
       console.error("\n========================================");
@@ -4107,25 +5018,50 @@ async function restoreOriginalPcid() {
     const backupExists = await registryUtils.checkSrPcidBackupExists();
 
     if (backupExists) {
-      // Get the backup PCID
+      // Get the backup PCID (returns as hex string like "4550B3E602EFBBF6")
       const backupPcid = await registryUtils.getSrPcidBackupFromRegistry();
 
       if (backupPcid) {
-        console.log("Restoring original PCID from backup...");
+        console.log(
+          `[PCID Restore] Restoring original PCID from SRPCIDBACKUP: ${backupPcid}`
+        );
 
-        // Create registry content to restore original PCID
-        const regContent = `Windows Registry Editor Version 5.00\n\n[HKEY_CURRENT_USER\\Software\\Classes\\SOFTWARE\\Microsoft\\XLive]\n"PCID"=hex(b):${backupPcid}`;
+        // Format the PCID as QWORD with reversed bytes and commas (little-endian)
+        // e.g., "4550B3E602EFBBF6" -> "f6,bb,ef,02,e6,b3,50,45"
+        const formattedPcid = registryUtils.formatQwordRegValue(backupPcid);
+
+        if (!formattedPcid) {
+          console.error("[PCID Restore] Failed to format backup PCID");
+          return false;
+        }
+
+        console.log(
+          `[PCID Restore] Formatted PCID for registry: ${formattedPcid}`
+        );
+
+        // Create registry content to restore original PCID (with proper BOM and CRLF)
+        const BOM = "\uFEFF";
+        const regContent =
+          BOM +
+          `Windows Registry Editor Version 5.00\r\n` +
+          `\r\n` +
+          `[HKEY_CURRENT_USER\\Software\\Classes\\SOFTWARE\\Microsoft\\XLive]\r\n` +
+          `"PCID"=hex(b):${formattedPcid}\r\n`;
 
         // Import registry changes
         await registryUtils.importRegFile(regContent);
 
-        console.log("Original PCID restored successfully");
+        console.log("[PCID Restore] ✅ Original PCID restored successfully");
         return true;
+      } else {
+        console.warn("[PCID Restore] ⚠️  Backup PCID value is empty/null");
       }
+    } else {
+      console.warn("[PCID Restore] ⚠️  No SRPCIDBACKUP exists in registry");
     }
     return false;
   } catch (error) {
-    console.error("Error restoring original PCID:", error);
+    console.error("[PCID Restore] ❌ Error restoring original PCID:", error);
     return false;
   }
 }

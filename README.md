@@ -2,40 +2,39 @@
 
 A modern, feature-rich game launcher for the classic Shadowrun FPS (2007) with automatic updates, Discord integration, and player tracking.
 
-![Version](https://img.shields.io/badge/version-0.9.2-orange)
+![Version](https://img.shields.io/badge/version-0.9.6-orange)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+
+<!-- ![License](https://img.shields.io/badge/license-MIT-green) -->
 
 ---
 
 ## ✨ Features
 
 ### 🎮 Game Management
+
 - **One-Click Download & Install** - Automatic game file download and installation
 - **Quick Launch** - Launch Shadowrun FPS directly from the launcher
 - **Skip Intro Mod** - Install/uninstall skip intro videos with one click
 - **PCID Backup** - Backup your player ID before reinstalling Windows
 
 ### 🔄 Auto-Update System
+
 - **Automatic Updates** - Self-updating launcher with one-click installation
 - **Version Rollback** - Server-controlled rollback to stable versions if needed
 - **Update Notifications** - Clean, modern update dialogs with release notes
 - **Smart Version Checking** - Only prompts users who need updates
 
 ### 🎨 User Interface
+
 - **Custom Window Frame** - Frameless design with custom title bar
 - **Dark Theme** - Modern dark UI matching Shadowrun's aesthetic
 - **Toast Notifications** - Non-intrusive feedback for actions
 - **Loading States** - Clear feedback for all operations
 - **Settings Panel** - Easy access to all launcher options
 
-### 📊 Player Tracking & Statistics
-- **Unique Install Tracking** - Anonymous UUID-based install counting
-- **Player Count API** - Track online players and in-game status
-- **Discord Integration** - Rich presence showing launcher/game status
-- **MongoDB Backend** - Persistent storage for install statistics
-
 ### ⚙️ Advanced Features
+
 - **FPS Limiter** - Adjustable frame rate cap (default 85 FPS)
 - **Registry Management** - Safe Windows registry modifications
 - **GFWL Support** - Games for Windows Live integration
@@ -105,17 +104,20 @@ shadowrun-launcher/
 ## 🛠️ Tech Stack
 
 ### Frontend
+
 - **Electron** - Desktop app framework
 - **Tailwind CSS** - Utility-first CSS
 - **HTML/CSS/JavaScript** - Core web technologies
 
 ### Backend
+
 - **Node.js** - Runtime environment
 - **Express** - API server
 - **MongoDB** - Database for install tracking
 - **Railway** - Hosting platform
 
 ### Build Tools
+
 - **electron-builder** - Package and distribute
 - **NSIS** - Windows installer
 - **Tailwind CLI** - CSS compilation
@@ -125,13 +127,16 @@ shadowrun-launcher/
 ## 🔧 Configuration
 
 ### Environment Variables (Railway API)
+
 ```bash
 MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/dbname
 PORT=8080  # Railway sets this automatically
 ```
 
 ### Update Server
+
 Update URL is configured in `package.json`:
+
 ```json
 {
   "publishConfig": {
@@ -146,12 +151,14 @@ Update URL is configured in `package.json`:
 ## 📡 API Endpoints
 
 ### Player Statistics
+
 ```
 GET /api/stats
 Returns: { totalOnline, inMenu, inGame, players[] }
 ```
 
 ### Install Tracking
+
 ```
 POST /api/install
 Body: { playerId, version, timestamp }
@@ -162,6 +169,7 @@ Returns: { totalUniqueInstalls, timestamp }
 ```
 
 ### Health Check
+
 ```
 GET /api/status
 Returns: { status, uptime, timestamp }
@@ -198,6 +206,7 @@ See [INSTALL-TRACKING-GUIDE.md](INSTALL-TRACKING-GUIDE.md) for implementation de
 ## 🎯 Build & Release
 
 ### Build Installer
+
 ```bash
 # Update version in package.json
 npm version 0.9.3
@@ -209,6 +218,7 @@ npm run build:win
 ```
 
 ### Upload to Update Server
+
 ```bash
 # Upload these files to your server:
 # - Shadowrun FPS Launcher Setup X.X.X.exe
@@ -217,6 +227,7 @@ npm run build:win
 ```
 
 ### Release Checklist
+
 - [ ] Update version in `package.json`
 - [ ] Build with `npm run build:win`
 - [ ] Test installer on clean Windows VM
@@ -230,6 +241,7 @@ npm run build:win
 ## 🐛 Development
 
 ### Run in Dev Mode
+
 ```bash
 npm run start:dev
 # Opens DevTools automatically
@@ -237,6 +249,7 @@ npm run start:dev
 ```
 
 ### Debug Tools
+
 - **F12 or Ctrl+Shift+I** - Toggle DevTools (dev mode only)
 - **Console Logs** - Detailed logging in both terminal and DevTools
 - **Player Tracking** - Test with local Railway API
@@ -244,14 +257,17 @@ npm run start:dev
 ### Common Issues
 
 **DevTools won't open?**
+
 - Make sure you're using `npm run start:dev` (not just `npm start`)
 
 **Auto-updater not working?**
+
 - Check `latest.yml` format on server
 - Verify update URL in `package.json`
 - Check logs for "Skip checkForUpdates" (dev mode)
 
 **Install tracking not working?**
+
 - Verify `MONGODB_URI` in Railway environment
 - Check Railway logs for "Connected to MongoDB"
 - Test with `/api/installs` endpoint
@@ -301,6 +317,7 @@ Shadowrun (2007) was a multiplayer first-person shooter developed by FASA Studio
 ## 📝 Changelog
 
 ### v0.9.2 (Current)
+
 - ✨ Added unique install tracking with MongoDB
 - ✨ Added rollback system for emergency updates
 - ✨ Added toast notifications for user feedback
@@ -311,18 +328,18 @@ Shadowrun (2007) was a multiplayer first-person shooter developed by FASA Studio
 - 🔧 Enhanced logging and debugging
 
 ### v0.9.1
+
 - 🎨 Redesigned update dialog
 - ✨ Added one-click update installation
 - 🐛 Various bug fixes
 
 ### v0.9.0
+
 - 🎉 Initial public release
 - ✨ Auto-update system
 - ✨ Discord integration
-- ✨ Player tracking
 - ✨ Skip intro mod support
 
 ---
 
 **Made with ❤️ for the Shadowrun FPS community**
-

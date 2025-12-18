@@ -1,7 +1,7 @@
 {
   "name": "shadowrun-fps-launcher",
   "productName": "Shadowrun FPS Launcher",
-  "version": "0.9.5",
+  "version": "0.9.7",
   "repository": {
     "type": "git",
     "url": "https://github.com/3MERGx/shadowrun-launcher.git"
@@ -62,6 +62,10 @@
         "filter": [
           "audio-volume-helper.exe"
         ]
+      },
+      {
+        "from": "resources/XLiveActivateHelper/bin/Release/win-x86/XLiveActivateHelper.exe",
+        "to": "XLiveActivateHelper.exe"
       }
     ],
     "win": {

@@ -1,0 +1,24 @@
+{
+  "_comment": "SIMPLE TEMPLATE - Just add your key and PCIDs",
+  "_instructions": [
+    "1. Copy the object below (between the curly braces)",
+    "2. Open activationKeys.json",
+    "3. Add it to the 'activationKeys' array (don't forget the comma between entries!)",
+    "4. Replace the id, productKey, and pcids with your actual values",
+    "5. Save and run: node app/config/validateConfig.js"
+  ],
+
+  "id": 999,
+  "productKey": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+  "pcids": ["abcdef0123456789", "fedcba9876543210"],
+
+  "_notes": {
+    "id": "Must be a unique number (required)",
+    "productKey": "Format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX (required)",
+    "pcids": "Array of 1-15 PCIDs, each 16 hex characters (required)"
+  },
+
+  "_critical_warning": "⚠️ ALL PCIDs MUST BE PAIRED WITH THIS PRODUCT KEY! ⚠️",
+  "_pcid_format": "16 hex characters, no 0x prefix, no dashes. Example: abcdef0123456789",
+  "_how_it_works": "Launcher randomly selects one PCID from array, sets it, provides the paired key"
+}

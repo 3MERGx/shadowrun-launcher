@@ -1,6 +1,179 @@
 // AT THE VERY TOP OF THE FILE:
 console.log("[Renderer] index.js script execution started.");
 
+// Custom Activation Confirmation Dialog
+function showActivationConfirmDialog() {
+  return new Promise((resolve) => {
+    // Create dialog overlay
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.15s ease-out;
+    `;
+
+    // Create dialog container
+    const dialog = document.createElement("div");
+    dialog.style.cssText = `
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      width: 420px;
+      max-width: 90%;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      animation: slideIn 0.2s ease-out;
+    `;
+
+    dialog.innerHTML = `
+      <style>
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideIn {
+          from {
+            transform: translateY(-10px);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        .confirm-dialog-header {
+          padding: 16px 20px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .confirm-title {
+          font-size: 16px;
+          font-weight: 500;
+          color: #ffffff;
+        }
+        .confirm-content {
+          padding: 24px 20px;
+          color: rgba(255, 255, 255, 0.85);
+          line-height: 1.5;
+        }
+        .confirm-message {
+          font-size: 14px;
+          margin-bottom: 16px;
+        }
+        .confirm-note {
+          background: rgba(255, 255, 255, 0.05);
+          border-left: 2px solid rgba(255, 255, 255, 0.2);
+          padding: 10px 12px;
+          font-size: 13px;
+          color: rgba(255, 255, 255, 0.7);
+        }
+        .confirm-footer {
+          padding: 12px 20px;
+          background: rgba(0, 0, 0, 0.2);
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+          display: flex;
+          gap: 8px;
+          justify-content: flex-end;
+        }
+        .confirm-button {
+          padding: 8px 20px;
+          border-radius: 4px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          border: none;
+        }
+        .confirm-button-cancel {
+          background: transparent;
+          color: rgba(255, 255, 255, 0.7);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .confirm-button-cancel:hover {
+          background: rgba(255, 255, 255, 0.05);
+          color: #ffffff;
+        }
+        .confirm-button-ok {
+          background: #3b82f6;
+          color: #ffffff;
+        }
+        .confirm-button-ok:hover {
+          background: #2563eb;
+        }
+        .confirm-button:active {
+          transform: scale(0.98);
+        }
+      </style>
+      <div class="confirm-dialog-header">
+        <div class="confirm-title">Shadowrun FPS Launcher</div>
+      </div>
+      <div class="confirm-content">
+        <div class="confirm-message">
+          Are you sure you want to activate the game?
+        </div>
+        <div class="confirm-note">
+          If you have any other GFWL games, this may cause them to require re-activation.
+        </div>
+      </div>
+      <div class="confirm-footer">
+        <button class="confirm-button confirm-button-cancel" id="cancelBtn">Cancel</button>
+        <button class="confirm-button confirm-button-ok" id="okBtn">OK</button>
+      </div>
+    `;
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    // Handle button clicks
+    const okBtn = dialog.querySelector("#okBtn");
+    const cancelBtn = dialog.querySelector("#cancelBtn");
+
+    const cleanup = () => {
+      overlay.style.animation = "fadeIn 0.15s ease-out reverse";
+      setTimeout(() => {
+        document.body.removeChild(overlay);
+      }, 150);
+    };
+
+    okBtn.addEventListener("click", () => {
+      cleanup();
+      resolve(true);
+    });
+
+    cancelBtn.addEventListener("click", () => {
+      cleanup();
+      resolve(false);
+    });
+
+    // Close on overlay click
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        cleanup();
+        resolve(false);
+      }
+    });
+
+    // Close on Escape key
+    const handleEscape = (e) => {
+      if (e.key === "Escape") {
+        cleanup();
+        resolve(false);
+        document.removeEventListener("keydown", handleEscape);
+      }
+    };
+    document.addEventListener("keydown", handleEscape);
+  });
+}
+
 window.handlePcidBackupClick = async function () {
   // Add async back
   console.log("[Renderer] handlePcidBackupClick CALLED VIA ONCLICK!");
@@ -472,10 +645,8 @@ playButton.addEventListener("click", async () => {
 activateButton.addEventListener("click", async () => {
   console.log("Activation requested...");
 
-  // Show confirmation dialog
-  const confirmActivation = confirm(
-    "Are you sure you want to activate the game?\n\nNote: If you have any other GFWL games, this may cause them to require re-activation."
-  );
+  // Show custom confirmation dialog
+  const confirmActivation = await showActivationConfirmDialog();
 
   if (!confirmActivation) {
     console.log("Activation cancelled by user");
@@ -780,13 +951,20 @@ window.api.onDownloadComplete(() => {
 
 window.api.onDownloadError((error) => {
   downloadMessage.textContent = `Error: ${error}`;
-  // Add a close button to the download screen
-  const closeBtn = document.createElement("button");
-  closeBtn.textContent = "Close";
-  closeBtn.className = "settings-action-button";
-  closeBtn.style.marginTop = "20px";
-  closeBtn.onclick = () => downloadProgressScreen.classList.remove("visible");
-  document.querySelector(".download-message").appendChild(closeBtn);
+
+  // Replace "Cancel Installation" button with "Close" button
+  const downloadActions = document.querySelector(".download-actions");
+  if (downloadActions) {
+    // Remove existing buttons
+    downloadActions.innerHTML = "";
+
+    // Add a single "Close" button
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "Close";
+    closeBtn.className = "settings-action-button";
+    closeBtn.onclick = () => downloadProgressScreen.classList.remove("visible");
+    downloadActions.appendChild(closeBtn);
+  }
 });
 
 // Add this event listener for the Instructions button
@@ -1695,7 +1873,7 @@ if (runDiagnosticsButton) {
 // Function to show diagnostics results in a nice modal
 function showDiagnosticsResults(diag) {
   const modal = document.createElement("div");
-  modal.className = "modal-screen visible";
+  modal.className = "visible modal-screen";
   modal.style.zIndex = "2000";
 
   const statusIcon = (status) => (status ? "✅" : "❌");

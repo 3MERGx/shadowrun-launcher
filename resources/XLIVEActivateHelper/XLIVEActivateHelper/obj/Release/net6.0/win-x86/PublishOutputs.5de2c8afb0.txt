@@ -1,0 +1,2 @@
+C:\Users\johna\OneDrive\Documents\shadowrun-launcher\resources\XLiveActivateHelper\XLIVEActivateHelper\bin\Release\net6.0\win-x86\publish\XLIVEActivateHelper.pdb
+C:\Users\johna\OneDrive\Documents\shadowrun-launcher\resources\XLiveActivateHelper\XLIVEActivateHelper\bin\Release\net6.0\win-x86\publish\XLIVEActivateHelper.exe

@@ -9,15 +9,14 @@ const REGISTRY_PATH_XLIVE =
 const PCID_VALUE_NAME = "PCID"; // Assuming you use this elsewhere
 const PCID_BACKUP_VALUE_NAME = "SRPCIDBACKUP";
 
-// --- Activation Specific Data (from C# logic) ---
-const ACTIVATION_PCID_HEX = "4550B3E602EFBBF6"; // Corresponds to "f6,bb,ef,02,e6,b3,50,45" from C# GetKeyData, converted to QWORD hex
-const ACTIVATION_PRODUCT_KEY = "R9GJT-87T6K-6KV49-XTX8G-6VBWW"; // From C# GetKeyData
+// NOTE: Activation PCID/Product Key pairs are now managed in app/config/activationKeys.json
+// This allows multiple key pairs to be configured and selected by the user
 
 // Game Activation Specific Constants
 const REGISTRY_PATH_GAME_ACTIVATION =
-  "HKEY_CURRENT_USER\\Software\\Classes\\Software\\Microsoft\\XLive\\Games\\4d5308d6"; // UPDATED
+  "HKEY_CURRENT_USER\\Software\\Classes\\Software\\Microsoft\\XLive\\Games\\4d5307d6"; // Shadowrun Title ID
 const GAME_TITLE_ID_VALUE_NAME = "TitleId";
-const GAME_TITLE_ID_HEX = "4d5308d6";
+const GAME_TITLE_ID_HEX = "4d5307d6"; // Shadowrun Title ID (confirmed correct)
 const GAME_ACTIVATION_VALUE_NAME = "Activation";
 const GAME_ACTIVATION_DATA_HEX = "01000000000000000000000000000000"; // Example data
 
@@ -222,9 +221,12 @@ const registryUtils = {
               const parts = valueLine.trim().split(/\s+/).filter(Boolean);
 
               if (parts.length >= 3) {
-                const hexValue = parts[parts.length - 1].replace("0x", "");
-                const backupPcid = registryUtils.decimalToHexFormat(hexValue);
-                resolve(backupPcid);
+                // Return clean hex value WITHOUT commas (formatQwordRegValue will handle formatting)
+                const hexValue = parts[parts.length - 1]
+                  .replace("0x", "")
+                  .toUpperCase()
+                  .padStart(16, "0");
+                resolve(hexValue);
                 return;
               }
             }
@@ -705,21 +707,53 @@ const registryUtils = {
                       "i"
                     )
                   );
-                  if (
-                    match &&
-                    match[1] &&
-                    match[1].toUpperCase() === cleanPcidValue
-                  ) {
-                    resolve({
-                      success: true,
-                      message: "PCID set and verified successfully.",
-                      newPcid: cleanPcidValue,
-                    });
+                  if (match && match[1]) {
+                    // Pad the registry value to 16 characters for comparison
+                    // Registry may return "2" but we need "0000000000000002"
+                    const registryValue = match[1]
+                      .toUpperCase()
+                      .padStart(16, "0");
+
+                    if (registryValue === cleanPcidValue) {
+                      console.log(
+                        `[RegistryUtils] ✅ PCID set and verified successfully: ${cleanPcidValue}`
+                      );
+                      console.log(
+                        `[RegistryUtils]    Registry returned: 0x${match[1]} (normalized to: ${registryValue})`
+                      );
+                      resolve({
+                        success: true,
+                        message: "PCID set and verified successfully.",
+                        newPcid: cleanPcidValue,
+                      });
+                    } else {
+                      const actualValue = match[1].toUpperCase();
+                      console.error(
+                        `[RegistryUtils] ❌ PCID verification failed!`
+                      );
+                      console.error(
+                        `[RegistryUtils]    Expected: ${cleanPcidValue}`
+                      );
+                      console.error(
+                        `[RegistryUtils]    Found (raw): ${actualValue}`
+                      );
+                      console.error(
+                        `[RegistryUtils]    Found (padded): ${registryValue}`
+                      );
+                      console.error(`[RegistryUtils]    Match object:`, match);
+                      resolve({
+                        success: false,
+                        error: `Set PCID command executed, but verification failed. Expected: ${cleanPcidValue}, Found: ${registryValue}`,
+                      });
+                    }
                   } else {
+                    console.error(
+                      `[RegistryUtils] ❌ PCID verification failed - no match found!`
+                    );
                     resolve({
                       success: false,
                       error:
-                        "Set PCID command executed, but value mismatch or not found during verification.",
+                        "Set PCID command executed, but PCID not found in registry during verification.",
                     });
                   }
                 }

@@ -111,3 +111,5 @@ xlive-helper.obj
 
 # Temporary files
 .commit-msg.txt
+
+activationKeys.json
