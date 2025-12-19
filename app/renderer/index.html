@@ -235,15 +235,15 @@
             </div>
           </div>
 
-          <div class="setting-item disabled">
+          <div class="setting-item">
             <div class="setting-label-group">
               <label for="dxvk">DXVK Support</label>
               <span class="setting-description"
-                >Enable DXVK for better compatibility (Coming soon)</span
+                >Enable DXVK for better compatibility with modern systems</span
               >
             </div>
             <div class="toggle-switch">
-              <input type="checkbox" id="dxvk" disabled />
+              <input type="checkbox" id="dxvk" />
               <span class="toggle-slider"></span>
             </div>
           </div>
@@ -365,6 +365,36 @@
                 </div>
                 <div id="currentPcidDisplay" class="current-pcid-display"></div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- srs_shadowrun.dll Version Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Game Library Version</h3>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label>srs_shadowrun.dll Toggle</label>
+              <span class="setting-description"
+                >Switch to older/larger library version (267 KB) for compatibility</span
+              >
+            </div>
+            <div class="segmented-control">
+              <button
+                id="srsDllNewerButton"
+                class="segmented-button active"
+                data-version="newer"
+              >
+                Newer (14KB)
+              </button>
+              <button
+                id="srsDllOlderButton"
+                class="segmented-button"
+                data-version="older"
+              >
+                Older (268KB)
+              </button>
             </div>
           </div>
         </div>

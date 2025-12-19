@@ -403,6 +403,10 @@ const closeSettingsButton = document.getElementById("closeSettingsButton");
 const skipIntroButton = document.getElementById("skipIntroButton");
 const dxvkToggle = document.getElementById("dxvk");
 
+// srs_shadowrun.dll version buttons
+const srsDllNewerButton = document.getElementById("srsDllNewerButton");
+const srsDllOlderButton = document.getElementById("srsDllOlderButton");
+
 // Game state (this would normally be managed by the main process)
 let gameInstalled = false;
 let settings = {
@@ -799,13 +803,53 @@ skipIntroButton.addEventListener("click", async () => {
   }
 });
 
-dxvkToggle.addEventListener("change", () => {
-  settings.dxvk = dxvkToggle.checked;
-  saveSettings();
+if (dxvkToggle) {
+  dxvkToggle.addEventListener("change", async () => {
+    const newState = dxvkToggle.checked;
 
-  // Apply the cooldown after toggling
-  applyCooldown(dxvkToggle);
-});
+    // Disable toggle during operation
+    dxvkToggle.disabled = true;
+    const settingItem = dxvkToggle.closest(".setting-item");
+    const label = settingItem.querySelector("label");
+    const originalLabelText = label.textContent;
+
+    try {
+      // Show loading state
+      label.textContent = "DXVK Support ⟳";
+
+      const result = await window.api.toggleDxvk(newState);
+
+      if (result.success) {
+        // Update settings
+        settings.dxvk = newState;
+        saveSettings();
+
+        // Show success toast
+        showToast(result.message, "success");
+      } else {
+        // Revert toggle state on failure
+        dxvkToggle.checked = !newState;
+        
+        // Show error toast
+        showToast(result.message, "error", 5000);
+      }
+    } catch (error) {
+      console.error("Error toggling DXVK:", error);
+      
+      // Revert toggle state on error
+      dxvkToggle.checked = !newState;
+      
+      showToast("An unexpected error occurred", "error");
+    } finally {
+      // Restore label and re-enable toggle
+      label.textContent = originalLabelText;
+      dxvkToggle.disabled = false;
+
+      // Apply cooldown
+      applyCooldown(dxvkToggle);
+    }
+  });
+}
 
 // Save settings to main process
 function saveSettings() {
@@ -818,7 +862,16 @@ async function loadSettings() {
   skipIntroButton.classList.contains("installed")
     ? skipIntroButton.classList.remove("installed")
     : skipIntroButton.classList.add("installed");
-  dxvkToggle.checked = settings.dxvk;
+
+  // Check DXVK status and update toggle
+  try {
+    const dxvkStatus = await window.api.checkDxvkStatus();
+    dxvkToggle.checked = dxvkStatus.enabled;
+    settings.dxvk = dxvkStatus.enabled;
+  } catch (error) {
+    console.error("Error checking DXVK status:", error);
+    dxvkToggle.checked = settings.dxvk;
+  }
 
   // Load frame rate setting if available, otherwise default to 85
   if (settings.maxFrameRate) {
@@ -1062,10 +1115,104 @@ function setGameRunning(running) {
   }
 }
 
-// Update the element verification check
-console.log("UI elements found:", {
-  skipIntroButton: !!skipIntroButton,
-  dxvkToggle: !!dxvkToggle,
+// DXVK progress handler
+window.api.onDxvkProgress((data) => {
+  const settingItem = dxvkToggle.closest(".setting-item");
+  const label = settingItem.querySelector("label");
+
+  // Update label with progress (don't show toasts here - handled by main toggle handler)
+  if (data.step === "download" || data.step === "extract") {
+    label.textContent = `DXVK Support ⟳ ${data.status}`;
+  } else if (data.step === "complete") {
+    label.textContent = "DXVK Support";
+  } else if (data.step === "error") {
+    label.textContent = "DXVK Support";
+  } else {
+    label.textContent = `DXVK Support ⟳`;
+  }
+});
+
+// ============================================================
+// SRS_SHADOWRUN.DLL VERSION SWITCHING
+// ============================================================
+
+// Function to update button states
+function updateSrsDllButtonStates(activeVersion) {
+  if (activeVersion === "newer") {
+    srsDllNewerButton.classList.add("active");
+    srsDllOlderButton.classList.remove("active");
+  } else if (activeVersion === "older") {
+    srsDllNewerButton.classList.remove("active");
+    srsDllOlderButton.classList.add("active");
+  }
+}
+
+// Function to handle version switching
+async function switchSrsDllVersion(targetVersion) {
+  // Disable both buttons during operation
+  srsDllNewerButton.disabled = true;
+  srsDllOlderButton.disabled = true;
+
+  // Add loading state to target button
+  const targetButton =
+    targetVersion === "newer" ? srsDllNewerButton : srsDllOlderButton;
+  targetButton.classList.add("loading");
+
+  try {
+    const result = await window.api.switchSrsDllVersion(targetVersion);
+
+    if (result.success) {
+      // Update button states
+      updateSrsDllButtonStates(targetVersion);
+
+      // Show success toast
+      showToast(result.message, "success");
+    } else {
+      // Show error toast
+      showToast(result.message, "error", 5000);
+    }
+  } catch (error) {
+    console.error("Error switching srs_shadowrun.dll version:", error);
+    showToast("An unexpected error occurred", "error");
+  } finally {
+    // Re-enable buttons and remove loading state
+    srsDllNewerButton.disabled = false;
+    srsDllOlderButton.disabled = false;
+    targetButton.classList.remove("loading");
+  }
+}
+
+// Event listeners for segmented buttons
+if (srsDllNewerButton) {
+  srsDllNewerButton.addEventListener("click", () => {
+    if (!srsDllNewerButton.classList.contains("active")) {
+      switchSrsDllVersion("newer");
+    }
+  });
+}
+
+if (srsDllOlderButton) {
+  srsDllOlderButton.addEventListener("click", () => {
+    if (!srsDllOlderButton.classList.contains("active")) {
+      switchSrsDllVersion("older");
+    }
+  });
+}
+
+// Progress handler for srs_shadowrun.dll switching
+window.api.onSrsDllProgress((data) => {
+  // Optional: Could add a progress indicator here if needed
+  // For now, the loading state on the button is sufficient
+  // Progress updates are silent - loading spinner on button shows activity
+});
+
+// Check current version on load
+window.api.checkSrsDllVersion().then((status) => {
+  if (status.exists && status.version) {
+    updateSrsDllButtonStates(status.version);
+  }
+}).catch((error) => {
+  console.error("Error checking srs_shadowrun.dll version:", error);
 });
 
 // Update the skip intro progress handler to auto-close without a button

@@ -250,6 +250,10 @@ async function loadSettingsFromDisk() {
     const skipIntroStatus = await checkSkipIntroStatus();
     settings.skipIntro = skipIntroStatus.installed;
 
+    // Check DXVK status and update settings accordingly
+    const dxvkStatus = await checkDxvkStatus();
+    settings.dxvk = dxvkStatus.enabled;
+
     return settings;
   } catch (error) {
     log.error("Error loading settings", error);
@@ -3314,17 +3318,17 @@ function getHttpModule(url) {
 // Validation function for activation key entries (1 key with multiple PCIDs)
 function validateActivationKey(keyEntry, index) {
   const errors = [];
-
+  
   // Validate ID
   if (typeof keyEntry.id !== "number") {
     errors.push(`Key ${index + 1}: 'id' must be a number`);
   }
-
+  
   // Validate name (optional, but if present must be string)
   if (keyEntry.name !== undefined && typeof keyEntry.name !== "string") {
     errors.push(`Key ${index + 1}: 'name' must be a string if provided`);
   }
-
+  
   // Validate product key format (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX)
   if (!keyEntry.productKey || typeof keyEntry.productKey !== "string") {
     errors.push(
@@ -3354,8 +3358,8 @@ function validateActivationKey(keyEntry, index) {
           keyEntry.pcids.length
         })`
       );
-    }
-
+  }
+  
     // Validate each PCID format
     keyEntry.pcids.forEach((pcid, pcidIndex) => {
       if (typeof pcid !== "string") {
@@ -3377,7 +3381,7 @@ function validateActivationKey(keyEntry, index) {
       errors.push(`Key ${index + 1}: contains duplicate PCIDs`);
     }
   }
-
+  
   return errors;
 }
 
@@ -3391,7 +3395,7 @@ ipcMain.handle("activate-game", async () => {
       "activationKeys.json"
     );
     let activationConfig;
-
+    
     try {
       const configData = fs.readFileSync(configPath, "utf8");
       activationConfig = JSON.parse(configData);
@@ -3477,7 +3481,7 @@ ipcMain.handle("activate-game", async () => {
         `[Activation]   Key ${idx + 1}: ID=${key.id}, PCIDs=${
           key.pcids.length
         }${key.name ? `, Name="${key.name}"` : ""}`
-      );
+    );
     });
 
     // RANDOMLY SELECT an activation key
@@ -3916,17 +3920,17 @@ ipcMain.handle("activate-game", async () => {
             "[Step 6/6]    User will receive product key for manual entry"
           );
         } else {
-          console.error(
-            `[Step 6/6] ❌ Exception calling XLiveActivateHelper: ${helperError.message}`
-          );
+        console.error(
+          `[Step 6/6] ❌ Exception calling XLiveActivateHelper: ${helperError.message}`
+        );
         }
       }
 
       // Show warning if token injection failed (non-fatal) - auto-copy key to clipboard
       if (!tokenInjectionSuccess) {
         // AUTOMATICALLY copy the product key to clipboard
-        const { clipboard } = require("electron");
-        clipboard.writeText(PRODUCT_KEY);
+          const { clipboard } = require("electron");
+          clipboard.writeText(PRODUCT_KEY);
         console.log(
           "[Activation] Product key automatically copied to clipboard"
         );
@@ -4506,6 +4510,10 @@ ipcMain.handle("load-settings", async () => {
   if (fps) {
     settings.maxFrameRate = fps;
   }
+
+  // Check DXVK status and update settings
+  const dxvkStatus = await checkDxvkStatus();
+  settings.dxvk = dxvkStatus.enabled;
 
   return settings;
 });
@@ -5502,6 +5510,538 @@ ipcMain.on("skip-intro-final-state", (state) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("skip-intro-final-state", state);
   }
+});
+
+// ============================================================
+// DXVK SUPPORT TOGGLE
+// ============================================================
+
+const DXVK_ZIP_URL = "http://157.245.214.234/releases/d3d9.zip";
+const DXVK_TEMP_PATH = path.join(os.tmpdir(), "d3d9.zip");
+
+// Check DXVK status (d3d9.dll exists or d3d9.backup exists)
+async function checkDxvkStatus() {
+  try {
+    if (!fs.existsSync(GAME_INSTALL_DIR)) {
+      return { enabled: false, fileExists: false };
+    }
+
+    const d3d9Path = path.join(GAME_INSTALL_DIR, "d3d9.dll");
+    const backupPath = path.join(GAME_INSTALL_DIR, "d3d9.backup");
+
+    const d3d9Exists = fs.existsSync(d3d9Path);
+    const backupExists = fs.existsSync(backupPath);
+
+    // DXVK is enabled if d3d9.dll exists
+    return {
+      enabled: d3d9Exists,
+      fileExists: d3d9Exists || backupExists,
+    };
+  } catch (error) {
+    console.error("Error checking DXVK status:", error);
+    return { enabled: false, fileExists: false };
+  }
+}
+
+// Handle DXVK toggle
+ipcMain.handle("toggle-dxvk", async (event, enabled) => {
+  try {
+    // Check if game is installed
+    if (!fs.existsSync(GAME_INSTALL_DIR)) {
+      return { success: false, message: "Game not installed" };
+    }
+
+    const d3d9Path = path.join(GAME_INSTALL_DIR, "d3d9.dll");
+    const backupPath = path.join(GAME_INSTALL_DIR, "d3d9.backup");
+
+    if (enabled) {
+      // ---- ENABLE DXVK ----
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("dxvk-progress", {
+          step: "init",
+          status: "Enabling DXVK...",
+          progress: 10,
+        });
+      }
+
+      // Check if d3d9.backup exists - rename it to d3d9.dll
+      if (fs.existsSync(backupPath)) {
+        try {
+          fs.renameSync(backupPath, d3d9Path);
+          
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("dxvk-progress", {
+              step: "complete",
+              status: "DXVK enabled successfully",
+              progress: 100,
+            });
+          }
+
+          return { success: true, message: "DXVK enabled" };
+        } catch (error) {
+          console.error("Error renaming d3d9.backup:", error);
+          return {
+            success: false,
+            message: "Unable to enable DXVK. Please check file permissions.",
+          };
+        }
+      }
+
+      // Neither file exists - download from server
+      if (!fs.existsSync(d3d9Path)) {
+        try {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("dxvk-progress", {
+              step: "download",
+              status: "Downloading DXVK files...",
+              progress: 20,
+            });
+          }
+
+          // Download d3d9.zip
+          const downloaded = await downloadFile(
+            DXVK_ZIP_URL,
+            DXVK_TEMP_PATH,
+            (progress) => {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send("dxvk-progress", {
+                  step: "download",
+                  status: `Downloading DXVK files (${progress}%)...`,
+                  progress: 20 + Math.floor(progress / 2), // Scale to 20-70%
+                });
+              }
+            }
+          );
+
+          if (!downloaded) {
+            return {
+              success: false,
+              message:
+                "Unable to download DXVK file. Please check your internet connection.",
+            };
+          }
+
+          // Extract the zip file
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("dxvk-progress", {
+              step: "extract",
+              status: "Extracting DXVK files...",
+              progress: 70,
+            });
+          }
+
+          // Create temp extraction directory
+          const tempExtractDir = path.join(os.tmpdir(), "d3d9_extract");
+          if (!fs.existsSync(tempExtractDir)) {
+            fs.mkdirSync(tempExtractDir, { recursive: true });
+          }
+
+          try {
+            await extractZip(DXVK_TEMP_PATH, tempExtractDir);
+
+            // Find d3d9.dll in extracted files
+            const extractedD3d9 = path.join(tempExtractDir, "d3d9.dll");
+
+            if (!fs.existsSync(extractedD3d9)) {
+              throw new Error("d3d9.dll not found in downloaded archive");
+            }
+
+            // Copy to game directory
+            fs.copyFileSync(extractedD3d9, d3d9Path);
+
+            // Cleanup temp files
+            fs.rmSync(tempExtractDir, { recursive: true, force: true });
+            if (fs.existsSync(DXVK_TEMP_PATH)) {
+              fs.unlinkSync(DXVK_TEMP_PATH);
+            }
+
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("dxvk-progress", {
+                step: "complete",
+                status: "DXVK enabled successfully",
+                progress: 100,
+              });
+            }
+
+            return { success: true, message: "DXVK enabled" };
+          } catch (extractError) {
+            console.error("Error extracting DXVK files:", extractError);
+
+            // Cleanup on error
+            if (fs.existsSync(tempExtractDir)) {
+              fs.rmSync(tempExtractDir, { recursive: true, force: true });
+            }
+            if (fs.existsSync(DXVK_TEMP_PATH)) {
+              fs.unlinkSync(DXVK_TEMP_PATH);
+            }
+
+            return {
+              success: false,
+              message:
+                "Downloaded file appears corrupted. Please try again.",
+            };
+          }
+        } catch (error) {
+          console.error("Error downloading DXVK:", error);
+
+          // Determine error type
+          if (error.code === "ENOTFOUND" || error.code === "ETIMEDOUT") {
+            return {
+              success: false,
+              message:
+                "Unable to reach download server. Please check your internet connection.",
+            };
+          }
+
+          return {
+            success: false,
+            message:
+              "Failed to enable DXVK support. Please try again or manually place d3d9.dll in the game folder.",
+          };
+        }
+      }
+
+      // d3d9.dll already exists
+      return { success: true, message: "DXVK already enabled" };
+    } else {
+      // ---- DISABLE DXVK ----
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("dxvk-progress", {
+          step: "disable",
+          status: "Disabling DXVK...",
+          progress: 50,
+        });
+      }
+
+      // Check if d3d9.dll exists
+      if (!fs.existsSync(d3d9Path)) {
+        return {
+          success: false,
+          message: "DXVK is already disabled",
+        };
+      }
+
+      try {
+        // If d3d9.backup exists, delete it first
+        if (fs.existsSync(backupPath)) {
+          fs.unlinkSync(backupPath);
+        }
+
+        // Rename d3d9.dll to d3d9.backup
+        fs.renameSync(d3d9Path, backupPath);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("dxvk-progress", {
+            step: "complete",
+            status: "DXVK disabled successfully",
+            progress: 100,
+          });
+        }
+
+        return { success: true, message: "DXVK disabled" };
+      } catch (error) {
+        console.error("Error disabling DXVK:", error);
+
+        // Check if it's a permission error
+        if (error.code === "EPERM" || error.code === "EACCES") {
+          return {
+            success: false,
+            message:
+              "Unable to modify d3d9.dll. Please check file permissions or close the game.",
+          };
+        }
+
+        return {
+          success: false,
+          message: "Failed to disable DXVK. Please try again.",
+        };
+      }
+    }
+  } catch (error) {
+    console.error("Error toggling DXVK:", error);
+    return {
+      success: false,
+      message: "An unexpected error occurred. Please try again.",
+    };
+  }
+});
+
+ipcMain.handle("check-dxvk-status", async () => {
+  return checkDxvkStatus();
+});
+
+// ============================================================
+// SRS_SHADOWRUN.DLL VERSION SWITCHING
+// ============================================================
+
+const SRS_DLL_ZIP_URL = "http://157.245.214.234/releases/srs_shadowrun.zip";
+const SRS_DLL_TEMP_PATH = path.join(os.tmpdir(), "srs_shadowrun.zip");
+
+// File size constants (in bytes)
+const SRS_DLL_NEWER_SIZE = 14336; // 14 KB
+const SRS_DLL_OLDER_SIZE = 273705; // 267-268 KB
+
+// Check which version of srs_shadowrun.dll is active
+async function checkSrsDllVersion() {
+  try {
+    if (!fs.existsSync(GAME_INSTALL_DIR)) {
+      return { version: null, exists: false };
+    }
+
+    const dllPath = path.join(GAME_INSTALL_DIR, "srs_shadowrun.dll");
+    
+    if (!fs.existsSync(dllPath)) {
+      return { version: null, exists: false };
+    }
+
+    const stats = fs.statSync(dllPath);
+    const fileSize = stats.size;
+
+    // Determine version by file size (with some tolerance)
+    if (Math.abs(fileSize - SRS_DLL_NEWER_SIZE) < 1000) {
+      return { version: "newer", exists: true, size: fileSize };
+    } else if (Math.abs(fileSize - SRS_DLL_OLDER_SIZE) < 1000) {
+      return { version: "older", exists: true, size: fileSize };
+    } else {
+      // Unknown version
+      return { version: "unknown", exists: true, size: fileSize };
+    }
+  } catch (error) {
+    console.error("Error checking srs_shadowrun.dll version:", error);
+    return { version: null, exists: false };
+  }
+}
+
+// Handle srs_shadowrun.dll version switching
+ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
+  try {
+    // Check if game is installed
+    if (!fs.existsSync(GAME_INSTALL_DIR)) {
+      return { success: false, message: "Game not installed" };
+    }
+
+    const dllPath = path.join(GAME_INSTALL_DIR, "srs_shadowrun.dll");
+    const altPath = path.join(GAME_INSTALL_DIR, "srs_shadowrun.dll.alt");
+
+    // Send initial progress
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("srs-dll-progress", {
+        step: "init",
+        status: "Switching version...",
+        progress: 10,
+      });
+    }
+
+    // Check current version
+    const currentStatus = await checkSrsDllVersion();
+    
+    if (!currentStatus.exists) {
+      return {
+        success: false,
+        message: "srs_shadowrun.dll not found. Please reinstall the game.",
+      };
+    }
+
+    // If already on target version, do nothing
+    if (currentStatus.version === targetVersion) {
+      return {
+        success: true,
+        message: `Already using ${targetVersion} version`,
+      };
+    }
+
+    // Check if alternative version exists
+    const altExists = fs.existsSync(altPath);
+    
+    if (altExists) {
+      // Alternative exists - just swap them
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("srs-dll-progress", {
+            step: "swap",
+            status: "Swapping versions...",
+            progress: 50,
+          });
+        }
+
+        // Create temp backup
+        const tempPath = path.join(GAME_INSTALL_DIR, "srs_shadowrun.dll.temp");
+        
+        // Move current to temp
+        fs.renameSync(dllPath, tempPath);
+        
+        // Move alt to current
+        fs.renameSync(altPath, dllPath);
+        
+        // Move temp to alt
+        fs.renameSync(tempPath, altPath);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("srs-dll-progress", {
+            step: "complete",
+            status: `Switched to ${targetVersion} version successfully`,
+            progress: 100,
+          });
+        }
+
+        return {
+          success: true,
+          message: `Switched to ${targetVersion} version`,
+        };
+      } catch (error) {
+        console.error("Error swapping versions:", error);
+        return {
+          success: false,
+          message: "Unable to swap versions. Please check file permissions or close the game.",
+        };
+      }
+    } else {
+      // Alternative doesn't exist - need to download from server
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("srs-dll-progress", {
+            step: "download",
+            status: "Downloading versions from server...",
+            progress: 20,
+          });
+        }
+
+        // Download the ZIP containing both versions
+        const downloaded = await downloadFile(
+          SRS_DLL_ZIP_URL,
+          SRS_DLL_TEMP_PATH,
+          (progress) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("srs-dll-progress", {
+                step: "download",
+                status: `Downloading versions (${progress}%)...`,
+                progress: 20 + Math.floor(progress / 2), // Scale to 20-70%
+              });
+            }
+          }
+        );
+
+        if (!downloaded) {
+          return {
+            success: false,
+            message: "Unable to download version files. Please check your internet connection.",
+          };
+        }
+
+        // Extract the ZIP
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("srs-dll-progress", {
+            step: "extract",
+            status: "Extracting files...",
+            progress: 70,
+          });
+        }
+
+        const tempExtractDir = path.join(os.tmpdir(), "srs_shadowrun_extract");
+        if (!fs.existsSync(tempExtractDir)) {
+          fs.mkdirSync(tempExtractDir, { recursive: true });
+        }
+
+        try {
+          await extractZip(SRS_DLL_TEMP_PATH, tempExtractDir);
+
+          // Find the extracted files
+          const extractedNewer = path.join(tempExtractDir, "srs_shadowrun.dll");
+          const extractedOlder = path.join(tempExtractDir, "srs_shadowrun.old");
+
+          if (!fs.existsSync(extractedNewer) || !fs.existsSync(extractedOlder)) {
+            throw new Error("Required files not found in downloaded archive");
+          }
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("srs-dll-progress", {
+              step: "install",
+              status: "Installing versions...",
+              progress: 85,
+            });
+          }
+
+          // Determine which file to use as current and which as alt
+          let targetFile, altFile;
+          
+          if (targetVersion === "newer") {
+            targetFile = extractedNewer;
+            altFile = extractedOlder;
+          } else {
+            targetFile = extractedOlder;
+            altFile = extractedNewer;
+          }
+
+          // Backup current version to .alt
+          if (fs.existsSync(dllPath)) {
+            fs.copyFileSync(dllPath, altPath);
+          }
+
+          // Copy target version to main location
+          fs.copyFileSync(targetFile, dllPath);
+
+          // Cleanup temp files
+          fs.rmSync(tempExtractDir, { recursive: true, force: true });
+          if (fs.existsSync(SRS_DLL_TEMP_PATH)) {
+            fs.unlinkSync(SRS_DLL_TEMP_PATH);
+          }
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("srs-dll-progress", {
+              step: "complete",
+              status: `Switched to ${targetVersion} version successfully`,
+              progress: 100,
+            });
+          }
+
+          return {
+            success: true,
+            message: `Switched to ${targetVersion} version`,
+          };
+        } catch (extractError) {
+          console.error("Error extracting/installing versions:", extractError);
+
+          // Cleanup on error
+          if (fs.existsSync(tempExtractDir)) {
+            fs.rmSync(tempExtractDir, { recursive: true, force: true });
+          }
+          if (fs.existsSync(SRS_DLL_TEMP_PATH)) {
+            fs.unlinkSync(SRS_DLL_TEMP_PATH);
+          }
+
+          return {
+            success: false,
+            message: "Downloaded file appears corrupted. Please try again.",
+          };
+        }
+      } catch (error) {
+        console.error("Error downloading versions:", error);
+
+        // Determine error type
+        if (error.code === "ENOTFOUND" || error.code === "ETIMEDOUT") {
+          return {
+            success: false,
+            message: "Unable to reach download server. Please check your internet connection.",
+          };
+        }
+
+        return {
+          success: false,
+          message: "Failed to switch versions. Please try again.",
+        };
+      }
+    }
+  } catch (error) {
+    console.error("Error switching srs_shadowrun.dll version:", error);
+    return {
+      success: false,
+      message: "An unexpected error occurred. Please try again.",
+    };
+  }
+});
+
+ipcMain.handle("check-srs-dll-version", async () => {
+  return checkSrsDllVersion();
 });
 
 // Update the open-game-directory handler to use GAME_INSTALL_DIR

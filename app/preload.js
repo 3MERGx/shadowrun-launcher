@@ -106,6 +106,21 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("skip-intro-final-state", (_, state) => callback(state));
   },
 
+  // DXVK Support methods
+  toggleDxvk: (enabled) => ipcRenderer.invoke("toggle-dxvk", enabled),
+  checkDxvkStatus: () => ipcRenderer.invoke("check-dxvk-status"),
+  onDxvkProgress: (callback) => {
+    ipcRenderer.on("dxvk-progress", (_, data) => callback(data));
+  },
+
+  // srs_shadowrun.dll version switching methods
+  switchSrsDllVersion: (version) =>
+    ipcRenderer.invoke("switch-srs-dll-version", version),
+  checkSrsDllVersion: () => ipcRenderer.invoke("check-srs-dll-version"),
+  onSrsDllProgress: (callback) => {
+    ipcRenderer.on("srs-dll-progress", (_, data) => callback(data));
+  },
+
   // Add this with the other exposed methods
   openGameDirectory: () => ipcRenderer.invoke("open-game-directory"),
 
