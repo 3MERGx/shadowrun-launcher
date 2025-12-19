@@ -1319,6 +1319,16 @@ button:focus {
   }
 }
 
+/* Changelog link styling */
+#viewChangelogLink {
+  transition: color 0.2s ease, text-decoration 0.2s ease;
+}
+
+#viewChangelogLink:hover {
+  color: #93c5fd !important;
+  text-decoration: underline !important;
+}
+
 /* Add a subtle pulse animation during cooldown */
 @keyframes cooldownPulse {
   0% {

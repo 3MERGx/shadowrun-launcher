@@ -15,7 +15,8 @@
   "scripts": {
     "start": "electron .",
     "start:dev": "electron . --dev",
-    "build:win": "npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --minify && electron-builder --win",
+    "prebuild": "node scripts/generate-changelog.js",
+    "build:win": "npm run prebuild && npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --minify && electron-builder --win",
     "build:win:clean": "npm run build:win && npm run cleanup-build",
     "cleanup-build": "node scripts/cleanup-build.js"
   },
@@ -66,6 +67,10 @@
       {
         "from": "resources/XLiveActivateHelper/bin/Release/win-x86/XLiveActivateHelper.exe",
         "to": "XLiveActivateHelper.exe"
+      },
+      {
+        "from": "changelog.json",
+        "to": "changelog.json"
       }
     ],
     "win": {

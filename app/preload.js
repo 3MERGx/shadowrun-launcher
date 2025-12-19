@@ -121,6 +121,9 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("srs-dll-progress", (_, data) => callback(data));
   },
 
+  // Changelog methods
+  getChangelog: () => ipcRenderer.invoke("get-changelog"),
+
   // Add this with the other exposed methods
   openGameDirectory: () => ipcRenderer.invoke("open-game-directory"),
 

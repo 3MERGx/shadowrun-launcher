@@ -258,25 +258,6 @@ console.log(
 // Add this at the very beginning of your index.js, outside any functions or event listeners
 console.log("Script loading...");
 
-// Try to add an event listener directly when the script loads
-setTimeout(() => {
-  console.log("Trying to attach button handler directly");
-  const btn = document.getElementById("openGameDirButton");
-  if (btn) {
-    console.log("Found button, attaching direct click handler");
-    btn.onclick = function () {
-      console.log("DIRECT CLICK HANDLER FIRED");
-      try {
-        window.api.openGameDirectory();
-      } catch (err) {
-        console.error("Error in direct handler:", err);
-      }
-    };
-  } else {
-    console.error("Button not found in setTimeout");
-  }
-}, 1000);
-
 // Audio elements
 const backgroundAudio = document.getElementById("backgroundAudio");
 const buttonHoverAudio = document.getElementById("buttonHoverAudio");
@@ -407,6 +388,12 @@ const dxvkToggle = document.getElementById("dxvk");
 const srsDllNewerButton = document.getElementById("srsDllNewerButton");
 const srsDllOlderButton = document.getElementById("srsDllOlderButton");
 
+// Changelog elements
+const viewChangelogLink = document.getElementById("viewChangelogLink");
+const changelogScreen = document.getElementById("changelogScreen");
+const closeChangelogButton = document.getElementById("closeChangelogButton");
+const changelogContent = document.getElementById("changelogContent");
+
 // Game state (this would normally be managed by the main process)
 let gameInstalled = false;
 let settings = {
@@ -492,7 +479,6 @@ const skipIntroProgressBar = document.getElementById("skipIntroProgressBar");
 
 // Add this with other DOM elements at the top
 const openGameDirButton = document.getElementById("openGameDirButton");
-console.log("Open Game Dir Button found:", !!openGameDirButton);
 
 // Add these DOM element references near the top with other element references
 const backupPcidButton = document.getElementById("backupPcidButton");
@@ -706,6 +692,11 @@ settingsButton.addEventListener("click", () => {
   window.api.checkSkipIntroStatus().then((status) => {
     updateSkipIntroButtonState(status.installed);
   });
+
+  // Check DXVK status whenever settings are opened
+  window.api.checkDxvkStatus().then((status) => {
+    dxvkToggle.checked = status.enabled;
+  });
 });
 
 closeSettingsButton.addEventListener("click", () => {
@@ -829,16 +820,16 @@ if (dxvkToggle) {
       } else {
         // Revert toggle state on failure
         dxvkToggle.checked = !newState;
-        
+
         // Show error toast
         showToast(result.message, "error", 5000);
       }
     } catch (error) {
       console.error("Error toggling DXVK:", error);
-      
+
       // Revert toggle state on error
       dxvkToggle.checked = !newState;
-      
+
       showToast("An unexpected error occurred", "error");
     } finally {
       // Restore label and re-enable toggle
@@ -1207,13 +1198,184 @@ window.api.onSrsDllProgress((data) => {
 });
 
 // Check current version on load
-window.api.checkSrsDllVersion().then((status) => {
-  if (status.exists && status.version) {
-    updateSrsDllButtonStates(status.version);
+window.api
+  .checkSrsDllVersion()
+  .then((status) => {
+    if (status.exists && status.version) {
+      updateSrsDllButtonStates(status.version);
+    }
+  })
+  .catch((error) => {
+    console.error("Error checking srs_shadowrun.dll version:", error);
+  });
+
+// ============================================================
+// CHANGELOG VIEWER
+// ============================================================
+
+// Function to fetch and display changelog
+async function loadChangelog() {
+  try {
+    changelogContent.innerHTML = `
+      <div style="text-align: center; padding: 20px; color: rgba(255, 255, 255, 0.5);">
+        Loading changelog...
+      </div>
+    `;
+
+    // Try IPC first (reads from local file or bundled resource)
+    let changelog = null;
+    let changelogSource = "unknown";
+
+    try {
+      const result = await window.api.getChangelog();
+      if (result.success) {
+        changelog = result.data;
+        changelogSource = result.source;
+        console.log(`[Changelog] Loaded from ${changelogSource}`);
+      }
+    } catch (ipcError) {
+      console.log("[Changelog] IPC failed, trying server...");
+    }
+
+    // If IPC fails, try server as fallback
+    if (!changelog) {
+      try {
+        const serverResponse = await fetch(
+          "http://157.245.214.234/launcher/changelog.json"
+        );
+        if (serverResponse.ok) {
+          changelog = await serverResponse.json();
+          changelogSource = "server";
+          console.log("[Changelog] Loaded from server");
+        }
+      } catch (serverError) {
+        console.log("[Changelog] Server not available");
+      }
+    }
+
+    // If no changelog found
+    if (!changelog || Object.keys(changelog).length === 0) {
+      changelogContent.innerHTML = `
+        <div style="text-align: center; padding: 40px; color: rgba(255, 255, 255, 0.5);">
+          <p style="font-size: 48px; margin-bottom: 16px;">📝</p>
+          <p style="font-size: 16px; margin-bottom: 8px;">No changelog available</p>
+          <p style="font-size: 12px; color: rgba(255, 255, 255, 0.3);">
+            Check back after the next update!
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    // Sort versions by semantic version (newest first)
+    const versions = Object.keys(changelog).sort((a, b) => {
+      const aParts = a.split(".").map(Number);
+      const bParts = b.split(".").map(Number);
+
+      for (let i = 0; i < 3; i++) {
+        if (aParts[i] !== bParts[i]) {
+          return bParts[i] - aParts[i];
+        }
+      }
+      return 0;
+    });
+
+    // Limit to last 5 versions
+    const recentVersions = versions.slice(0, 5);
+
+    // Build HTML
+    let html = "";
+
+    recentVersions.forEach((version, index) => {
+      const entry = changelog[version];
+      const isLatest = index === 0;
+
+      html += `
+        <div style="margin-bottom: 24px; padding-bottom: 24px; ${
+          index < recentVersions.length - 1
+            ? "border-bottom: 1px solid rgba(255, 255, 255, 0.1);"
+            : ""
+        }">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <h3 style="font-size: 18px; font-weight: 600; color: #60a5fa; margin: 0;">
+              v${entry.version}
+            </h3>
+            ${
+              isLatest
+                ? '<span style="background: #10b981; color: white; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500;">LATEST</span>'
+                : ""
+            }
+            <span style="color: rgba(255, 255, 255, 0.4); font-size: 12px; margin-left: auto;">
+              ${entry.date}
+            </span>
+          </div>
+          <ul style="list-style: none; padding: 0; margin: 0; font-size: 13px; line-height: 1.8;">
+      `;
+
+      entry.notes.forEach((note) => {
+        // Parse markdown-style bold text
+        const formattedNote = note.replace(
+          /\*\*([^*]+)\*\*/g,
+          '<strong style="color: #60a5fa;">$1</strong>'
+        );
+
+        html += `
+          <li style="margin-bottom: 4px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
+            <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
+            ${formattedNote}
+          </li>
+        `;
+      });
+
+      html += `
+          </ul>
+        </div>
+      `;
+    });
+
+    // Add footer note if there are more versions
+    if (versions.length > 5) {
+      html += `
+        <div style="text-align: center; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.4); font-size: 12px;">
+          Showing ${recentVersions.length} of ${versions.length} versions
+        </div>
+      `;
+    }
+
+    changelogContent.innerHTML = html;
+  } catch (error) {
+    console.error("Error loading changelog:", error);
+    changelogContent.innerHTML = `
+      <div style="text-align: center; padding: 40px; color: rgba(220, 38, 38, 0.8);">
+        <p style="font-size: 48px; margin-bottom: 16px;">⚠️</p>
+        <p style="font-size: 16px; margin-bottom: 8px;">Failed to load changelog</p>
+        <p style="font-size: 12px; color: rgba(255, 255, 255, 0.3);">
+          ${error.message}
+        </p>
+      </div>
+    `;
   }
-}).catch((error) => {
-  console.error("Error checking srs_shadowrun.dll version:", error);
-});
+}
+
+// Event listeners
+if (viewChangelogLink && changelogScreen && closeChangelogButton) {
+  viewChangelogLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    changelogScreen.classList.add("visible");
+    loadChangelog();
+  });
+
+  closeChangelogButton.addEventListener("click", () => {
+    changelogScreen.classList.remove("visible");
+  });
+
+  // Close on background click
+  changelogScreen.addEventListener("click", (e) => {
+    if (e.target === changelogScreen) {
+      changelogScreen.classList.remove("visible");
+    }
+  });
+}
 
 // Update the skip intro progress handler to auto-close without a button
 window.api.onSkipIntroProgress((data) => {

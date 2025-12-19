@@ -3318,17 +3318,17 @@ function getHttpModule(url) {
 // Validation function for activation key entries (1 key with multiple PCIDs)
 function validateActivationKey(keyEntry, index) {
   const errors = [];
-  
+
   // Validate ID
   if (typeof keyEntry.id !== "number") {
     errors.push(`Key ${index + 1}: 'id' must be a number`);
   }
-  
+
   // Validate name (optional, but if present must be string)
   if (keyEntry.name !== undefined && typeof keyEntry.name !== "string") {
     errors.push(`Key ${index + 1}: 'name' must be a string if provided`);
   }
-  
+
   // Validate product key format (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX)
   if (!keyEntry.productKey || typeof keyEntry.productKey !== "string") {
     errors.push(
@@ -3358,8 +3358,8 @@ function validateActivationKey(keyEntry, index) {
           keyEntry.pcids.length
         })`
       );
-  }
-  
+    }
+
     // Validate each PCID format
     keyEntry.pcids.forEach((pcid, pcidIndex) => {
       if (typeof pcid !== "string") {
@@ -3381,7 +3381,7 @@ function validateActivationKey(keyEntry, index) {
       errors.push(`Key ${index + 1}: contains duplicate PCIDs`);
     }
   }
-  
+
   return errors;
 }
 
@@ -3395,7 +3395,7 @@ ipcMain.handle("activate-game", async () => {
       "activationKeys.json"
     );
     let activationConfig;
-    
+
     try {
       const configData = fs.readFileSync(configPath, "utf8");
       activationConfig = JSON.parse(configData);
@@ -3481,7 +3481,7 @@ ipcMain.handle("activate-game", async () => {
         `[Activation]   Key ${idx + 1}: ID=${key.id}, PCIDs=${
           key.pcids.length
         }${key.name ? `, Name="${key.name}"` : ""}`
-    );
+      );
     });
 
     // RANDOMLY SELECT an activation key
@@ -3920,17 +3920,17 @@ ipcMain.handle("activate-game", async () => {
             "[Step 6/6]    User will receive product key for manual entry"
           );
         } else {
-        console.error(
-          `[Step 6/6] ❌ Exception calling XLiveActivateHelper: ${helperError.message}`
-        );
+          console.error(
+            `[Step 6/6] ❌ Exception calling XLiveActivateHelper: ${helperError.message}`
+          );
         }
       }
 
       // Show warning if token injection failed (non-fatal) - auto-copy key to clipboard
       if (!tokenInjectionSuccess) {
         // AUTOMATICALLY copy the product key to clipboard
-          const { clipboard } = require("electron");
-          clipboard.writeText(PRODUCT_KEY);
+        const { clipboard } = require("electron");
+        clipboard.writeText(PRODUCT_KEY);
         console.log(
           "[Activation] Product key automatically copied to clipboard"
         );
@@ -5568,7 +5568,7 @@ ipcMain.handle("toggle-dxvk", async (event, enabled) => {
       if (fs.existsSync(backupPath)) {
         try {
           fs.renameSync(backupPath, d3d9Path);
-          
+
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send("dxvk-progress", {
               step: "complete",
@@ -5677,8 +5677,7 @@ ipcMain.handle("toggle-dxvk", async (event, enabled) => {
 
             return {
               success: false,
-              message:
-                "Downloaded file appears corrupted. Please try again.",
+              message: "Downloaded file appears corrupted. Please try again.",
             };
           }
         } catch (error) {
@@ -5789,7 +5788,7 @@ async function checkSrsDllVersion() {
     }
 
     const dllPath = path.join(GAME_INSTALL_DIR, "srs_shadowrun.dll");
-    
+
     if (!fs.existsSync(dllPath)) {
       return { version: null, exists: false };
     }
@@ -5834,7 +5833,7 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
 
     // Check current version
     const currentStatus = await checkSrsDllVersion();
-    
+
     if (!currentStatus.exists) {
       return {
         success: false,
@@ -5852,7 +5851,7 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
 
     // Check if alternative version exists
     const altExists = fs.existsSync(altPath);
-    
+
     if (altExists) {
       // Alternative exists - just swap them
       try {
@@ -5866,13 +5865,13 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
 
         // Create temp backup
         const tempPath = path.join(GAME_INSTALL_DIR, "srs_shadowrun.dll.temp");
-        
+
         // Move current to temp
         fs.renameSync(dllPath, tempPath);
-        
+
         // Move alt to current
         fs.renameSync(altPath, dllPath);
-        
+
         // Move temp to alt
         fs.renameSync(tempPath, altPath);
 
@@ -5892,7 +5891,8 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
         console.error("Error swapping versions:", error);
         return {
           success: false,
-          message: "Unable to swap versions. Please check file permissions or close the game.",
+          message:
+            "Unable to swap versions. Please check file permissions or close the game.",
         };
       }
     } else {
@@ -5924,7 +5924,8 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
         if (!downloaded) {
           return {
             success: false,
-            message: "Unable to download version files. Please check your internet connection.",
+            message:
+              "Unable to download version files. Please check your internet connection.",
           };
         }
 
@@ -5949,7 +5950,10 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
           const extractedNewer = path.join(tempExtractDir, "srs_shadowrun.dll");
           const extractedOlder = path.join(tempExtractDir, "srs_shadowrun.old");
 
-          if (!fs.existsSync(extractedNewer) || !fs.existsSync(extractedOlder)) {
+          if (
+            !fs.existsSync(extractedNewer) ||
+            !fs.existsSync(extractedOlder)
+          ) {
             throw new Error("Required files not found in downloaded archive");
           }
 
@@ -5963,7 +5967,7 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
 
           // Determine which file to use as current and which as alt
           let targetFile, altFile;
-          
+
           if (targetVersion === "newer") {
             targetFile = extractedNewer;
             altFile = extractedOlder;
@@ -6021,7 +6025,8 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
         if (error.code === "ENOTFOUND" || error.code === "ETIMEDOUT") {
           return {
             success: false,
-            message: "Unable to reach download server. Please check your internet connection.",
+            message:
+              "Unable to reach download server. Please check your internet connection.",
           };
         }
 
@@ -6042,6 +6047,38 @@ ipcMain.handle("switch-srs-dll-version", async (event, targetVersion) => {
 
 ipcMain.handle("check-srs-dll-version", async () => {
   return checkSrsDllVersion();
+});
+
+// ============================================================
+// CHANGELOG SUPPORT
+// ============================================================
+
+// Handle getting changelog (tries local file first for dev, then server)
+ipcMain.handle("get-changelog", async () => {
+  try {
+    // Try to read from local file first (for dev/bundled app)
+    const localChangelogPath = path.join(app.getAppPath(), "changelog.json");
+
+    if (fs.existsSync(localChangelogPath)) {
+      const changelogData = fs.readFileSync(localChangelogPath, "utf8");
+
+      return {
+        success: true,
+        data: JSON.parse(changelogData),
+        source: "local",
+      };
+    }
+
+    // If local doesn't exist, try server
+    console.log("[Changelog] Local file not found, trying server...");
+    return {
+      success: false,
+      message: "Changelog not found locally. Fetching from server...",
+    };
+  } catch (error) {
+    console.error("[Changelog] Error reading changelog:", error);
+    return { success: false, message: error.message };
+  }
 });
 
 // Update the open-game-directory handler to use GAME_INSTALL_DIR

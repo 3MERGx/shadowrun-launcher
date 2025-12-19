@@ -190,11 +190,7 @@
                 >Open the folder where Shadowrun is installed</span
               >
             </div>
-            <button
-              id="openGameDirButton"
-              class="settings-action-button"
-              onclick="console.log('HTML onclick fired'); window.api.openGameDirectory(); return false;"
-            >
+            <button id="openGameDirButton" class="settings-action-button">
               Open Game Folder
             </button>
           </div>
@@ -258,7 +254,17 @@
             <div class="setting-label-group">
               <label>Check for Updates</label>
               <span class="setting-description"
-                >Check if a new version of the launcher is available</span
+                >Check if a new version of the launcher is available<br />
+                <a
+                  id="viewChangelogLink"
+                  style="
+                    color: #60a5fa;
+                    cursor: pointer;
+                    text-decoration: none;
+                    font-size: 11px;
+                  "
+                  >View Changelog</a
+                ></span
               >
             </div>
             <button id="btnCheckUpdates" class="settings-action-button">
@@ -293,8 +299,16 @@
 
       <div class="settings-content">
         <!-- Warning Notice -->
-        <div style="background: rgba(234, 179, 8, 0.1); border-left: 3px solid rgba(234, 179, 8, 0.6); padding: 8px 12px; margin-bottom: 16px; border-radius: 2px;">
-          <div style="font-size: 11px; color: #fbbf24;">
+        <div
+          style="
+            background: rgba(234, 179, 8, 0.1);
+            border-left: 3px solid rgba(234, 179, 8, 0.6);
+            padding: 8px 12px;
+            margin-bottom: 16px;
+            border-radius: 2px;
+          "
+        >
+          <div style="font-size: 11px; color: #fbbf24">
             ⚠️ Use at your own risk.
           </div>
         </div>
@@ -307,7 +321,8 @@
             <div class="setting-label-group">
               <label>Run System Check</label>
               <span class="setting-description"
-                >Check DirectX, GPU drivers, and Windows services for common issues</span
+                >Check DirectX, GPU drivers, and Windows services for common
+                issues</span
               >
             </div>
             <button id="runDiagnosticsButton" class="settings-action-button">
@@ -316,20 +331,81 @@
           </div>
 
           <div class="setting-item">
-            <div class="setting-label-group" style="width: 100%;">
+            <div class="setting-label-group" style="width: 100%">
               <label>System Information</label>
-              <div style="display: flex; gap: 16px; margin-top: 12px; align-items: flex-start;">
-                <div id="systemInfoDisplay" style="flex: 1; font-size: 12px;">
-                  <div style="margin-bottom: 6px;"><strong style="color: #60a5fa; min-width: 50px; display: inline-block;">GPU:</strong> <span id="gpuInfo" style="color: #e5e7eb;">Detecting...</span></div>
-                  <div style="margin-bottom: 6px;"><strong style="color: #60a5fa; min-width: 50px; display: inline-block;">CPU:</strong> <span id="cpuInfo" style="color: #e5e7eb;">Detecting...</span></div>
-                  <div style="margin-bottom: 6px;"><strong style="color: #60a5fa; min-width: 50px; display: inline-block;">OS:</strong> <span id="osInfo" style="color: #e5e7eb;">Detecting...</span></div>
-                  <div><strong style="color: #10b981; min-width: 50px; display: inline-block;">NAT:</strong> <span id="natInfo" style="color: #e5e7eb;">Detecting...</span></div>
+              <div
+                style="
+                  display: flex;
+                  gap: 16px;
+                  margin-top: 12px;
+                  align-items: flex-start;
+                "
+              >
+                <div id="systemInfoDisplay" style="flex: 1; font-size: 12px">
+                  <div style="margin-bottom: 6px">
+                    <strong
+                      style="
+                        color: #60a5fa;
+                        min-width: 50px;
+                        display: inline-block;
+                      "
+                      >GPU:</strong
+                    >
+                    <span id="gpuInfo" style="color: #e5e7eb"
+                      >Detecting...</span
+                    >
+                  </div>
+                  <div style="margin-bottom: 6px">
+                    <strong
+                      style="
+                        color: #60a5fa;
+                        min-width: 50px;
+                        display: inline-block;
+                      "
+                      >CPU:</strong
+                    >
+                    <span id="cpuInfo" style="color: #e5e7eb"
+                      >Detecting...</span
+                    >
+                  </div>
+                  <div style="margin-bottom: 6px">
+                    <strong
+                      style="
+                        color: #60a5fa;
+                        min-width: 50px;
+                        display: inline-block;
+                      "
+                      >OS:</strong
+                    >
+                    <span id="osInfo" style="color: #e5e7eb">Detecting...</span>
+                  </div>
+                  <div>
+                    <strong
+                      style="
+                        color: #10b981;
+                        min-width: 50px;
+                        display: inline-block;
+                      "
+                      >NAT:</strong
+                    >
+                    <span id="natInfo" style="color: #e5e7eb"
+                      >Detecting...</span
+                    >
+                  </div>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 8px;">
-                  <button id="detectSystemButton" class="settings-action-button" style="white-space: nowrap; min-width: 140px;">
+                <div style="display: flex; flex-direction: column; gap: 8px">
+                  <button
+                    id="detectSystemButton"
+                    class="settings-action-button"
+                    style="white-space: nowrap; min-width: 140px"
+                  >
                     Detect System
                   </button>
-                  <button id="copySystemInfoButton" class="settings-action-button" style="white-space: nowrap; min-width: 140px;">
+                  <button
+                    id="copySystemInfoButton"
+                    class="settings-action-button"
+                    style="white-space: nowrap; min-width: 140px"
+                  >
                     Copy to Clipboard
                   </button>
                 </div>
@@ -377,7 +453,8 @@
             <div class="setting-label-group">
               <label>srs_shadowrun.dll Toggle</label>
               <span class="setting-description"
-                >Switch to older/larger library version (267 KB) for compatibility</span
+                >Switch to older/larger library version (267 KB) for
+                compatibility</span
               >
             </div>
             <div class="segmented-control">
@@ -407,7 +484,8 @@
             <div class="setting-label-group">
               <label>Fix License Manager Error</label>
               <span class="setting-description"
-                >Fixes error 0x80072746 by starting Windows License Manager Service</span
+                >Fixes error 0x80072746 by starting Windows License Manager
+                Service</span
               >
             </div>
             <button id="fixLicenseManagerButton" class="settings-action-button">
@@ -419,10 +497,14 @@
             <div class="setting-label-group">
               <label>Restart Xbox Live Networking</label>
               <span class="setting-description"
-                >Restarts Xbox Live Networking Service to fix connection issues</span
+                >Restarts Xbox Live Networking Service to fix connection
+                issues</span
               >
             </div>
-            <button id="restartXboxNetworkingButton" class="settings-action-button">
+            <button
+              id="restartXboxNetworkingButton"
+              class="settings-action-button"
+            >
               Restart Service
             </button>
           </div>
@@ -431,7 +513,8 @@
             <div class="setting-label-group">
               <label>System File Checker</label>
               <span class="setting-description"
-                >Runs Windows SFC scan to fix corrupted system files (fixes errors 1603/1722)</span
+                >Runs Windows SFC scan to fix corrupted system files (fixes
+                errors 1603/1722)</span
               >
             </div>
             <button id="runSfcScanButton" class="settings-action-button">
@@ -519,6 +602,29 @@
             <button id="gotItButton" class="instructions-got-it-button">
               Got it!
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Changelog Modal -->
+    <div id="changelogScreen" class="modal-screen">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Changelog</h2>
+          <button id="closeChangelogButton" class="close-button">×</button>
+        </div>
+        <div class="modal-body" style="max-height: 500px; overflow-y: auto">
+          <div id="changelogContent" style="padding: 12px">
+            <div
+              style="
+                text-align: center;
+                padding: 20px;
+                color: rgba(255, 255, 255, 0.5);
+              "
+            >
+              Loading changelog...
+            </div>
           </div>
         </div>
       </div>

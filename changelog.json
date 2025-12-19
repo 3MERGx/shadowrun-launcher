@@ -1,0 +1,15 @@
+{
+  "0.9.8": {
+    "version": "0.9.8",
+    "date": "2025-12-15",
+    "notes": [
+      "**Added:** Changelog Modal & History",
+      "**Added:** DXVK Support toggle for better compatibility",
+      "**Added:** srs_shadowrun.dll version switcher (newer/older)",
+      "**Added:** System diagnostics and troubleshooting tools",
+      "**Added:** Automatic updates",
+      "**Improved:** Game activation with auto-injection",
+      "**Improved:** File download progress tracking"
+    ]
+  }
+}
