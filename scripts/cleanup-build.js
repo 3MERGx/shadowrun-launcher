@@ -53,6 +53,23 @@ if (errorCount > 0) {
   console.log(`   Errors: ${errorCount}`);
 }
 
+// Copy changelog.json to dist for server upload
+console.log(`\n📋 Copying changelog.json to dist/...`);
+try {
+  const changelogSrc = path.join(__dirname, '..', 'changelog.json');
+  const changelogDest = path.join(distDir, 'changelog.json');
+  
+  if (fs.existsSync(changelogSrc)) {
+    fs.copyFileSync(changelogSrc, changelogDest);
+    console.log(`✅ Copied changelog.json to dist/`);
+    console.log(`   📤 Upload this to: http://157.245.214.234/launcher/changelog.json`);
+  } else {
+    console.log(`⚠️  changelog.json not found - skipping copy`);
+  }
+} catch (error) {
+  console.error(`❌ Error copying changelog.json:`, error.message);
+}
+
 // List remaining files
 console.log(`\n📦 Remaining files in dist/:`);
 try {
