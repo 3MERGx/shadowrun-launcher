@@ -1563,7 +1563,7 @@ async function loadChangelog() {
     const versions = Object.keys(changelog).sort((a, b) => {
       const aParts = a.split(".").map(Number);
       const bParts = b.split(".").map(Number);
-      
+
       // Compare up to the maximum length of either version
       const maxLength = Math.max(aParts.length, bParts.length);
       
@@ -1644,17 +1644,17 @@ async function loadChangelog() {
           `;
         } else {
           // No dash separator - render as single line (backwards compatibility)
-          const formattedNote = note.replace(
-            /\*\*([^*]+)\*\*/g,
-            '<strong style="color: #60a5fa;">$1</strong>'
-          );
+        const formattedNote = note.replace(
+          /\*\*([^*]+)\*\*/g,
+          '<strong style="color: #60a5fa;">$1</strong>'
+        );
 
-          html += `
-            <li style="margin-bottom: 4px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
-              <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
-              ${formattedNote}
-            </li>
-          `;
+        html += `
+          <li style="margin-bottom: 4px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
+            <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
+            ${formattedNote}
+          </li>
+        `;
         }
       });
 

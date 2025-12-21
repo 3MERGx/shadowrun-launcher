@@ -975,9 +975,9 @@ async function launchGameLogic(gameSettings, source = "unknown") {
     setTimeout(() => {
       // Verify the process is actually running
       if (gameProcess && !gameProcess.killed) {
-        playerInGame = true;
+    playerInGame = true;
         gameStartTime = new Date(); // Track when game started for Discord presence
-        updateDiscordActivity(true);
+    updateDiscordActivity(true);
       }
     }, 2000); // 2 second delay to ensure game process has started
 
@@ -4532,7 +4532,7 @@ objShell.ShellExecute "cmd.exe", "/k echo Running System File Checker... && sfc 
         }
       } catch (cleanupError) {
         // Ignore cleanup errors
-      }
+        }
     }, 5000);
 
     return {
@@ -5080,24 +5080,24 @@ async function updateDiscordActivity(playing) {
       : "In-Game";
 
     activity = {
-      details: "Playing Shadowrun (2007)",
+        details: "Playing Shadowrun (2007)",
       state: state,
-      largeImageKey: "game_logo",
+        largeImageKey: "game_logo",
       largeImageText: "Shadowrun FPS",
       smallImageKey: "launcher_logo",
       smallImageText: versionText, // Shows version or "Update: vX → vY" if update available
       startTimestamp: gameStartTime || new Date(), // Shows "Playing for X hours Y minutes" automatically
-      buttons: [
-        {
-          label: "🌐 Visit Website",
-          url: "https://www.shadowrunfps.com",
-        },
-        {
-          label: "💬 Join Discord",
-          url: "https://discord.gg/p9uzqbNPEK",
-        },
-      ],
-      instance: false,
+        buttons: [
+          {
+            label: "🌐 Visit Website",
+            url: "https://www.shadowrunfps.com",
+          },
+          {
+            label: "💬 Join Discord",
+            url: "https://discord.gg/p9uzqbNPEK",
+          },
+        ],
+        instance: false,
     };
   } else {
     // In launcher - show idle status and player count
@@ -5109,22 +5109,22 @@ async function updateDiscordActivity(playing) {
     activity = {
       details: "Idle in Launcher",
       state: state,
-      largeImageKey: "launcher_logo",
+        largeImageKey: "launcher_logo",
       largeImageText: "Shadowrun FPS Launcher",
       smallImageKey: "menu",
       smallImageText: versionText, // This will show "v1.0.0 → v1.0.2" if update available, or just "v1.0.2" if up to date
-      buttons: [
-        {
-          label: "🌐 Visit Website",
-          url: "https://www.shadowrunfps.com",
-        },
-        {
-          label: "💬 Join Discord",
-          url: "https://discord.gg/p9uzqbNPEK",
-        },
-      ],
-      instance: false,
-    };
+        buttons: [
+          {
+            label: "🌐 Visit Website",
+            url: "https://www.shadowrunfps.com",
+          },
+          {
+            label: "💬 Join Discord",
+            url: "https://discord.gg/p9uzqbNPEK",
+          },
+        ],
+        instance: false,
+      };
   }
 
   rpc.setActivity(activity).catch((error) => {
@@ -6458,11 +6458,11 @@ ipcMain.handle("get-changelog", async () => {
         try {
           const changelogData = fs.readFileSync(changelogPath, "utf8");
           console.log(`[Changelog] Found at: ${changelogPath}`);
-          return {
-            success: true,
-            data: JSON.parse(changelogData),
-            source: "local",
-          };
+      return {
+        success: true,
+        data: JSON.parse(changelogData),
+        source: "local",
+      };
         } catch (readError) {
           console.warn(
             `[Changelog] Error reading ${changelogPath}:`,
