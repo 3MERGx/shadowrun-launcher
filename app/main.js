@@ -4,6 +4,8 @@ const fs = require("fs");
 const http = require("http");
 const https = require("https");
 const { exec } = require("child_process");
+const util = require("util");
+const execPromise = util.promisify(exec);
 const os = require("os");
 const { v4: uuidv4 } = require("uuid");
 
@@ -100,7 +102,10 @@ const BUNDLED_NO_INTRO_FIX = path.join(
   "NoIntroFix.zip"
 );
 
-const CLIENT_ID = "1352066395487076406";
+// Discord Application Client ID
+// Replace with your Discord application's Client ID from https://discord.com/developers/applications
+// Client IDs are PUBLIC and safe to include in code - only Client Secrets need to be private
+const CLIENT_ID = "1352066395487076406"; // TODO: Replace with your Discord application Client ID
 
 // Make Discord RPC completely optional
 let DiscordRPC = null;
@@ -109,8 +114,25 @@ let rpc = null;
 // Track if player is currently in-game
 let playerInGame = false;
 
+// Track game start time for Discord "Playing for X hours Y minutes"
+let gameStartTime = null;
+
+// Track update availability for Discord RPC
+let updateAvailable = false;
+let latestVersion = null;
+
 // Add this variable to track the game process
 let gameProcess = null;
+
+// Discord RPC rate limiting (Discord allows 1 update per 15 seconds)
+let lastDiscordUpdate = 0;
+const DISCORD_UPDATE_INTERVAL = 15000; // 15 seconds minimum between updates
+let pendingDiscordUpdate = null;
+let discordUpdateInterval = null;
+let lastDiscordState = null; // Track last state to detect changes
+
+// Track the timeout for hiding the launcher (so we can clear it if game closes early)
+let hideLauncherTimeout = null;
 
 // Define modifiedFiles at the higher scope level
 let modifiedFiles = [];
@@ -244,6 +266,16 @@ async function loadSettingsFromDisk() {
 
       // Assign properties individually rather than replacing the whole object
       Object.assign(settings, loadedSettings);
+
+      // Load custom game path if it exists
+      if (
+        loadedSettings.customGamePath &&
+        fs.existsSync(loadedSettings.customGamePath)
+      ) {
+        GAME_INSTALL_DIR = loadedSettings.customGamePath;
+        RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+        console.log(`[Settings] Loaded custom game path: ${GAME_INSTALL_DIR}`);
+      }
     }
 
     // Check skip intro status and update settings accordingly
@@ -938,9 +970,16 @@ async function launchGameLogic(gameSettings, source = "unknown") {
     // Set default game configuration before launching (resolution and volume)
     setDefaultGameConfig();
 
-    // Set player as in-game and send heartbeat
-    playerInGame = true;
-    updateDiscordActivity(true);
+    // Wait a moment to ensure game process actually starts before marking as in-game
+    // This improves accuracy - don't mark as in-game until process is confirmed running
+    setTimeout(() => {
+      // Verify the process is actually running
+      if (gameProcess && !gameProcess.killed) {
+        playerInGame = true;
+        gameStartTime = new Date(); // Track when game started for Discord presence
+        updateDiscordActivity(true);
+      }
+    }, 2000); // 2 second delay to ensure game process has started
 
     // Get GPU-specific environment variables for enhanced FPS limiting
     const dxvkEnvVars = getEnhancedDxvkEnvVars(actualFps, gpuInfo.vendor);
@@ -967,6 +1006,7 @@ async function launchGameLogic(gameSettings, source = "unknown") {
         console.log("[Game Close] Game process has exited");
         playerInGame = false;
         gameProcess = null;
+        gameStartTime = null; // Clear game start time
         updateDiscordActivity(false);
 
         // Auto-restore original PCID when game closes
@@ -1002,8 +1042,34 @@ async function launchGameLogic(gameSettings, source = "unknown") {
           // Non-fatal error, don't block game close handling
         }
 
-        // Notify renderer that game is no longer running
+        // Show launcher window and taskbar icon when game closes
         if (mainWindow && !mainWindow.isDestroyed()) {
+          // Clear any pending hide timeout (in case game closed before delay completed)
+          if (hideLauncherTimeout) {
+            clearTimeout(hideLauncherTimeout);
+            hideLauncherTimeout = null;
+            console.log("[Game Close] Cleared pending launcher hide timeout");
+          }
+
+          // Show window and restore taskbar icon
+          mainWindow.setSkipTaskbar(false);
+          mainWindow.show();
+          mainWindow.focus();
+
+          // Ensure window stays visible (prevent any race conditions)
+          setTimeout(() => {
+            if (mainWindow && !mainWindow.isDestroyed() && !gameProcess) {
+              if (!mainWindow.isVisible()) {
+                mainWindow.show();
+                mainWindow.focus();
+                console.log("[Game Close] Re-showing launcher (was hidden)");
+              }
+            }
+          }, 100);
+
+          console.log("[Game Close] Launcher restored (window and taskbar)");
+
+          // Notify renderer that game is no longer running
           mainWindow.webContents.send("game-state-update", { running: false });
         }
 
@@ -1058,6 +1124,19 @@ async function launchGameLogic(gameSettings, source = "unknown") {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("game-state-update", { running: true });
     }
+
+    // Delay hiding launcher to allow game to load first (4 seconds)
+    hideLauncherTimeout = setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed() && gameProcess) {
+        mainWindow.hide();
+        // Hide from taskbar
+        mainWindow.setSkipTaskbar(true);
+        console.log(
+          "[Launch] Launcher hidden (window and taskbar) after delay"
+        );
+      }
+      hideLauncherTimeout = null;
+    }, 5000);
 
     // Update player tracking status
     playerTracker.setStatus("in-game");
@@ -2216,6 +2295,9 @@ ipcMain.handle("download-game", async () => {
 
     downloadInProgress = true;
     cancelDownloadRequested = false;
+    
+    // Update player tracking status
+    playerTracker.setStatus("downloading");
 
     // Create temp directory
     if (!fs.existsSync(GAME_FILES_TEMP)) {
@@ -2919,6 +3001,9 @@ d3d9.maxFrameRate = 85
 
     // Clean up downloads
     downloadInProgress = false;
+    
+    // Update player tracking status back to menu
+    playerTracker.setStatus("menu");
 
     // Auto-launch is DISABLED - game will NOT launch automatically after download
     // To enable auto-launch, set AUTO_LAUNCH_AFTER_DOWNLOAD = true at line 66
@@ -4423,31 +4508,37 @@ ipcMain.handle("run-sfc-scan", async () => {
   try {
     console.log("[SFC] User requested System File Checker scan");
 
-    // Check if running as admin
-    const isAdmin = await isRunningAsAdmin();
+    // Use VBScript to launch elevated command prompt (shows UAC, then runs hidden)
+    const vbsPath = path.join(os.tmpdir(), `sfc-elevate-${Date.now()}.vbs`);
+    const vbsContent = `Set objShell = CreateObject("Shell.Application")
+objShell.ShellExecute "cmd.exe", "/k echo Running System File Checker... && sfc /scannow && echo. && echo Scan complete. You can close this window. && pause", "", "runas", 1
+`;
+    fs.writeFileSync(vbsPath, vbsContent, "utf8");
 
-    if (!isAdmin) {
-      return {
-        success: false,
-        needsAdmin: true,
-        error: "Administrator privileges required to run System File Checker",
-      };
-    }
+    console.log("[SFC] Launching UAC prompt for elevated SFC scan");
 
-    // Open command prompt as admin with SFC command
-    exec(
-      'start cmd.exe /k "echo Running System File Checker... && sfc /scannow"',
-      (error) => {
-        if (error) {
-          console.error("[SFC] Error opening cmd:", error);
+    // Run the VBScript (this shows UAC, then cmd runs)
+    spawn("wscript.exe", [vbsPath], {
+      stdio: "ignore",
+      detached: true,
+      windowsHide: true,
+    }).unref();
+
+    // Cleanup VBScript after a delay
+    setTimeout(() => {
+      try {
+        if (fs.existsSync(vbsPath)) {
+          fs.unlinkSync(vbsPath);
         }
+      } catch (cleanupError) {
+        // Ignore cleanup errors
       }
-    );
+    }, 5000);
 
     return {
       success: true,
       message:
-        "System File Checker launched in new window. This may take several minutes to complete.",
+        "System File Checker will launch after UAC prompt. This may take 10-15 minutes to complete.",
     };
   } catch (error) {
     console.error("[IPC] Error running SFC scan:", error);
@@ -4455,18 +4546,93 @@ ipcMain.handle("run-sfc-scan", async () => {
   }
 });
 
-// Open Windows Update (for driver updates)
+// Open Windows Update or GPU-specific update software (for driver updates)
 ipcMain.handle("open-windows-update", async () => {
   try {
-    console.log("[Windows Update] Opening Windows Update settings");
-    exec("start ms-settings:windowsupdate", (error) => {
+    // Detect GPU vendor
+    const gpuInfo = await detectGPUVendor();
+    console.log(
+      `[Driver Updates] Detected GPU: ${gpuInfo.vendor} - ${gpuInfo.name}`
+    );
+
+    let command = null;
+    let appName = "";
+
+    if (gpuInfo.vendor === "nvidia") {
+      // Try NVIDIA App (new), NVIDIA GeForce Experience, or NVIDIA Control Panel
+      const nvidiaPaths = [
+        "C:\\Program Files\\NVIDIA Corporation\\NVIDIA app\\CEF\\NVIDIA App.exe",
+        "C:\\Program Files (x86)\\NVIDIA Corporation\\NVIDIA app\\CEF\\NVIDIA App.exe",
+        "C:\\Program Files\\NVIDIA Corporation\\NVIDIA GeForce Experience\\NVIDIA GeForce Experience.exe",
+        "C:\\Program Files (x86)\\NVIDIA Corporation\\NVIDIA GeForce Experience\\NVIDIA GeForce Experience.exe",
+        "C:\\Program Files\\NVIDIA Corporation\\Control Panel Client\\nvcplui.exe",
+      ];
+
+      let nvidiaPath = null;
+      for (const testPath of nvidiaPaths) {
+        if (fs.existsSync(testPath)) {
+          nvidiaPath = testPath;
+          break;
+        }
+      }
+
+      if (nvidiaPath) {
+        command = `start "" "${nvidiaPath}"`;
+        // Determine app name based on path
+        if (nvidiaPath.includes("NVIDIA app")) {
+          appName = "NVIDIA App";
+        } else if (nvidiaPath.includes("GeForce Experience")) {
+          appName = "NVIDIA GeForce Experience";
+        } else {
+          appName = "NVIDIA Control Panel";
+        }
+      } else {
+        // Fallback to Windows Update
+        command = "start ms-settings:windowsupdate";
+        appName = "Windows Update (NVIDIA drivers not found)";
+      }
+    } else if (gpuInfo.vendor === "amd") {
+      // Try AMD Software: Adrenalin Edition (RadeonSoftware.exe)
+      const amdPaths = [
+        "C:\\Program Files\\AMD\\CNext\\CNext\\RadeonSoftware.exe",
+        "C:\\Program Files (x86)\\AMD\\CNext\\CNext\\RadeonSoftware.exe",
+        "C:\\Program Files\\AMD\\CIM\\Bin64\\AMDCIM.exe",
+        "C:\\Program Files (x86)\\AMD\\CIM\\Bin64\\AMDCIM.exe",
+        "C:\\Program Files\\AMD\\CNext\\CNext\\amdow.exe",
+      ];
+
+      let amdPath = null;
+      for (const testPath of amdPaths) {
+        if (fs.existsSync(testPath)) {
+          amdPath = testPath;
+          break;
+        }
+      }
+
+      if (amdPath) {
+        command = `start "" "${amdPath}"`;
+        appName = "AMD Software: Adrenalin Edition";
+      } else {
+        // Fallback to Windows Update
+        command = "start ms-settings:windowsupdate";
+        appName = "Windows Update (AMD drivers not found)";
+      }
+    } else {
+      // Intel or unknown - use Windows Update
+      command = "start ms-settings:windowsupdate";
+      appName = "Windows Update";
+    }
+
+    console.log(`[Driver Updates] Opening ${appName}`);
+    exec(command, (error) => {
       if (error) {
-        console.error("[Windows Update] Error opening settings:", error);
+        console.error(`[Driver Updates] Error opening ${appName}:`, error);
       }
     });
-    return { success: true };
+
+    return { success: true, appName };
   } catch (error) {
-    console.error("[IPC] Error opening Windows Update:", error);
+    console.error("[IPC] Error opening driver update software:", error);
     return { success: false, error: error.message };
   }
 });
@@ -4595,6 +4761,9 @@ ipcMain.handle("set-max-frame-rate", async (event, fps) => {
   try {
     console.log("Setting max frame rate to:", fps);
 
+    // Check if game is running
+    const isGameRunning = gameProcess && !gameProcess.killed;
+
     // Update settings
     settings.maxFrameRate = parseInt(fps);
     saveSettingsToDisk();
@@ -4611,7 +4780,10 @@ ipcMain.handle("set-max-frame-rate", async (event, fps) => {
 d3d9.maxFrameRate = ${fps}
 `;
       fs.writeFileSync(dxvkConfPath, defaultConfig);
-      return { success: true };
+      return {
+        success: true,
+        requiresRestart: isGameRunning,
+      };
     }
 
     // Read existing file
@@ -4657,7 +4829,10 @@ d3d9.maxFrameRate = ${fps}
     fs.writeFileSync(dxvkConfPath, configContent);
     console.log("Config file updated successfully");
 
-    return { success: true };
+    return {
+      success: true,
+      requiresRestart: isGameRunning,
+    };
   } catch (error) {
     console.error("Error setting max frame rate:", error);
     return { success: false, error: error.message };
@@ -4679,12 +4854,16 @@ function initDiscord() {
     // Set activity once connected
     rpc.on("ready", () => {
       console.log("Discord RPC connected");
+      lastDiscordState = false; // Initialize state tracking
       updateDiscordActivity(false);
 
-      // Update activity every minute to keep it fresh
-      setInterval(() => {
-        updateDiscordActivity(false);
-      }, 60000);
+      // Update activity every 30 seconds to keep it fresh and verify game state
+      // This also ensures we catch any state changes (game crash, etc.)
+      discordUpdateInterval = setInterval(() => {
+        // Verify actual game state before updating
+        const isActuallyPlaying = gameProcess && !gameProcess.killed && playerInGame;
+        updateDiscordActivity(isActuallyPlaying);
+      }, 30000); // 30 seconds - respects Discord's 15-second rate limit
     });
 
     // Handle connection errors gracefully
@@ -4722,56 +4901,262 @@ function initDiscord() {
   }
 }
 
+// Fetch player count from Railway API
+async function fetchPlayerCount() {
+  try {
+    const https = require("https");
+    const TRACKING_API_URL = "https://playertracker-production.up.railway.app";
+    const url = new URL(`${TRACKING_API_URL}/api/stats`);
+
+    return new Promise((resolve) => {
+      const req = https.request(
+        {
+          hostname: url.hostname,
+          port: url.port || 443,
+          path: url.pathname,
+          method: "GET",
+          timeout: 3000, // 3 second timeout
+        },
+        (res) => {
+          let data = "";
+          res.on("data", (chunk) => {
+            data += chunk;
+          });
+          res.on("end", () => {
+            try {
+              const stats = JSON.parse(data);
+              
+              // Check if current version is outdated compared to other players
+              const currentVersion = app.getVersion();
+              const versionBreakdown = stats.versionBreakdown || {};
+              const versions = Object.keys(versionBreakdown).sort();
+              
+              // Find most common version (likely the latest)
+              let mostCommonVersion = null;
+              let maxCount = 0;
+              for (const [version, count] of Object.entries(versionBreakdown)) {
+                if (count > maxCount && version !== currentVersion) {
+                  maxCount = count;
+                  mostCommonVersion = version;
+                }
+              }
+              
+              // If most common version is different and newer, suggest update
+              // (This is a fallback if auto-updater hasn't detected it yet)
+              if (mostCommonVersion && mostCommonVersion !== currentVersion) {
+                // Simple version comparison (assumes semantic versioning)
+                const currentParts = currentVersion.split('.').map(Number);
+                const latestParts = mostCommonVersion.split('.').map(Number);
+                let isNewer = false;
+                
+                for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
+                  const current = currentParts[i] || 0;
+                  const latest = latestParts[i] || 0;
+                  if (latest > current) {
+                    isNewer = true;
+                    break;
+                  } else if (latest < current) {
+                    break;
+                  }
+                }
+                
+                if (isNewer && !updateAvailable) {
+                  // Other players are on a newer version
+                  updateAvailable = true;
+                  latestVersion = mostCommonVersion;
+                }
+              }
+              
+              resolve({
+                totalOnline: stats.totalOnline || 0,
+                inGame: stats.inGame || 0,
+                inMenu: stats.inMenu || 0,
+                versionBreakdown: versionBreakdown,
+              });
+            } catch (error) {
+              resolve(null);
+            }
+          });
+        }
+      );
+
+      req.on("error", () => {
+        resolve(null); // Silently fail
+      });
+
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(null);
+      });
+
+      req.end();
+    });
+  } catch (error) {
+    return null;
+  }
+}
+
+// Helper function to verify game is actually running
+function isGameActuallyRunning() {
+  if (!gameProcess) return false;
+  
+  // Check if process is killed
+  if (gameProcess.killed) return false;
+  
+  // Additional check: verify process still exists (Windows)
+  try {
+    if (gameProcess.pid) {
+      // Try to send signal 0 (doesn't kill, just checks if process exists)
+      process.kill(gameProcess.pid, 0);
+      return true;
+    }
+  } catch (error) {
+    // Process doesn't exist (ESRCH error)
+    return false;
+  }
+  
+  return true;
+}
+
 // Update Discord Activity with enhanced information
-function updateDiscordActivity(playing) {
+async function updateDiscordActivity(playing) {
   if (!rpc) return;
 
-  const activity = playing
-    ? {
-        details: "Playing Shadowrun (2007)",
-        state: "First-Person Shooter",
-        largeImageKey: "game_logo",
-        largeImageText: "Shadowrun",
-        smallImageKey: "controller", // Optional: add a controller icon if you upload one
-        smallImageText: "PC",
-        startTimestamp: new Date(), // Shows "elapsed" time
-        buttons: [
-          {
-            label: "🌐 Visit Website",
-            url: "https://www.shadowrunfps.com",
-          },
-          {
-            label: "💬 Join Discord",
-            url: "https://discord.gg/p9uzqbNPEK",
-          },
-        ],
-        instance: false,
-      }
-    : {
-        details: "In Launcher",
-        state: "Browsing Menu",
-        largeImageKey: "launcher_logo",
-        largeImageText: "Shadowrun Launcher",
-        smallImageKey: "menu", // Optional: add a menu icon if you upload one
-        smallImageText: "Idle",
-        buttons: [
-          {
-            label: "🌐 Visit Website",
-            url: "https://www.shadowrunfps.com",
-          },
-          {
-            label: "💬 Join Discord",
-            url: "https://discord.gg/p9uzqbNPEK",
-          },
-        ],
-        instance: false,
-      };
+  // Verify actual game state - don't trust the 'playing' parameter alone
+  const actuallyPlaying = playing && isGameActuallyRunning();
+  
+  // If we thought we were playing but game isn't running, correct the state
+  if (playing && !actuallyPlaying) {
+    console.log("[Discord RPC] Game state mismatch detected - correcting to idle");
+    playerInGame = false;
+    gameProcess = null;
+    gameStartTime = null;
+  }
 
-  rpc.setActivity(activity).catch(console.error);
+  // Rate limiting: Discord allows 1 update per 15 seconds
+  // BUT: Allow immediate updates on state changes (game start/stop)
+  const now = Date.now();
+  const timeSinceLastUpdate = now - lastDiscordUpdate;
+  const stateChanged = lastDiscordState !== actuallyPlaying;
+  
+  if (timeSinceLastUpdate < DISCORD_UPDATE_INTERVAL && !stateChanged) {
+    // Queue the update for later (only if state hasn't changed)
+    const delay = DISCORD_UPDATE_INTERVAL - timeSinceLastUpdate;
+    if (pendingDiscordUpdate) {
+      clearTimeout(pendingDiscordUpdate);
+    }
+    pendingDiscordUpdate = setTimeout(() => {
+      updateDiscordActivity(actuallyPlaying);
+    }, delay);
+    return;
+  }
+
+  // Clear any pending update since we're updating now
+  if (pendingDiscordUpdate) {
+    clearTimeout(pendingDiscordUpdate);
+    pendingDiscordUpdate = null;
+  }
+
+  lastDiscordUpdate = now;
+  lastDiscordState = actuallyPlaying;
+
+  // Fetch player count from Railway API
+  const playerStats = await fetchPlayerCount();
+  
+  // Format version string with update indicator
+  const currentVersion = app.getVersion();
+  let versionText = `v${currentVersion}`;
+  if (updateAvailable && latestVersion) {
+    versionText = `Update: v${currentVersion} → v${latestVersion}`;
+  }
+
+  let activity;
+
+  if (actuallyPlaying) {
+    // Game is running - Discord automatically shows "Playing for X hours Y minutes" with startTimestamp
+    // Format: "X online • Y in-game" to differentiate total online vs actually in-game
+    const state = playerStats
+      ? `${playerStats.totalOnline} online • ${playerStats.inGame} in-game`
+      : "In-Game";
+
+    activity = {
+      details: "Playing Shadowrun (2007)",
+      state: state,
+      largeImageKey: "game_logo",
+      largeImageText: "Shadowrun FPS",
+      smallImageKey: "launcher_logo",
+      smallImageText: versionText, // Shows version or "Update: vX → vY" if update available
+      startTimestamp: gameStartTime || new Date(), // Shows "Playing for X hours Y minutes" automatically
+      buttons: [
+        {
+          label: "🌐 Visit Website",
+          url: "https://www.shadowrunfps.com",
+        },
+        {
+          label: "💬 Join Discord",
+          url: "https://discord.gg/p9uzqbNPEK",
+        },
+      ],
+      instance: false,
+    };
+  } else {
+    // In launcher - show idle status and player count
+    // Format: "X online • Y in-game" to show total online (launcher + game) vs just in-game
+    const state = playerStats
+      ? `${playerStats.totalOnline} online • ${playerStats.inGame} in-game`
+      : "Idle in Launcher";
+
+    activity = {
+      details: "Idle in Launcher",
+      state: state,
+      largeImageKey: "launcher_logo",
+      largeImageText: "Shadowrun FPS Launcher",
+      smallImageKey: "menu",
+      smallImageText: versionText, // This will show "v1.0.0 → v1.0.2" if update available, or just "v1.0.2" if up to date
+      buttons: [
+        {
+          label: "🌐 Visit Website",
+          url: "https://www.shadowrunfps.com",
+        },
+        {
+          label: "💬 Join Discord",
+          url: "https://discord.gg/p9uzqbNPEK",
+        },
+      ],
+      instance: false,
+    };
+  }
+
+  rpc.setActivity(activity).catch((error) => {
+    // Only log non-common errors (Discord not running is normal)
+    if (
+      error.message &&
+      !error.message.includes("RPC_CONNECTION") &&
+      !error.message.includes("ENOENT")
+    ) {
+      console.log("[Discord RPC] Activity update error:", error.message);
+    }
+  });
+
+  // Log activity details for debugging (only in dev)
+  if (process.env.NODE_ENV !== "production") {
+  }
 }
 
 // Clean up when the app is closing
 app.on("before-quit", () => {
+  // Clear Discord update interval
+  if (discordUpdateInterval) {
+    clearInterval(discordUpdateInterval);
+    discordUpdateInterval = null;
+  }
+  
+  // Clear pending Discord update
+  if (pendingDiscordUpdate) {
+    clearTimeout(pendingDiscordUpdate);
+    pendingDiscordUpdate = null;
+  }
+  
   // Stop player tracking
   playerTracker.stop();
 
@@ -6056,21 +6441,42 @@ ipcMain.handle("check-srs-dll-version", async () => {
 // Handle getting changelog (tries local file first for dev, then server)
 ipcMain.handle("get-changelog", async () => {
   try {
-    // Try to read from local file first (for dev/bundled app)
-    const localChangelogPath = path.join(app.getAppPath(), "changelog.json");
+    // Try multiple paths for changelog.json
+    const possiblePaths = [
+      // Dev / unpacked app (project root)
+      path.join(app.getAppPath(), "changelog.json"),
+      // Packaged app: electron-builder places extraResources into the resources folder
+      path.join(process.resourcesPath || "", "changelog.json"),
+      // Alternative path for packaged app
+      path.join(__dirname, "..", "changelog.json"),
+      // Another alternative (app.asar parent)
+      path.join(path.dirname(app.getAppPath()), "changelog.json"),
+    ];
 
-    if (fs.existsSync(localChangelogPath)) {
-      const changelogData = fs.readFileSync(localChangelogPath, "utf8");
-
-      return {
-        success: true,
-        data: JSON.parse(changelogData),
-        source: "local",
-      };
+    for (const changelogPath of possiblePaths) {
+      if (changelogPath && fs.existsSync(changelogPath)) {
+        try {
+          const changelogData = fs.readFileSync(changelogPath, "utf8");
+          console.log(`[Changelog] Found at: ${changelogPath}`);
+          return {
+            success: true,
+            data: JSON.parse(changelogData),
+            source: "local",
+          };
+        } catch (readError) {
+          console.warn(
+            `[Changelog] Error reading ${changelogPath}:`,
+            readError.message
+          );
+          continue;
+        }
+      }
     }
 
-    // If local doesn't exist, try server
-    console.log("[Changelog] Local file not found, trying server...");
+    // If no local/resource changelog, signal fallback to server
+    console.log(
+      "[Changelog] Local/resource file not found in any path, trying server..."
+    );
     return {
       success: false,
       message: "Changelog not found locally. Fetching from server...",
@@ -6182,6 +6588,728 @@ ipcMain.handle("open-game-directory", async () => {
 });
 
 // Add this helper if not already present
+ipcMain.handle("get-game-installation-path", () => {
+  return GAME_INSTALL_DIR;
+});
+
+// Handler to change game location
+ipcMain.handle("change-game-location", async () => {
+  try {
+    // Check if game is running
+    if (gameProcess && !gameProcess.killed) {
+      return {
+        success: false,
+        error:
+          "Cannot move game files while the game is running. Please close the game first.",
+      };
+    }
+
+    // Show folder picker
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: "Select New Game Location",
+      defaultPath: path.dirname(GAME_INSTALL_DIR),
+      properties: ["openDirectory", "createDirectory"],
+      buttonLabel: "Select Folder",
+    });
+
+    if (canceled || !filePaths || filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+
+    const newBasePath = filePaths[0];
+    const newGamePath = path.join(newBasePath, "Shadowrun");
+
+    // Validate the path
+    const validation = await validateNewGamePath(newGamePath);
+    if (!validation.valid) {
+      return {
+        success: false,
+        error: validation.error,
+        requiresElevation: validation.requiresElevation || false,
+        newPath: newGamePath,
+      };
+    }
+
+    // Get folder sizes
+    const currentSize = await getFolderSize(GAME_INSTALL_DIR);
+
+    // Check if source or destination requires admin
+    const sourceRequiresAdmin = await checkIfPathRequiresAdmin(
+      GAME_INSTALL_DIR
+    );
+    const destRequiresAdmin = await checkIfPathRequiresAdmin(newGamePath);
+
+    console.log(
+      `[Change Location] Source requires admin: ${sourceRequiresAdmin}`
+    );
+    console.log(`[Change Location] Dest requires admin: ${destRequiresAdmin}`);
+
+    return {
+      success: true,
+      currentPath: GAME_INSTALL_DIR,
+      newPath: newGamePath,
+      size: currentSize,
+      sizeFormatted: formatBytes(currentSize),
+      requiresElevation: Boolean(sourceRequiresAdmin || destRequiresAdmin),
+      sourceRequiresAdmin: Boolean(sourceRequiresAdmin),
+      destRequiresAdmin: Boolean(destRequiresAdmin),
+    };
+  } catch (error) {
+    console.error("[Change Location] Error:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Handler to execute the move
+ipcMain.handle("execute-game-move", async (event, newPath) => {
+  try {
+    const oldPath = GAME_INSTALL_DIR;
+
+    console.log(`[Move Game] Starting move from ${oldPath} to ${newPath}`);
+
+    // Check if game is running (double-check)
+    if (gameProcess && !gameProcess.killed) {
+      return {
+        success: false,
+        error: "Game is currently running. Please close it first.",
+      };
+    }
+
+    // Check if source OR destination requires elevation
+    const sourceRequiresAdmin = await checkIfPathRequiresAdmin(oldPath);
+    const destRequiresAdmin = await checkIfPathRequiresAdmin(newPath);
+
+    if (sourceRequiresAdmin || destRequiresAdmin) {
+      console.log(
+        "[Move Game] Source or destination requires elevation, using elevated move process"
+      );
+      return await executeElevatedMove(oldPath, newPath);
+    }
+
+    // Normal move (no elevation needed)
+    return await executeNormalMove(oldPath, newPath);
+  } catch (error) {
+    console.error("[Move Game] Error:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Execute move with elevation (UAC prompt)
+async function executeElevatedMove(oldPath, newPath) {
+  try {
+    console.log("[Elevated Move] Preparing elevated move operation");
+
+    // Get list of all files to move
+    const files = await getAllFiles(oldPath);
+    const totalFiles = files.length;
+
+    console.log(`[Elevated Move] Moving ${totalFiles} files with elevation`);
+
+    // Create temp file paths
+    const vbsPath = path.join(os.tmpdir(), `elevate-${Date.now()}.vbs`);
+    const logPath = path.join(os.tmpdir(), `move-game-log-${Date.now()}.txt`);
+    const fileListPath = path.join(
+      os.tmpdir(),
+      `move-game-files-${Date.now()}.json`
+    );
+
+    // Write file list to JSON file
+    const fileList = files.map((file) => ({
+      src: file,
+      dest: path.join(newPath, path.relative(oldPath, file)),
+    }));
+    fs.writeFileSync(fileListPath, JSON.stringify(fileList), "utf8");
+
+    // Create PowerShell script content
+    const psScriptContent = `
+$ErrorActionPreference = "Stop"
+$fileListPath = "${fileListPath.replace(/\\/g, "\\\\")}"
+$logFile = "${logPath.replace(/\\/g, "\\\\")}"
+$newPath = "${newPath.replace(/\\/g, "\\\\")}"
+$oldPath = "${oldPath.replace(/\\/g, "\\\\")}"
+$currentUser = "${process.env.USERNAME || "Users"}"
+$userDomain = "${process.env.USERDOMAIN || ""}"
+
+# Write start marker immediately using UTF8 encoding
+$newline = [Environment]::NewLine
+[System.IO.File]::WriteAllText($logFile, "STARTED$newline", [System.Text.Encoding]::UTF8)
+
+try {
+    $files = Get-Content $fileListPath | ConvertFrom-Json
+    $totalFiles = $files.Count
+    $movedFiles = 0
+    
+    # Create base destination directory
+    if (-not (Test-Path $newPath)) {
+        New-Item -ItemType Directory -Path $newPath -Force | Out-Null
+    }
+    
+    # Set permissions on destination so current user has full control
+    try {
+        $acl = Get-Acl $newPath
+        $userIdentity = if ($userDomain) { "$userDomain\\$currentUser" } else { $currentUser }
+        $permission = $userIdentity,"FullControl","ContainerInherit,ObjectInherit","None","Allow"
+        $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule $permission
+        $acl.SetAccessRule($accessRule)
+        Set-Acl $newPath $acl
+        [System.IO.File]::AppendAllText($logFile, "PERMISSIONS_SET$newline", [System.Text.Encoding]::UTF8)
+    } catch {
+        [System.IO.File]::AppendAllText($logFile, "PERMISSIONS_WARNING: $($_.Exception.Message)$newline", [System.Text.Encoding]::UTF8)
+    }
+    
+    # Copy all files
+    foreach ($file in $files) {
+        $destDir = Split-Path -Parent $file.dest
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+        Copy-Item -Path $file.src -Destination $file.dest -Force -ErrorAction Stop
+        $movedFiles++
+        
+        if (($movedFiles % 10 -eq 0) -or ($movedFiles -eq $totalFiles)) {
+            $progress = [math]::Round(($movedFiles / $totalFiles) * 100)
+            $progressLine = "PROGRESS:$progress|$movedFiles|$totalFiles$newline"
+            [System.IO.File]::AppendAllText($logFile, $progressLine, [System.Text.Encoding]::UTF8)
+        }
+    }
+    
+    # Send final 100% progress
+    [System.IO.File]::AppendAllText($logFile, "PROGRESS:100|$totalFiles|$totalFiles$newline", [System.Text.Encoding]::UTF8)
+    
+    # Verify
+    $verified = $true
+    foreach ($file in $files) {
+        if (-not (Test-Path $file.dest)) {
+            $verified = $false
+            break
+        }
+    }
+    
+    if ($verified) {
+        Remove-Item -Path $oldPath -Recurse -Force -ErrorAction Stop
+        [System.IO.File]::AppendAllText($logFile, "SUCCESS$newline", [System.Text.Encoding]::UTF8)
+    } else {
+        [System.IO.File]::AppendAllText($logFile, "VERIFICATION_FAILED$newline", [System.Text.Encoding]::UTF8)
+    }
+} catch {
+    [System.IO.File]::AppendAllText($logFile, "ERROR: $($_.Exception.Message)$newline", [System.Text.Encoding]::UTF8)
+    exit 1
+}
+exit 0
+`.trim();
+
+    const psScriptPath = path.join(
+      os.tmpdir(),
+      `move-game-script-${Date.now()}.ps1`
+    );
+    fs.writeFileSync(psScriptPath, psScriptContent, "utf8");
+
+    // Create VBScript to launch PowerShell elevated and hidden (no window)
+    // Escape backslashes for VBScript (need to double them)
+    const escapedPsPath = psScriptPath.replace(/\\/g, "\\\\");
+    const vbsContent = `Set objShell = CreateObject("Shell.Application")
+objShell.ShellExecute "powershell.exe", "-ExecutionPolicy Bypass -WindowStyle Hidden -NoProfile -File ""${escapedPsPath}""", "", "runas", 0
+`;
+    fs.writeFileSync(vbsPath, vbsContent, "utf8");
+    console.log(`[Elevated Move] VBScript created at: ${vbsPath}`);
+    console.log(`[Elevated Move] PowerShell script at: ${psScriptPath}`);
+
+    console.log(
+      "[Elevated Move] Launching UAC prompt (PowerShell will run hidden)"
+    );
+    console.log(`[Elevated Move] Log file will be at: ${logPath}`);
+
+    // Send initial progress
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("game-move-progress", {
+        progress: 0,
+        movedFiles: 0,
+        totalFiles: files.length,
+      });
+    }
+
+    // Run the VBScript (this shows UAC, then PowerShell runs hidden)
+    spawn("wscript.exe", [vbsPath], {
+      stdio: "ignore",
+      detached: true,
+      windowsHide: true,
+    }).unref();
+
+    // Wait a moment for the log file to be created
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Monitor progress
+    const startTime = Date.now();
+    const maxWaitTime = 300000; // 5 minutes max
+    let lastProgressLine = null;
+
+    const progressInterval = setInterval(() => {
+      try {
+        if (fs.existsSync(logPath)) {
+          const logContent = fs.readFileSync(logPath, "utf8").trim();
+          const lines = logContent.split("\n");
+
+          // Log when script starts
+          if (lines.includes("STARTED") && lastProgressLine === null) {
+            console.log(
+              "[Elevated Move] PowerShell script started, log file detected"
+            );
+          }
+
+          // Find the last progress line
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            if (line.startsWith("PROGRESS:")) {
+              // Only log if it's a new progress line
+              if (line !== lastProgressLine) {
+                const progressData = line.substring(9); // Remove "PROGRESS:" prefix
+                const [progress, movedFiles, total] = progressData.split("|");
+
+                console.log(
+                  `[Elevated Move] Progress: ${progress}% (${movedFiles}/${total})`
+                );
+
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                  mainWindow.webContents.send("game-move-progress", {
+                    progress: parseInt(progress),
+                    movedFiles: parseInt(movedFiles),
+                    totalFiles: parseInt(total),
+                  });
+                }
+                lastProgressLine = line;
+              }
+              break;
+            }
+          }
+        } else {
+          // Log file doesn't exist yet - log occasionally
+          const elapsed = Date.now() - startTime;
+          if (elapsed < 10000 && elapsed % 2000 < 500) {
+            console.log(
+              `[Elevated Move] Waiting for log file... (${Math.round(
+                elapsed / 1000
+              )}s elapsed)`
+            );
+          }
+        }
+      } catch (err) {
+        console.error("[Elevated Move] Progress monitor error:", err.message);
+      }
+    }, 500);
+
+    // Wait for completion (check log file for final status)
+    let completed = false;
+    while (!completed && Date.now() - startTime < maxWaitTime) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      try {
+        if (fs.existsSync(logPath)) {
+          const logContent = fs.readFileSync(logPath, "utf8").trim();
+          const lines = logContent.split("\n");
+          const lastLine = lines[lines.length - 1].trim();
+
+          if (
+            lastLine === "SUCCESS" ||
+            lastLine === "VERIFICATION_FAILED" ||
+            lastLine.startsWith("ERROR:")
+          ) {
+            completed = true;
+          }
+        }
+      } catch (err) {
+        // Continue waiting
+      }
+    }
+
+    clearInterval(progressInterval);
+
+    console.log("[Elevated Move] Operation completed, checking results");
+
+    // Check result
+    let result = {
+      success: false,
+      error: "Operation timed out or did not complete",
+    };
+
+    if (fs.existsSync(logPath)) {
+      const logContent = fs.readFileSync(logPath, "utf8").trim();
+      const lines = logContent.split("\n");
+      const lastLine = lines[lines.length - 1].trim();
+
+      console.log(`[Elevated Move] Log file contents:\n${logContent}`);
+      console.log(`[Elevated Move] Final result: ${lastLine}`);
+
+      if (lastLine === "SUCCESS") {
+        // Update global paths
+        GAME_INSTALL_DIR = newPath;
+        RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+        settings.customGamePath = newPath;
+
+        // Re-check mod statuses at new location
+        console.log("[Elevated Move] Re-checking mod statuses at new location");
+        const skipIntroStatus = await checkSkipIntroStatus();
+        const dxvkStatus = await checkDxvkStatus();
+        settings.skipIntro = skipIntroStatus.installed;
+        settings.dxvk = dxvkStatus.enabled;
+        saveSettingsToDisk();
+
+        // Send updated settings to renderer
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("settings-updated", settings);
+        }
+
+        result = { success: true, newPath };
+      } else if (lastLine === "VERIFICATION_FAILED") {
+        result = {
+          success: false,
+          error: "File verification failed. Old files preserved.",
+        };
+      } else if (lastLine.startsWith("ERROR:")) {
+        result = { success: false, error: lastLine.substring(7) };
+      }
+    }
+
+    // Cleanup
+    try {
+      if (fs.existsSync(vbsPath)) fs.unlinkSync(vbsPath);
+      if (fs.existsSync(psScriptPath)) fs.unlinkSync(psScriptPath);
+      if (fs.existsSync(fileListPath)) fs.unlinkSync(fileListPath);
+      if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
+    } catch (cleanupError) {
+      console.warn("[Elevated Move] Cleanup warning:", cleanupError.message);
+    }
+
+    return result;
+  } catch (error) {
+    console.error("[Elevated Move] Error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Execute normal move (no elevation)
+async function executeNormalMove(oldPath, newPath) {
+  try {
+    // Create destination directory
+    if (!fs.existsSync(newPath)) {
+      fs.mkdirSync(newPath, { recursive: true });
+    }
+
+    // Get list of all files to move
+    const files = await getAllFiles(oldPath);
+    const totalFiles = files.length;
+    let movedFiles = 0;
+
+    // Move files with progress updates
+    for (const file of files) {
+      const relativePath = path.relative(oldPath, file);
+      const destPath = path.join(newPath, relativePath);
+      const destDir = path.dirname(destPath);
+
+      // Create destination directory if needed
+      if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+      }
+
+      // Copy file
+      fs.copyFileSync(file, destPath);
+      movedFiles++;
+
+      // Send progress update every 10 files or on last file
+      if (movedFiles % 10 === 0 || movedFiles === totalFiles) {
+        const progress = Math.round((movedFiles / totalFiles) * 100);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("game-move-progress", {
+            progress,
+            movedFiles,
+            totalFiles,
+          });
+        }
+      }
+    }
+
+    // Verify all files copied successfully
+    console.log(`[Move Game] Verifying ${totalFiles} files...`);
+    let verified = true;
+    for (const file of files) {
+      const relativePath = path.relative(oldPath, file);
+      const destPath = path.join(newPath, relativePath);
+
+      if (!fs.existsSync(destPath)) {
+        console.error(`[Move Game] Verification failed: ${destPath} not found`);
+        verified = false;
+        break;
+      }
+    }
+
+    if (!verified) {
+      return {
+        success: false,
+        error:
+          "File verification failed. Old files have not been deleted. Please try again.",
+      };
+    }
+
+    console.log(`[Move Game] All files verified successfully`);
+
+    // Delete old directory
+    console.log(`[Move Game] Removing old directory...`);
+    fs.rmSync(oldPath, { recursive: true, force: true });
+
+    // Update global paths
+    GAME_INSTALL_DIR = newPath;
+    RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+
+    // Save new path to settings
+    settings.customGamePath = newPath;
+    saveSettingsToDisk();
+
+    console.log(`[Move Game] Move completed successfully`);
+
+    return { success: true, newPath };
+  } catch (error) {
+    console.error("[Normal Move] Error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Helper function to validate new game path
+async function validateNewGamePath(newPath) {
+  try {
+    // Check if path is too long (Windows MAX_PATH limit)
+    if (newPath.length > 240) {
+      return {
+        valid: false,
+        error:
+          "Path is too long. Please choose a shorter path (Windows limit is 260 characters).",
+      };
+    }
+
+    // Check if it's the same as current path
+    if (path.normalize(newPath) === path.normalize(GAME_INSTALL_DIR)) {
+      return {
+        valid: false,
+        error: "This is already the current game location.",
+      };
+    }
+
+    // Check if destination already has files
+    if (fs.existsSync(newPath)) {
+      const files = fs.readdirSync(newPath);
+      if (files.length > 0) {
+        return {
+          valid: false,
+          error:
+            "This folder already contains files. Please choose an empty folder or a different location.",
+        };
+      }
+    }
+
+    // Check if it's a network drive
+    const drive = newPath.substring(0, 2);
+    if (drive.startsWith("\\\\")) {
+      return {
+        valid: false,
+        error: "Network drives are not supported. Please choose a local drive.",
+      };
+    }
+
+    // Check available space
+    const gameSize = await getFolderSize(GAME_INSTALL_DIR);
+    const destDrive = path.parse(newPath).root;
+
+    try {
+      const { stdout } = await execPromise(
+        `wmic logicaldisk where "DeviceID='${destDrive.replace(
+          "\\",
+          ""
+        )}'" get FreeSpace`
+      );
+      const freeSpaceMatch = stdout.match(/\d+/);
+      if (freeSpaceMatch) {
+        const freeSpace = parseInt(freeSpaceMatch[0]);
+        const requiredSpace = gameSize * 1.1; // Add 10% buffer
+
+        if (freeSpace < requiredSpace) {
+          return {
+            valid: false,
+            error: `Not enough disk space. Need ${formatBytes(
+              requiredSpace
+            )}, but only ${formatBytes(freeSpace)} available.`,
+          };
+        }
+      }
+    } catch (spaceCheckError) {
+      console.warn("[Validation] Could not check disk space:", spaceCheckError);
+      // Continue anyway - user might have enough space
+    }
+
+    // Check if path requires admin rights (Program Files, Windows, etc.)
+    const requiresAdmin = await checkIfPathRequiresAdmin(newPath);
+
+    // Also check if SOURCE requires admin (for deletion)
+    const sourceRequiresAdmin = await checkIfPathRequiresAdmin(
+      GAME_INSTALL_DIR
+    );
+
+    if (requiresAdmin || sourceRequiresAdmin) {
+      // Skip write permission test - we'll elevate during move
+      console.log("[Validation] Path requires admin, will elevate during move");
+      return {
+        valid: true,
+        requiresElevation: true,
+      };
+    }
+
+    // Check write permissions (only for non-admin paths)
+    const parentDir = path.dirname(newPath);
+    if (!fs.existsSync(parentDir)) {
+      try {
+        fs.mkdirSync(parentDir, { recursive: true });
+      } catch (mkdirError) {
+        return {
+          valid: false,
+          error:
+            "Cannot create directory at this location. You may not have permission.",
+        };
+      }
+    }
+
+    const testFile = path.join(parentDir, `.write-test-${Date.now()}.tmp`);
+    try {
+      fs.writeFileSync(testFile, "test");
+      fs.unlinkSync(testFile);
+    } catch (writeError) {
+      return {
+        valid: false,
+        error: "Cannot write to this location. You may not have permission.",
+      };
+    }
+
+    return { valid: true };
+  } catch (error) {
+    return {
+      valid: false,
+      error: `Validation error: ${error.message}`,
+    };
+  }
+}
+
+// Helper function to check if path requires admin rights
+async function checkIfPathRequiresAdmin(targetPath) {
+  const normalizedPath = path.normalize(targetPath).toLowerCase();
+
+  // Common Windows protected directories that require admin
+  const protectedPaths = [
+    "c:\\program files",
+    "c:\\program files (x86)",
+    "c:\\windows",
+    "c:\\programdata",
+  ];
+
+  const needsAdmin = protectedPaths.some((protectedPath) =>
+    normalizedPath.startsWith(protectedPath)
+  );
+
+  console.log(
+    `[Admin Check] Path: ${targetPath} → Requires admin: ${needsAdmin}`
+  );
+  return needsAdmin;
+}
+
+// Helper function to get folder size
+async function getFolderSize(folderPath) {
+  let totalSize = 0;
+
+  function calculateSize(dirPath) {
+    const items = fs.readdirSync(dirPath, { withFileTypes: true });
+
+    for (const item of items) {
+      const itemPath = path.join(dirPath, item.name);
+
+      if (item.isDirectory()) {
+        calculateSize(itemPath);
+      } else if (item.isFile()) {
+        const stats = fs.statSync(itemPath);
+        totalSize += stats.size;
+      }
+    }
+  }
+
+  try {
+    if (fs.existsSync(folderPath)) {
+      calculateSize(folderPath);
+    }
+  } catch (error) {
+    console.error("[getFolderSize] Error:", error);
+  }
+
+  return totalSize;
+}
+
+// Helper function to get all files recursively
+async function getAllFiles(dirPath, fileList = []) {
+  const items = fs.readdirSync(dirPath, { withFileTypes: true });
+
+  for (const item of items) {
+    const itemPath = path.join(dirPath, item.name);
+
+    if (item.isDirectory()) {
+      await getAllFiles(itemPath, fileList);
+    } else if (item.isFile()) {
+      fileList.push(itemPath);
+    }
+  }
+
+  return fileList;
+}
+
+// Helper function to format bytes
+function formatBytes(bytes) {
+  if (bytes === 0) return "0 Bytes";
+
+  const k = 1024;
+  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
+}
+
+// Helper function to update shortcuts
+async function updateShortcuts(newPath) {
+  try {
+    // Get Start Menu Programs folder
+    const startMenuPath = path.join(
+      process.env.APPDATA,
+      "Microsoft\\Windows\\Start Menu\\Programs"
+    );
+
+    // Look for Shadowrun shortcuts
+    const shortcutName = "Shadowrun FPS Launcher.lnk";
+    const shortcutPath = path.join(startMenuPath, shortcutName);
+
+    if (fs.existsSync(shortcutPath)) {
+      console.log("[Shortcuts] Found launcher shortcut, no update needed");
+      // Launcher shortcut points to launcher exe, not game exe, so no update needed
+    }
+
+    // Check for game shortcut if user created one
+    const gameShortcutName = "Shadowrun.lnk";
+    const gameShortcutPath = path.join(startMenuPath, gameShortcutName);
+
+    if (fs.existsSync(gameShortcutPath)) {
+      console.log("[Shortcuts] Found game shortcut at:", gameShortcutPath);
+      // We could update this, but it's safer to let Windows handle it
+      // Game shortcuts are uncommon for our launcher
+    }
+
+    console.log("[Shortcuts] Shortcut update completed");
+    return true;
+  } catch (error) {
+    console.error("[Shortcuts] Error updating shortcuts:", error);
+    return false;
+  }
+}
+
 ipcMain.handle("show-notification", (event, data) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("show-notification", data);
@@ -6465,6 +7593,15 @@ function checkForUpdates(manual = false) {
 autoUpdater.on("update-available", (info) => {
   console.log("[Updater] Update available:", info.version);
   console.log("[Updater] Release notes:", info.releaseNotes);
+  
+  // Track for Discord RPC
+  updateAvailable = true;
+  latestVersion = info.version;
+  
+  // Update Discord presence to show update available
+  if (rpc) {
+    updateDiscordActivity(playerInGame);
+  }
 
   if (!mainWindow || mainWindow.isDestroyed()) {
     // No window, start download anyway
@@ -6499,13 +7636,22 @@ autoUpdater.on("update-available", (info) => {
 autoUpdater.on("update-not-available", (info) => {
   console.log(
     "[Updater] No update available. Current version is latest:",
-    info.version
+    info?.version || app.getVersion()
   );
+  
+  // Clear update tracking
+  updateAvailable = false;
+  latestVersion = null;
+  
+  // Update Discord presence
+  if (rpc) {
+    updateDiscordActivity(playerInGame);
+  }
 
   // Send to renderer for UI feedback
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (isManualUpdateCheck && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("update-not-available", {
-      version: info.version,
+      version: info?.version || app.getVersion(),
     });
   }
 });

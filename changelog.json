@@ -1,4 +1,16 @@
 {
+  "0.9.91": {
+    "version": "0.9.92",
+    "date": "2025-12-20",
+    "notes": [
+      "**Added:** **Change Game Location** - Move game files to a different location after initial download",
+      "**Added:** **GPU Driver Update Detection** - Automatically detects GPU vendor and opens appropriate software",
+      "**Added:** **System File Checker (SFC) with UAC** - Run Windows SFC scan with UAC elevation",
+      "**Added:** **Launcher Visibility Management** - Launcher automatically hides when game launches",
+      "**Improved:** **Game File Move Operations**",
+      "**Improved:** **UI/UX Enhancements**"
+    ]
+  },
   "0.9.8": {
     "version": "0.9.8",
     "date": "2025-12-15",

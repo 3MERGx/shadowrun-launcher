@@ -198,6 +198,19 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("update-downloaded-silent", (event, data) => callback(data));
   },
 
+  // Game location management
+  getGameInstallationPath: () => ipcRenderer.invoke("get-game-installation-path"),
+  changeGameLocation: () => ipcRenderer.invoke("change-game-location"),
+  executeGameMove: (newPath) => ipcRenderer.invoke("execute-game-move", newPath),
+  onGameMoveProgress: (callback) => {
+    ipcRenderer.on("game-move-progress", (_, data) => callback(data));
+  },
+  
+  // Listen for settings updates
+  onSettingsUpdated: (callback) => {
+    ipcRenderer.on("settings-updated", (_, settings) => callback(settings));
+  },
+
   // For receiving messages from main (if you use them)
   on: (channel, callback) => {
     ipcRenderer.on(channel, (event, ...args) => callback(...args));

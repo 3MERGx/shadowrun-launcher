@@ -13,8 +13,9 @@ class PlayerTracker {
   constructor() {
     this.playerId = this.getOrCreatePlayerId();
     this.heartbeatInterval = null;
-    this.currentStatus = "menu"; // 'menu' or 'in-game'
+    this.currentStatus = "menu"; // 'menu', 'in-game', 'downloading', 'installing'
     this.enabled = true;
+    this.gameSessionStart = null; // Track when game session started
   }
 
   getOrCreatePlayerId() {
@@ -104,10 +105,14 @@ class PlayerTracker {
   reportInstall() {
     console.log("[PlayerTracker] Reporting unique installation...");
 
+    const os = require("os");
     const data = JSON.stringify({
       playerId: this.playerId,
       version: app.getVersion(),
       timestamp: new Date().toISOString(),
+      os: os.platform(),
+      platform: process.platform,
+      architecture: os.arch(),
     });
 
     const url = new URL(`${TRACKING_API_URL}/api/install`);
@@ -187,16 +192,31 @@ class PlayerTracker {
       );
       this.currentStatus = status;
 
+      // Track game session start time
+      if (status === "in-game" && !this.gameSessionStart) {
+        this.gameSessionStart = Date.now();
+      } else if (status !== "in-game" && this.gameSessionStart) {
+        // Game session ended
+        this.gameSessionStart = null;
+      }
+
       // Send immediate heartbeat on status change
       this.sendHeartbeat();
     }
   }
 
   sendHeartbeat() {
+    const os = require("os");
     const data = JSON.stringify({
       playerId: this.playerId,
       status: this.currentStatus,
       version: app.getVersion(),
+      os: os.platform(),
+      platform: process.platform,
+      gameSessionStart: this.gameSessionStart || null,
+      sessionDuration: this.gameSessionStart
+        ? Date.now() - this.gameSessionStart
+        : 0,
     });
 
     const url = new URL(`${TRACKING_API_URL}/api/heartbeat`);

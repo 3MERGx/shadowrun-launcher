@@ -2,6 +2,10 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:;"
+    />
     <title>Shadowrun FPS Launcher</title>
     <link rel="stylesheet" href="../styles/global.css" />
     <!-- Script moved to bottom of body to avoid double-loading -->
@@ -414,6 +418,65 @@
           </div>
         </div>
 
+        <!-- Game Location Management Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Game Location</h3>
+
+          <div class="setting-item" style="display: block">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 12px;
+              "
+            >
+              <div
+                class="setting-label-group"
+                style="flex: 1; margin-right: 16px"
+              >
+                <label>Change Game Location</label>
+                <span class="setting-description"
+                  >Move game files to a different location on your
+                  computer</span
+                >
+              </div>
+              <button
+                id="changeGameLocationButton"
+                class="settings-action-button"
+                style="flex-shrink: 0"
+              >
+                📁 Change Location
+              </button>
+            </div>
+
+            <div
+              id="currentGamePathDisplay"
+              style="
+                padding: 12px;
+                background: rgba(0, 0, 0, 0.3);
+                border-radius: 4px;
+                border-left: 3px solid rgba(59, 130, 246, 0.5);
+                font-size: 11px;
+                color: #94a3b8;
+                word-break: break-all;
+              "
+            >
+              <strong style="color: #60a5fa">Current Location:</strong><br />
+              <span
+                id="currentGamePath"
+                style="
+                  color: #e5e7eb;
+                  font-family: 'Courier New', monospace;
+                  font-size: 12px;
+                "
+              >
+                Loading...
+              </span>
+            </div>
+          </div>
+        </div>
+
         <!-- PCID Management Section -->
         <div class="settings-section">
           <h3 class="settings-section-title">PCID Management</h3>
@@ -511,10 +574,12 @@
 
           <div class="setting-item">
             <div class="setting-label-group">
-              <label>System File Checker</label>
+              <label
+                >System File Checker
+                <span style="color: #60a5fa; font-size: 12px">🔒</span></label
+              >
               <span class="setting-description"
-                >Runs Windows SFC scan to fix corrupted system files (fixes
-                errors 1603/1722)</span
+                >Runs Windows SFC scan to fix corrupted system files</span
               >
             </div>
             <button id="runSfcScanButton" class="settings-action-button">
@@ -530,12 +595,12 @@
           <div class="setting-item">
             <div class="setting-label-group">
               <label>Update GPU Drivers</label>
-              <span class="setting-description"
-                >Opens Windows Update to install optional driver updates</span
+              <span id="driverUpdateDescription" class="setting-description"
+                >Opens driver update software for your GPU</span
               >
             </div>
             <button id="openWindowsUpdateButton" class="settings-action-button">
-              Open Windows Update
+              Open Driver Software
             </button>
           </div>
         </div>

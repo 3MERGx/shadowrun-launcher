@@ -53,6 +53,17 @@ if (errorCount > 0) {
   console.log(`   Errors: ${errorCount}`);
 }
 
+// Ensure changelog.json is generated before copying
+console.log(`\n📋 Generating changelog.json from CHANGELOG.md...`);
+try {
+  // Run the changelog generator script (it won't exit when required)
+  require('./generate-changelog.js');
+  console.log(`✅ Changelog generation completed`);
+} catch (error) {
+  console.error(`❌ Error generating changelog.json:`, error.message);
+  // Continue anyway - maybe changelog.json already exists
+}
+
 // Copy changelog.json to dist for server upload
 console.log(`\n📋 Copying changelog.json to dist/...`);
 try {
@@ -65,6 +76,7 @@ try {
     console.log(`   📤 Upload this to: http://157.245.214.234/launcher/changelog.json`);
   } else {
     console.log(`⚠️  changelog.json not found - skipping copy`);
+    console.log(`   💡 Make sure CHANGELOG.md exists and is properly formatted`);
   }
 } catch (error) {
   console.error(`❌ Error copying changelog.json:`, error.message);

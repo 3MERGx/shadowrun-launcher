@@ -13,7 +13,11 @@ try {
     console.log("[Changelog] CHANGELOG.md not found - skipping changelog generation");
     // Create empty changelog.json
     fs.writeFileSync(CHANGELOG_JSON, JSON.stringify({}, null, 2));
-    process.exit(0);
+    // Only exit if this script is run directly (not required/imported)
+    if (require.main === module) {
+      process.exit(0);
+    }
+    return;
   }
 
   // Read CHANGELOG.md
@@ -101,6 +105,9 @@ try {
   console.error("[Changelog] ❌ Error generating changelog:", error);
   // Create empty changelog.json on error
   fs.writeFileSync(CHANGELOG_JSON, JSON.stringify({}, null, 2));
-  process.exit(0); // Don't fail the build
+  // Only exit if this script is run directly (not required/imported)
+  if (require.main === module) {
+    process.exit(0); // Don't fail the build
+  }
 }
 

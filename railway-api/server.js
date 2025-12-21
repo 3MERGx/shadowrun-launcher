@@ -7,7 +7,50 @@ const { MongoClient } = require("mongodb");
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10kb" })); // Limit request size
+
+// Rate limiting (simple in-memory)
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per minute per IP
+
+function rateLimitMiddleware(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  
+  if (!rateLimitMap.has(ip)) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+  
+  const limit = rateLimitMap.get(ip);
+  
+  if (now > limit.resetTime) {
+    // Reset window
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+  
+  if (limit.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return res.status(429).json({ error: "Too many requests" });
+  }
+  
+  limit.count++;
+  next();
+}
+
+// Clean up old rate limit entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, limit] of rateLimitMap.entries()) {
+    if (now > limit.resetTime) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, 60000);
+
+// Apply rate limiting to all API routes
+app.use("/api", rateLimitMiddleware);
 
 // MongoDB connection
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017";
@@ -39,7 +82,7 @@ connectDB();
 
 // In-memory storage for active players (temporary data)
 const activePlayers = new Map();
-const HEARTBEAT_TIMEOUT = 60000; // 60 seconds
+const HEARTBEAT_TIMEOUT = 90000; // 90 seconds (more forgiving for network issues)
 
 // In-memory fallback for installs if MongoDB fails
 const uniqueInstalls = new Set();
@@ -57,16 +100,47 @@ setInterval(() => {
 
 // Heartbeat endpoint - launcher calls this every 30 seconds
 app.post("/api/heartbeat", (req, res) => {
-  const { playerId, status, version } = req.body;
+  const {
+    playerId,
+    status,
+    version,
+    os,
+    platform,
+    gameSessionStart,
+    sessionDuration,
+  } = req.body;
 
-  if (!playerId || !status) {
-    return res.status(400).json({ error: "Missing required fields" });
+  // Validation
+  if (!playerId || typeof playerId !== "string" || playerId.length > 100) {
+    return res.status(400).json({ error: "Invalid playerId" });
+  }
+
+  if (!status || !["menu", "in-game", "downloading", "installing"].includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+
+  const now = Date.now();
+  const existingPlayer = activePlayers.get(playerId);
+  
+  // Track session start time if status changed to in-game
+  let sessionStart = gameSessionStart;
+  if (status === "in-game" && existingPlayer?.status !== "in-game") {
+    // New game session started
+    sessionStart = now;
+  } else if (status === "in-game" && existingPlayer?.gameSessionStart) {
+    // Continue existing session
+    sessionStart = existingPlayer.gameSessionStart;
   }
 
   activePlayers.set(playerId, {
-    status, // 'menu' or 'in-game'
-    version,
-    lastSeen: Date.now(),
+    status,
+    version: version || "unknown",
+    os: os || "unknown",
+    platform: platform || "unknown",
+    lastSeen: now,
+    gameSessionStart: sessionStart || null,
+    sessionDuration: sessionDuration || (sessionStart ? now - sessionStart : 0),
+    firstSeen: existingPlayer?.firstSeen || now,
   });
 
   res.json({
@@ -78,10 +152,11 @@ app.post("/api/heartbeat", (req, res) => {
 
 // Report unique install - launcher calls this once on first launch
 app.post("/api/install", async (req, res) => {
-  const { playerId, version, timestamp } = req.body;
+  const { playerId, version, timestamp, os, platform, architecture } = req.body;
 
-  if (!playerId) {
-    return res.status(400).json({ error: "Missing playerId" });
+  // Validation
+  if (!playerId || typeof playerId !== "string" || playerId.length > 100) {
+    return res.status(400).json({ error: "Invalid playerId" });
   }
 
   try {
@@ -92,12 +167,16 @@ app.post("/api/install", async (req, res) => {
         {
           $setOnInsert: {
             playerId,
-            version,
+            version: version || "unknown",
+            os: os || "unknown",
+            platform: platform || "unknown",
+            architecture: architecture || "unknown",
             firstInstall: timestamp || new Date().toISOString(),
             createdAt: new Date(),
           },
           $set: {
             lastSeen: new Date(),
+            lastVersion: version || "unknown",
           },
         },
         { upsert: true }
@@ -150,14 +229,41 @@ app.get("/api/installs", async (req, res) => {
     if (installsCollection) {
       // Use MongoDB
       const totalInstalls = await installsCollection.countDocuments();
+      
+      // Get version breakdown
+      const versionBreakdown = await installsCollection
+        .aggregate([
+          { $group: { _id: "$version", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+        ])
+        .toArray();
+
+      // Get OS breakdown
+      const osBreakdown = await installsCollection
+        .aggregate([
+          { $group: { _id: "$os", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+        ])
+        .toArray();
+
       res.json({
         totalUniqueInstalls: totalInstalls,
+        versionBreakdown: versionBreakdown.reduce((acc, item) => {
+          acc[item._id || "unknown"] = item.count;
+          return acc;
+        }, {}),
+        osBreakdown: osBreakdown.reduce((acc, item) => {
+          acc[item._id || "unknown"] = item.count;
+          return acc;
+        }, {}),
         timestamp: Date.now(),
       });
     } else {
       // Fallback to in-memory
       res.json({
         totalUniqueInstalls: uniqueInstalls.size,
+        versionBreakdown: {},
+        osBreakdown: {},
         timestamp: Date.now(),
       });
     }
@@ -173,21 +279,39 @@ app.get("/api/stats", (req, res) => {
     totalOnline: activePlayers.size,
     inMenu: 0,
     inGame: 0,
+    downloading: 0,
+    installing: 0,
     players: [],
+    versionBreakdown: {},
+    osBreakdown: {},
   };
 
   for (const [playerId, data] of activePlayers.entries()) {
+    // Count by status
     if (data.status === "in-game") {
       stats.inGame++;
+    } else if (data.status === "downloading") {
+      stats.downloading++;
+    } else if (data.status === "installing") {
+      stats.installing++;
     } else {
       stats.inMenu++;
     }
+
+    // Version breakdown
+    const version = data.version || "unknown";
+    stats.versionBreakdown[version] = (stats.versionBreakdown[version] || 0) + 1;
+
+    // OS breakdown
+    const os = data.os || "unknown";
+    stats.osBreakdown[os] = (stats.osBreakdown[os] || 0) + 1;
 
     // Optional: include anonymous player data
     stats.players.push({
       status: data.status,
       version: data.version,
       lastSeen: data.lastSeen,
+      sessionDuration: data.sessionDuration || 0,
     });
   }
 

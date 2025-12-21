@@ -573,10 +573,34 @@ function addButtonSoundEffects() {
 
 // Button event handlers
 playButton.addEventListener("click", async () => {
+  // First check if button is disabled or if game is running
+  if (playButton.disabled || gameRunning) {
+    console.log("Button clicked while disabled or game running, ignoring...");
+    return; // Exit early, don't process the click
+  }
+
+  // If game is installed, launch it
+  if (gameInstalled) {
+    console.log("Launching game...");
+    window.api.launchGame(settings);
+    return;
+  }
+
   // If game is not installed, start download
-  if (playButton.textContent === "Download") {
+  console.log("Downloading game...");
+  
     // Show the download progress screen
     downloadProgressScreen.classList.add("visible");
+  
+  // Reset progress bars
+  gameFilesProgress.style.width = "0%";
+  gfwlProgress.style.width = "0%";
+  dxProgress.style.width = "0%";
+  gameFilesStatus.textContent = "Waiting...";
+  gfwlStatus.textContent = "Waiting...";
+  dxStatus.textContent = "Waiting...";
+  downloadMessage.textContent =
+    "Preparing installation... This may take a few minutes.";
 
     try {
       const result = await window.api.downloadGame();
@@ -604,31 +628,6 @@ playButton.addEventListener("click", async () => {
       }
     } catch (error) {
       downloadMessage.textContent = `Error: ${error.message}`;
-    }
-  }
-  // First check if button is disabled or if game is running
-  if (playButton.disabled || gameRunning) {
-    console.log("Button clicked while disabled or game running, ignoring...");
-    return; // Exit early, don't process the click
-  }
-
-  if (gameInstalled) {
-    console.log("Launching game...");
-    window.api.launchGame(settings);
-  } else {
-    console.log("Downloading game...");
-    // Reset progress bars
-    gameFilesProgress.style.width = "0%";
-    gfwlProgress.style.width = "0%";
-    dxProgress.style.width = "0%";
-    gameFilesStatus.textContent = "Waiting...";
-    gfwlStatus.textContent = "Waiting...";
-    dxStatus.textContent = "Waiting...";
-    downloadMessage.textContent =
-      "Preparing installation... This may take a few minutes.";
-
-    // Start download
-    window.api.downloadGame();
   }
 });
 
@@ -697,6 +696,11 @@ settingsButton.addEventListener("click", () => {
   window.api.checkDxvkStatus().then((status) => {
     dxvkToggle.checked = status.enabled;
   });
+
+  // Update driver update button text based on detected GPU
+  if (typeof updateDriverUpdateButton === "function") {
+    updateDriverUpdateButton();
+  }
 });
 
 closeSettingsButton.addEventListener("click", () => {
@@ -712,8 +716,17 @@ const closeDiagnosticsButton = document.getElementById(
 );
 
 if (openDiagnosticsButton && diagnosticsScreen) {
-  openDiagnosticsButton.addEventListener("click", () => {
+  openDiagnosticsButton.addEventListener("click", async () => {
     diagnosticsScreen.classList.add("visible");
+
+    // Reset scroll position to top when opening
+    const settingsContent = diagnosticsScreen.querySelector(".settings-content");
+    if (settingsContent) {
+      settingsContent.scrollTop = 0;
+    }
+
+    // Load and display current game path
+    await loadCurrentGamePath();
 
     // Auto-detect system info when diagnostics opens (silently, no toast)
     detectAndDisplaySystemInfo(false);
@@ -724,6 +737,272 @@ if (closeDiagnosticsButton && diagnosticsScreen) {
   closeDiagnosticsButton.addEventListener("click", () => {
     diagnosticsScreen.classList.remove("visible");
   });
+}
+
+// Function to load and display current game path
+async function loadCurrentGamePath() {
+  const currentGamePathElement = document.getElementById("currentGamePath");
+  const currentGamePathDisplay = document.getElementById("currentGamePathDisplay");
+  
+  if (!currentGamePathElement) return;
+
+  try {
+    const gamePath = await window.api.getGameInstallationPath();
+    
+    if (gamePath) {
+      currentGamePathElement.textContent = gamePath;
+      currentGamePathDisplay.style.display = "block";
+    } else {
+      currentGamePathElement.textContent = "Game not installed";
+      currentGamePathDisplay.style.display = "block";
+    }
+  } catch (error) {
+    console.error("[Load Game Path] Error:", error);
+    currentGamePathElement.textContent = "Unable to determine location";
+    currentGamePathDisplay.style.display = "block";
+  }
+}
+
+// Change Game Location button handler
+const changeGameLocationButton = document.getElementById("changeGameLocationButton");
+if (changeGameLocationButton) {
+  changeGameLocationButton.addEventListener("click", async () => {
+    try {
+      // Disable button during operation
+      changeGameLocationButton.disabled = true;
+      changeGameLocationButton.textContent = "Please wait...";
+
+      // Request folder selection and validation
+      const result = await window.api.changeGameLocation();
+
+      // Re-enable button
+      changeGameLocationButton.disabled = false;
+      changeGameLocationButton.textContent = "📁 Change Location";
+
+      if (!result.success) {
+        if (result.canceled) {
+          // User cancelled, do nothing
+          return;
+        }
+        
+        // Show error
+        showToast(result.error, "error", 5000);
+        return;
+      }
+
+      // Show confirmation dialog (includes elevation warning if needed)
+      showGameMoveConfirmation(result);
+    } catch (error) {
+      console.error("[Change Location] Error:", error);
+      showToast(`Error: ${error.message}`, "error", 5000);
+      changeGameLocationButton.disabled = false;
+      changeGameLocationButton.textContent = "📁 Change Location";
+    }
+  });
+}
+
+// Function to show game move confirmation dialog
+function showGameMoveConfirmation(moveData) {
+  console.log('[Move Confirmation] Data received:', {
+    requiresElevation: moveData.requiresElevation,
+    sourceRequiresAdmin: moveData.sourceRequiresAdmin,
+    destRequiresAdmin: moveData.destRequiresAdmin,
+    currentPath: moveData.currentPath,
+    newPath: moveData.newPath
+  });
+  
+  const modal = document.createElement("div");
+  modal.className = "visible modal-screen";
+  modal.style.zIndex = "3000";
+
+  // Add elevation warning if needed
+  const elevationWarning = moveData.requiresElevation ? `
+    <div style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid rgba(59, 130, 246, 0.6); padding: 12px; border-radius: 4px; margin-bottom: 16px;">
+      <div style="font-size: 11px; color: #60a5fa; line-height: 1.5;">
+        🔒 <strong>Administrator permission required:</strong> ${
+          moveData.sourceRequiresAdmin && moveData.destRequiresAdmin 
+            ? 'Both folders are protected (like Program Files). A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
+            : moveData.sourceRequiresAdmin
+            ? 'The source folder is protected (like Program Files), so admin permission is needed to delete the old files. A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
+            : 'The destination folder is protected (like Program Files), so admin permission is needed to write files there. A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
+        }
+      </div>
+    </div>
+  ` : '';
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header" style="background: rgba(15, 23, 42, 0.95);">
+        <h2>📁 Move Game Files?</h2>
+        <button class="close-button" id="cancelMoveButton">×</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <div style="margin-bottom: 20px;">
+          <p style="color: #e5e7eb; margin-bottom: 16px;">
+            Are you sure you want to move the game files to a new location?
+          </p>
+        </div>
+
+        <div style="background: rgba(0, 0, 0, 0.3); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+          <div style="margin-bottom: 12px;">
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">FROM:</div>
+            <div style="font-size: 12px; color: #e5e7eb; word-break: break-all;">${moveData.currentPath}</div>
+          </div>
+          <div style="margin-bottom: 12px;">
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">TO:</div>
+            <div style="font-size: 12px; color: #60a5fa; word-break: break-all;">${moveData.newPath}</div>
+          </div>
+          <div>
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">SIZE:</div>
+            <div style="font-size: 12px; color: #e5e7eb;">${moveData.sizeFormatted}</div>
+          </div>
+        </div>
+
+        ${elevationWarning}
+
+        <div style="background: rgba(234, 179, 8, 0.1); border-left: 3px solid rgba(234, 179, 8, 0.6); padding: 12px; border-radius: 4px; margin-bottom: 16px;">
+          <div style="font-size: 11px; color: #fbbf24; line-height: 1.5;">
+            ⚠️ This operation may take several minutes. The game must be closed during this process.
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+          <button id="cancelMoveButtonFooter" class="settings-action-button" style="background: rgba(100, 100, 100, 0.3); border: 1px solid rgba(255, 255, 255, 0.2);">
+            Cancel
+          </button>
+          <button id="confirmMoveButton" class="settings-action-button" style="background: #3b82f6; border: 1px solid #60a5fa;">
+            Move Files
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  // Close handlers
+  const cancelButtons = [
+    modal.querySelector("#cancelMoveButton"),
+    modal.querySelector("#cancelMoveButtonFooter")
+  ];
+  cancelButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      modal.remove();
+    });
+  });
+
+  // Confirm handler
+  const confirmButton = modal.querySelector("#confirmMoveButton");
+  confirmButton.addEventListener("click", async () => {
+    // Disable buttons
+    confirmButton.disabled = true;
+    confirmButton.textContent = "Moving...";
+    cancelButtons.forEach(btn => btn.disabled = true);
+
+    // Show progress modal
+    modal.remove();
+    showGameMoveProgress(moveData.newPath);
+  });
+}
+
+// Function to show move progress
+function showGameMoveProgress(newPath) {
+  const progressModal = document.createElement("div");
+  progressModal.className = "visible modal-screen";
+  progressModal.style.zIndex = "3000";
+  progressModal.id = "gameMoveProgressModal";
+
+  progressModal.innerHTML = `
+    <div class="modal-content" style="max-width: 450px;">
+      <div class="modal-header" style="background: rgba(15, 23, 42, 0.95);">
+        <h2>📦 Moving Game Files...</h2>
+      </div>
+      <div class="modal-body" style="padding: 30px;">
+        <div style="margin-bottom: 20px;">
+          <div style="background: rgba(0, 0, 0, 0.3); border-radius: 8px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 13px; color: #e5e7eb;">Progress</span>
+              <span id="moveProgressPercent" style="font-size: 13px; color: #60a5fa; font-weight: 600;">0%</span>
+            </div>
+            <div style="width: 100%; height: 8px; background: rgba(0, 0, 0, 0.5); border-radius: 4px; overflow: hidden;">
+              <div id="moveProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 0.3s ease;"></div>
+            </div>
+            <div id="moveProgressStatus" style="font-size: 11px; color: #94a3b8; margin-top: 8px;">
+              Preparing to move files...
+            </div>
+          </div>
+        </div>
+
+        <div style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid rgba(59, 130, 246, 0.6); padding: 12px; border-radius: 4px;">
+          <div style="font-size: 11px; color: #60a5fa; line-height: 1.5;">
+            ℹ️ Please do not close the launcher or shut down your computer during this process.
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(progressModal);
+
+  // Listen for progress updates
+  window.api.onGameMoveProgress((data) => {
+    const progressBar = document.getElementById("moveProgressBar");
+    const progressPercent = document.getElementById("moveProgressPercent");
+    const progressStatus = document.getElementById("moveProgressStatus");
+
+    if (progressBar && progressPercent && progressStatus) {
+      progressBar.style.width = `${data.progress}%`;
+      progressPercent.textContent = `${data.progress}%`;
+      progressStatus.textContent = `Moving files... (${data.movedFiles} of ${data.totalFiles})`;
+    }
+  });
+
+  // Execute the move
+  executeGameMove(newPath, progressModal);
+}
+
+// Function to execute the move
+async function executeGameMove(newPath, progressModal) {
+  try {
+    const result = await window.api.executeGameMove(newPath);
+
+    // Remove progress modal
+    if (progressModal && progressModal.parentNode) {
+      progressModal.remove();
+    }
+
+    if (result.success) {
+      // Show success message
+      showToast(`Game files moved successfully to ${result.newPath}`, "success", 5000);
+      
+      // Refresh installation status
+      const installStatus = await window.api.checkGameInstalled();
+      gameInstalled = installStatus.installed;
+      updateUI();
+      
+      // Reload settings from main process (includes updated mod statuses)
+      const updatedSettings = await window.api.loadSettings();
+      settings = updatedSettings;
+      
+      // Update the displayed game path
+      await loadCurrentGamePath();
+      
+      // Update all UI elements with new settings
+      loadSettings();
+    } else {
+      // Show error
+      showToast(`Move failed: ${result.error}`, "error", 7000);
+    }
+  } catch (error) {
+    console.error("[Execute Move] Error:", error);
+    
+    // Remove progress modal
+    if (progressModal && progressModal.parentNode) {
+      progressModal.remove();
+    }
+    
+    showToast(`Move failed: ${error.message}`, "error", 7000);
+  }
 }
 
 // Add a cooldown mechanism for toggle switches
@@ -1049,13 +1328,25 @@ saveFrameRateButton.addEventListener("click", async () => {
   if (result.success) {
     // Show success feedback
     const feedback = document.getElementById("fpsFeedback");
+    
+    if (result.requiresRestart) {
+      // Game is running - show restart warning
+      feedback.textContent = "FPS saved! Restart game to apply changes.";
+      feedback.style.backgroundColor = "rgba(251, 191, 36, 0.9)"; // Orange/yellow warning color
+    } else {
+      // Game not running - normal success
     feedback.textContent = "FPS setting saved successfully!";
+      feedback.style.backgroundColor = "rgba(16, 185, 129, 0.9)"; // Green success color
+    }
+    
     feedback.classList.add("visible");
 
-    // Hide after 3 seconds
+    // Hide after 5 seconds (longer for restart message)
     setTimeout(() => {
       feedback.classList.remove("visible");
-    }, 3000);
+      // Reset to default green color for next time
+      feedback.style.backgroundColor = "rgba(16, 185, 129, 0.9)";
+    }, result.requiresRestart ? 5000 : 3000);
   } else {
     // Show error feedback
     const feedback = document.getElementById("fpsFeedback");
@@ -1268,13 +1559,20 @@ async function loadChangelog() {
     }
 
     // Sort versions by semantic version (newest first)
+    // Handles variable-length versions like 0.9.9 vs 0.9.91
     const versions = Object.keys(changelog).sort((a, b) => {
       const aParts = a.split(".").map(Number);
       const bParts = b.split(".").map(Number);
-
-      for (let i = 0; i < 3; i++) {
-        if (aParts[i] !== bParts[i]) {
-          return bParts[i] - aParts[i];
+      
+      // Compare up to the maximum length of either version
+      const maxLength = Math.max(aParts.length, bParts.length);
+      
+      for (let i = 0; i < maxLength; i++) {
+        const aPart = aParts[i] || 0; // Default to 0 if part doesn't exist
+        const bPart = bParts[i] || 0;
+        
+        if (aPart !== bPart) {
+          return bPart - aPart; // Descending order (newest first)
         }
       }
       return 0;
@@ -1313,18 +1611,51 @@ async function loadChangelog() {
       `;
 
       entry.notes.forEach((note) => {
-        // Parse markdown-style bold text
-        const formattedNote = note.replace(
-          /\*\*([^*]+)\*\*/g,
-          '<strong style="color: #60a5fa;">$1</strong>'
-        );
+        // Check if note has a dash separator (title - description format)
+        const dashIndex = note.indexOf(" - ");
+        
+        if (dashIndex > 0) {
+          // Split into title and description
+          const title = note.substring(0, dashIndex).trim();
+          const description = note.substring(dashIndex + 3).trim();
+          
+          // Parse markdown-style bold text for title
+          const formattedTitle = title.replace(
+            /\*\*([^*]+)\*\*/g,
+            '<strong style="color: #60a5fa;">$1</strong>'
+          );
+          
+          // Parse markdown-style bold text for description (if any)
+          const formattedDescription = description.replace(
+            /\*\*([^*]+)\*\*/g,
+            '<strong style="color: #60a5fa;">$1</strong>'
+          );
 
-        html += `
-          <li style="margin-bottom: 4px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
-            <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
-            ${formattedNote}
-          </li>
-        `;
+          html += `
+            <li style="margin-bottom: 8px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
+              <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
+              <div style="margin-bottom: 2px;">
+                ${formattedTitle}
+              </div>
+              <div style="padding-left: 20px; color: rgba(255, 255, 255, 0.6); font-size: 12px; line-height: 1.5;">
+                ${formattedDescription}
+              </div>
+            </li>
+          `;
+        } else {
+          // No dash separator - render as single line (backwards compatibility)
+          const formattedNote = note.replace(
+            /\*\*([^*]+)\*\*/g,
+            '<strong style="color: #60a5fa;">$1</strong>'
+          );
+
+          html += `
+            <li style="margin-bottom: 4px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
+              <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
+              ${formattedNote}
+            </li>
+          `;
+        }
       });
 
       html += `
@@ -2073,12 +2404,22 @@ function showUpdateToast(
 
   console.log("✅ Button found:", btn);
 
+  let isChecking = false; // Prevent multiple simultaneous checks
+
   btn.addEventListener("click", async function handleCheckUpdatesClick() {
+    // Prevent multiple simultaneous checks
+    if (isChecking) {
+      console.log("⏭️  Update check already in progress, skipping...");
+      return;
+    }
+
     console.log("");
     console.log("=================================================");
     console.log("🔍 CHECK FOR UPDATES BUTTON CLICKED!");
     console.log("=================================================");
     console.log("Time:", new Date().toLocaleTimeString());
+
+    isChecking = true;
 
     // Visual feedback - button changes
     const originalText = btn.textContent;
@@ -2109,6 +2450,8 @@ function showUpdateToast(
       btn.disabled = false;
       btn.textContent = originalText;
       btn.style.opacity = "1";
+    } finally {
+      isChecking = false;
     }
 
     console.log("=================================================");
@@ -2624,7 +2967,8 @@ if (runSfcScanButton) {
 
     const confirm = window.confirm(
       "This will open a Command Prompt window and run the System File Checker.\n\n" +
-        "⚠️ This requires Administrator privileges and may take 10-15 minutes.\n\n" +
+        "🔒 A UAC prompt will appear - click 'Yes' to grant Administrator privileges.\n\n" +
+        "⚠️ This may take 10-15 minutes to complete.\n\n" +
         "The scan will check for corrupted Windows system files and repair them.\n\n" +
         "Continue?"
     );
@@ -2636,15 +2980,7 @@ if (runSfcScanButton) {
       console.log("[SFC] Result:", result);
 
       if (result.success) {
-        showToast(
-          "✅ System File Checker launched! Check the Command Prompt window.",
-          "success",
-          6000
-        );
-      } else if (result.needsAdmin) {
-        alert(
-          "⚠️ Administrator privileges required\n\nPlease run the launcher as Administrator to use System File Checker."
-        );
+        // No toast needed - the command prompt window opening is sufficient feedback
       } else {
         alert(`Error: ${result.error}`);
       }
@@ -2659,24 +2995,53 @@ if (runSfcScanButton) {
 const openWindowsUpdateButton = document.getElementById(
   "openWindowsUpdateButton"
 );
+const driverUpdateDescription = document.getElementById("driverUpdateDescription");
+
+// Update button text and description based on detected GPU
+async function updateDriverUpdateButton() {
+  if (!openWindowsUpdateButton || !driverUpdateDescription) return;
+
+  try {
+    const gpuResult = await window.api.getGpuInfo();
+    if (gpuResult.success && gpuResult.gpu) {
+      const vendor = gpuResult.gpu.vendor.toLowerCase();
+      const gpuName = gpuResult.gpu.name;
+
+      if (vendor === "nvidia") {
+        openWindowsUpdateButton.textContent = "Open NVIDIA App";
+        driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${gpuName}`;
+      } else if (vendor === "amd") {
+        openWindowsUpdateButton.textContent = "Open AMD Software";
+        driverUpdateDescription.textContent = `Opens AMD Software: Adrenalin Edition to update drivers for ${gpuName}`;
+      } else {
+        openWindowsUpdateButton.textContent = "Open Windows Update";
+        driverUpdateDescription.textContent = `Opens Windows Update to install optional driver updates for ${gpuName}`;
+      }
+    }
+  } catch (error) {
+    console.error("[Driver Updates] Error detecting GPU:", error);
+    // Keep default text if detection fails
+  }
+}
+
+// Update button text when settings screen opens
 if (openWindowsUpdateButton) {
+  // Update on initial load
+  updateDriverUpdateButton();
+
   openWindowsUpdateButton.addEventListener("click", async () => {
-    console.log("[Windows Update] Opening Windows Update settings...");
+    console.log("[Driver Updates] Opening driver update software...");
 
     try {
       const result = await window.api.openWindowsUpdate();
       if (result.success) {
-        showToast(
-          "✅ Opening Windows Update... Check for Optional Updates for GPU drivers.",
-          "info",
-          5000
-        );
+        // No toast needed - the application opening is sufficient feedback
       } else {
-        alert(`Error opening Windows Update: ${result.error}`);
+        alert(`Error: ${result.error}`);
       }
     } catch (error) {
-      console.error("[Windows Update] Error:", error);
-      alert(`Failed to open Windows Update: ${error.message}`);
+      console.error("[Driver Updates] Error:", error);
+      alert(`Failed to open driver update software: ${error.message}`);
     }
   });
 }
