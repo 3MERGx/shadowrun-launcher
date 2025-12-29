@@ -174,6 +174,251 @@ function showActivationConfirmDialog() {
   });
 }
 
+// Function to show download confirmation dialog with option to find existing game
+function showDownloadConfirmDialog() {
+  return new Promise((resolve) => {
+    // Create dialog overlay
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.15s ease-out;
+    `;
+
+    // Create dialog container
+    const dialog = document.createElement("div");
+    dialog.style.cssText = `
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      width: 420px;
+      max-width: 90%;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      animation: slideIn 0.2s ease-out;
+    `;
+
+    dialog.innerHTML = `
+      <style>
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideIn {
+          from {
+            transform: translateY(-10px);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        .confirm-dialog-header {
+          padding: 18px 24px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .confirm-title {
+          font-size: 17px;
+          font-weight: 600;
+          color: #ffffff;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .confirm-icon {
+          font-size: 20px;
+        }
+        .confirm-close-button {
+          background: transparent;
+          border: none;
+          color: rgba(255, 255, 255, 0.6);
+          font-size: 24px;
+          line-height: 1;
+          cursor: pointer;
+          padding: 4px 8px;
+          border-radius: 4px;
+          transition: all 0.15s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+        }
+        .confirm-close-button:hover {
+          background: rgba(255, 255, 255, 0.1);
+          color: #ffffff;
+        }
+        .confirm-content {
+          padding: 24px;
+          color: rgba(255, 255, 255, 0.9);
+          line-height: 1.6;
+        }
+        .confirm-message {
+          font-size: 15px;
+          margin-bottom: 20px;
+          color: #ffffff;
+          font-weight: 500;
+        }
+        .confirm-note {
+          background: rgba(59, 130, 246, 0.1);
+          border-left: 3px solid #60a5fa;
+          border-radius: 4px;
+          padding: 14px 16px;
+          font-size: 13px;
+          color: rgba(255, 255, 255, 0.85);
+          line-height: 1.5;
+        }
+        .confirm-note strong {
+          color: #93c5fd;
+          font-weight: 600;
+        }
+        .confirm-footer {
+          padding: 16px 24px;
+          background: rgba(0, 0, 0, 0.2);
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+          display: flex;
+          gap: 10px;
+          justify-content: center;
+        }
+        .confirm-button {
+          padding: 10px 24px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          border: none;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          white-space: nowrap;
+        }
+        .confirm-button-cancel {
+          background: transparent;
+          color: rgba(255, 255, 255, 0.6);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .confirm-button-cancel:hover {
+          background: rgba(255, 255, 255, 0.05);
+          color: rgba(255, 255, 255, 0.9);
+          border-color: rgba(255, 255, 255, 0.25);
+        }
+        .confirm-button-secondary {
+          background: rgba(59, 130, 246, 0.15);
+          color: #60a5fa;
+          border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        .confirm-button-secondary:hover {
+          background: rgba(59, 130, 246, 0.25);
+          color: #93c5fd;
+          border-color: rgba(59, 130, 246, 0.4);
+        }
+        .confirm-button-primary {
+          background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+          color: #ffffff;
+          box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+        .confirm-button-primary:hover {
+          background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+          transform: translateY(-1px);
+        }
+        .confirm-button:active {
+          transform: scale(0.97);
+        }
+        .confirm-button-primary:active {
+          transform: scale(0.97) translateY(0);
+        }
+      </style>
+      <div class="confirm-dialog-header">
+        <div class="confirm-title">
+          <span class="confirm-icon">🔍</span>
+          Game Not Found
+        </div>
+        <button class="confirm-close-button" id="closeBtn" aria-label="Close">×</button>
+      </div>
+      <div class="confirm-content">
+        <div class="confirm-message">
+          Shadowrun game files were not detected on your system.
+        </div>
+        <div class="confirm-note">
+          <strong>Already have the game?</strong> Browse for your existing installation to avoid downloading again.
+        </div>
+      </div>
+      <div class="confirm-footer">
+        <button class="confirm-button confirm-button-secondary" id="findBtn">
+          <span>📂</span>
+          <span>Find Existing Game</span>
+        </button>
+        <button class="confirm-button confirm-button-primary" id="downloadBtn">
+          <span>⬇️</span>
+          <span>Download Game</span>
+        </button>
+      </div>
+    `;
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    // Handle button clicks
+    const downloadBtn = dialog.querySelector("#downloadBtn");
+    const findBtn = dialog.querySelector("#findBtn");
+    const closeBtn = dialog.querySelector("#closeBtn");
+
+    const cleanup = () => {
+      overlay.style.animation = "fadeIn 0.15s ease-out reverse";
+      setTimeout(() => {
+        document.body.removeChild(overlay);
+      }, 150);
+    };
+
+    downloadBtn.addEventListener("click", () => {
+      cleanup();
+      resolve("download");
+    });
+
+    findBtn.addEventListener("click", () => {
+      cleanup();
+      resolve("find");
+    });
+
+    closeBtn.addEventListener("click", () => {
+      cleanup();
+      resolve("cancel");
+    });
+
+    // Close on overlay click
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        cleanup();
+        resolve("cancel");
+      }
+    });
+
+    // Close on Escape key
+    const handleEscape = (e) => {
+      if (e.key === "Escape") {
+        cleanup();
+        resolve("cancel");
+        document.removeEventListener("keydown", handleEscape);
+      }
+    };
+    document.addEventListener("keydown", handleEscape);
+  });
+}
+
 window.handlePcidBackupClick = async function () {
   // Add async back
   console.log("[Renderer] handlePcidBackupClick CALLED VIA ONCLICK!");
@@ -460,6 +705,49 @@ window.api.onGameInstallationStatus((status) => {
   }
 });
 
+// Listen for settings updates (e.g., after browsing for game or moving game)
+window.api.onSettingsUpdated(async (updatedSettings) => {
+  console.log("Settings updated, refreshing mod statuses");
+  // Refresh mod statuses to reflect the new game location
+  window.api.checkSkipIntroStatus().then((status) => {
+    updateSkipIntroButtonState(status.installed);
+  });
+
+  // Refresh DXVK status
+  window.api.checkDxvkStatus().then((status) => {
+    const dxvkToggle = document.getElementById("dxvk");
+    if (dxvkToggle) {
+      dxvkToggle.checked = status.enabled;
+    }
+  });
+
+  // Refresh FPS setting from dxvk.conf
+  try {
+    const fps = await window.api.getCurrentFpsFromDxvkConf();
+    if (fps && maxFrameRateInput) {
+      maxFrameRateInput.value = fps;
+      // Update settings object
+      if (settings) {
+        settings.maxFrameRate = fps;
+      }
+    }
+  } catch (error) {
+    console.error("Error reading FPS from dxvk.conf:", error);
+  }
+
+  // Refresh srs_shadowrun.dll version
+  window.api
+    .checkSrsDllVersion()
+    .then((status) => {
+      if (status.exists && status.version) {
+        updateSrsDllButtonStates(status.version);
+      }
+    })
+    .catch((error) => {
+      console.error("Error checking srs_shadowrun.dll version:", error);
+    });
+});
+
 // Replace the existing activation status handler with this stripped-down version
 window.api.onActivationStatus((status) => {
   // Only log the status, don't change UI
@@ -515,15 +803,141 @@ function updateUI() {
     playButton.disabled = false;
   }
 
+  // Update "Open Game Folder" button in Settings based on game installation status
+  const openGameDirButton = document.getElementById("openGameDirButton");
+  const gameFolderLabel = document.getElementById("gameFolderLabel");
+  const gameFolderDescription = document.getElementById(
+    "gameFolderDescription"
+  );
+
+  if (openGameDirButton) {
+    if (gameInstalled) {
+      openGameDirButton.textContent = "Open Game Folder";
+      if (gameFolderLabel)
+        gameFolderLabel.textContent = "Game Installation Folder";
+      if (gameFolderDescription)
+        gameFolderDescription.textContent =
+          "Open the folder where Shadowrun is installed";
+    } else {
+      openGameDirButton.textContent = "Find Existing Game";
+      if (gameFolderLabel)
+        gameFolderLabel.textContent = "Find Existing Installation";
+      if (gameFolderDescription)
+        gameFolderDescription.textContent =
+          "Browse for your existing Shadowrun game folder";
+    }
+  }
+
   // Update settings screen state based on game installation
   if (gameInstalled) {
     // Enable skip intro button
-    skipIntroButton.disabled = false;
+    if (skipIntroButton) {
+      skipIntroButton.disabled = false;
+      skipIntroButton.style.opacity = "1";
+      skipIntroButton.style.cursor = "pointer";
+    }
+    // Enable FPS input and apply button
+    if (maxFrameRateInput) {
+      maxFrameRateInput.disabled = false;
+      maxFrameRateInput.style.opacity = "1";
+      maxFrameRateInput.style.cursor = "text";
+      // Also restore the FPS setting container
+      const fpsSetting = maxFrameRateInput.closest(".fps-setting");
+      if (fpsSetting) {
+        fpsSetting.style.opacity = "1";
+      }
+    }
+    if (saveFrameRateButton) {
+      saveFrameRateButton.disabled = false;
+      saveFrameRateButton.style.opacity = "1";
+      saveFrameRateButton.style.cursor = "pointer";
+    }
+    // Enable DXVK toggle
+    if (dxvkToggle) {
+      dxvkToggle.disabled = false;
+      const toggleContainer = dxvkToggle.closest(".setting-item");
+      if (toggleContainer) {
+        toggleContainer.style.opacity = "1";
+        toggleContainer.style.pointerEvents = "auto";
+      }
+    }
+    // Enable srs_shadowrun.dll version buttons
+    if (srsDllNewerButton) {
+      srsDllNewerButton.disabled = false;
+      srsDllNewerButton.style.opacity = "1";
+      srsDllNewerButton.style.cursor = "pointer";
+    }
+    if (srsDllOlderButton) {
+      srsDllOlderButton.disabled = false;
+      srsDllOlderButton.style.opacity = "1";
+      srsDllOlderButton.style.cursor = "pointer";
+    }
+    // Enable Change Game Location button
+    const changeGameLocationButton = document.getElementById(
+      "changeGameLocationButton"
+    );
+    if (changeGameLocationButton) {
+      changeGameLocationButton.disabled = false;
+      changeGameLocationButton.style.opacity = "1";
+      changeGameLocationButton.style.cursor = "pointer";
+    }
   } else {
     // Disable skip intro button
-    skipIntroButton.disabled = true;
-    skipIntroButton.classList.remove("installed");
-    skipIntroButton.textContent = "Install Mod";
+    if (skipIntroButton) {
+      skipIntroButton.disabled = true;
+      skipIntroButton.classList.remove("installed");
+      skipIntroButton.textContent = "Install Mod";
+      skipIntroButton.style.opacity = "0.5";
+      skipIntroButton.style.cursor = "not-allowed";
+    }
+    // Disable FPS input and apply button
+    if (maxFrameRateInput) {
+      maxFrameRateInput.disabled = true;
+      maxFrameRateInput.style.opacity = "0.5";
+      maxFrameRateInput.style.cursor = "not-allowed";
+      // Also style the FPS setting container
+      const fpsSetting = maxFrameRateInput.closest(".fps-setting");
+      if (fpsSetting) {
+        fpsSetting.style.opacity = "0.5";
+      }
+    }
+    if (saveFrameRateButton) {
+      saveFrameRateButton.disabled = true;
+      saveFrameRateButton.style.opacity = "0.5";
+      saveFrameRateButton.style.cursor = "not-allowed";
+    }
+    // Disable DXVK toggle
+    if (dxvkToggle) {
+      dxvkToggle.disabled = true;
+      dxvkToggle.checked = false;
+      const toggleContainer = dxvkToggle.closest(".setting-item");
+      if (toggleContainer) {
+        toggleContainer.style.opacity = "0.5";
+        toggleContainer.style.pointerEvents = "none";
+      }
+    }
+    // Disable srs_shadowrun.dll version buttons
+    if (srsDllNewerButton) {
+      srsDllNewerButton.disabled = true;
+      srsDllNewerButton.classList.remove("active");
+      srsDllNewerButton.style.opacity = "0.5";
+      srsDllNewerButton.style.cursor = "not-allowed";
+    }
+    if (srsDllOlderButton) {
+      srsDllOlderButton.disabled = true;
+      srsDllOlderButton.classList.remove("active");
+      srsDllOlderButton.style.opacity = "0.5";
+      srsDllOlderButton.style.cursor = "not-allowed";
+    }
+    // Disable Change Game Location button
+    const changeGameLocationButton = document.getElementById(
+      "changeGameLocationButton"
+    );
+    if (changeGameLocationButton) {
+      changeGameLocationButton.disabled = true;
+      changeGameLocationButton.style.opacity = "0.5";
+      changeGameLocationButton.style.cursor = "not-allowed";
+    }
   }
 }
 
@@ -579,19 +993,70 @@ playButton.addEventListener("click", async () => {
     return; // Exit early, don't process the click
   }
 
-  // If game is installed, launch it
+  // If game is installed, verify it still exists before launching
   if (gameInstalled) {
+    console.log("Verifying game still exists before launch...");
+    // Re-check game installation status to catch renamed/moved folders
+    const checkResult = await window.api.checkGameInstalled();
+    if (!checkResult.installed || !checkResult.dependencies?.gameFiles) {
+      console.warn("Game files no longer found at cached location");
+      showToast(
+        "Game files not found. Please browse for your game folder in Settings.",
+        "error",
+        5000
+      );
+      // Update UI to show Download button
+      gameInstalled = false;
+      updateUI();
+      return;
+    }
     console.log("Launching game...");
-    window.api.launchGame(settings);
+    const launchResult = await window.api.launchGame(settings);
+    if (!launchResult.success) {
+      showToast(launchResult.error || "Failed to launch game", "error", 5000);
+      // If game executable not found, update UI
+      if (launchResult.error && launchResult.error.includes("not found")) {
+        gameInstalled = false;
+        updateUI();
+      }
+    }
     return;
   }
 
-  // If game is not installed, start download
+  // If game is not installed, show confirmation dialog
+  const downloadChoice = await showDownloadConfirmDialog();
+
+  if (downloadChoice === "find") {
+    // User wants to find existing game
+    try {
+      const result = await window.api.browseForExistingGame();
+      if (result.success) {
+        showToast("✓ Game found!", "success", 3000);
+        // The game-installation-status event will be triggered automatically
+        // which will update the UI
+      } else if (!result.canceled) {
+        showToast(
+          result.error || "Game files not found in selected folder",
+          "error",
+          4000
+        );
+      }
+    } catch (error) {
+      console.error("[Find Game] Error:", error);
+      showToast(`Error: ${error.message}`, "error", 4000);
+    }
+    return;
+  } else if (downloadChoice === "cancel") {
+    // User canceled
+    return;
+  }
+
+  // User chose to download - proceed with download
   console.log("Downloading game...");
-  
-    // Show the download progress screen
-    downloadProgressScreen.classList.add("visible");
-  
+
+  // Show the download progress screen
+  downloadProgressScreen.classList.add("visible");
+
   // Reset progress bars
   gameFilesProgress.style.width = "0%";
   gfwlProgress.style.width = "0%";
@@ -602,37 +1067,51 @@ playButton.addEventListener("click", async () => {
   downloadMessage.textContent =
     "Preparing installation... This may take a few minutes.";
 
-    try {
-      const result = await window.api.downloadGame();
+  try {
+    const result = await window.api.downloadGame();
 
-      if (!result.success) {
-        // Check if admin privileges are required
-        if (result.requiresAdmin) {
-          // Show admin requirement message
-          downloadMessage.textContent =
-            "Administrator privileges required for installation";
+    if (!result.success) {
+      // Check if admin privileges are required
+      if (result.requiresAdmin) {
+        // Show admin requirement message
+        downloadMessage.textContent =
+          "Administrator privileges required for installation";
 
-          // Create admin restart button
-          const adminButton = document.createElement("button");
-          adminButton.textContent = "Restart as Administrator";
-          adminButton.className = "admin-button";
-          adminButton.onclick = () => window.api.restartAsAdmin();
+        // Create admin restart button
+        const adminButton = document.createElement("button");
+        adminButton.textContent = "Restart as Administrator";
+        adminButton.className = "admin-button";
+        adminButton.onclick = () => window.api.restartAsAdmin();
 
-          // Add button to download actions
-          document.querySelector(".download-actions").prepend(adminButton);
+        // Add button to download actions
+        document.querySelector(".download-actions").prepend(adminButton);
 
-          return;
-        } else {
-          downloadMessage.textContent = `Error: ${result.error}`;
-        }
+        return;
+      } else {
+        downloadMessage.textContent = `Error: ${result.error}`;
       }
-    } catch (error) {
-      downloadMessage.textContent = `Error: ${error.message}`;
+    }
+  } catch (error) {
+    downloadMessage.textContent = `Error: ${error.message}`;
   }
 });
 
 activateButton.addEventListener("click", async () => {
   console.log("Activation requested...");
+
+  // Check if PCID exists before allowing activation
+  console.log("Checking for PCID before activation...");
+  const pcidCheck = await window.api.getCurrentPcid();
+
+  if (!pcidCheck.success && pcidCheck.error === "No PCID found") {
+    console.log("No PCID found - user must launch game first to generate PCID");
+    showToast(
+      "No PCID found. Launch the game first to generate a PCID, then you can activate the game.",
+      "warning",
+      6000
+    );
+    return;
+  }
 
   // Show custom confirmation dialog
   const confirmActivation = await showActivationConfirmDialog();
@@ -687,15 +1166,77 @@ websiteButton.addEventListener("click", () => {
 settingsButton.addEventListener("click", () => {
   settingsScreen.classList.add("visible");
 
-  // Check mod status whenever settings are opened
-  window.api.checkSkipIntroStatus().then((status) => {
-    updateSkipIntroButtonState(status.installed);
-  });
+  // If game is not installed, disable all mod controls
+  if (!gameInstalled) {
+    // Disable skip intro button
+    if (skipIntroButton) {
+      skipIntroButton.disabled = true;
+      skipIntroButton.classList.remove("installed");
+      skipIntroButton.textContent = "Install Mod";
+      skipIntroButton.style.opacity = "0.5";
+      skipIntroButton.style.cursor = "not-allowed";
+    }
+    // Disable FPS input and apply button
+    if (maxFrameRateInput) {
+      maxFrameRateInput.disabled = true;
+      maxFrameRateInput.style.opacity = "0.5";
+      maxFrameRateInput.style.cursor = "not-allowed";
+      // Also style the FPS setting container
+      const fpsSetting = maxFrameRateInput.closest(".fps-setting");
+      if (fpsSetting) {
+        fpsSetting.style.opacity = "0.5";
+      }
+    }
+    if (saveFrameRateButton) {
+      saveFrameRateButton.disabled = true;
+      saveFrameRateButton.style.opacity = "0.5";
+      saveFrameRateButton.style.cursor = "not-allowed";
+    }
+    // Disable DXVK toggle
+    if (dxvkToggle) {
+      dxvkToggle.disabled = true;
+      dxvkToggle.checked = false;
+      const toggleContainer = dxvkToggle.closest(".setting-item");
+      if (toggleContainer) {
+        toggleContainer.style.opacity = "0.5";
+        toggleContainer.style.pointerEvents = "none";
+      }
+    }
+    // Disable srs_shadowrun.dll version buttons
+    if (srsDllNewerButton) {
+      srsDllNewerButton.disabled = true;
+      srsDllNewerButton.classList.remove("active");
+      srsDllNewerButton.style.opacity = "0.5";
+      srsDllNewerButton.style.cursor = "not-allowed";
+    }
+    if (srsDllOlderButton) {
+      srsDllOlderButton.disabled = true;
+      srsDllOlderButton.classList.remove("active");
+      srsDllOlderButton.style.opacity = "0.5";
+      srsDllOlderButton.style.cursor = "not-allowed";
+    }
+    // Disable Change Game Location button
+    const changeGameLocationButton = document.getElementById(
+      "changeGameLocationButton"
+    );
+    if (changeGameLocationButton) {
+      changeGameLocationButton.disabled = true;
+      changeGameLocationButton.style.opacity = "0.5";
+      changeGameLocationButton.style.cursor = "not-allowed";
+    }
+  } else {
+    // Game is installed, check mod status whenever settings are opened
+    window.api.checkSkipIntroStatus().then((status) => {
+      updateSkipIntroButtonState(status.installed);
+    });
 
-  // Check DXVK status whenever settings are opened
-  window.api.checkDxvkStatus().then((status) => {
-    dxvkToggle.checked = status.enabled;
-  });
+    // Check DXVK status whenever settings are opened
+    window.api.checkDxvkStatus().then((status) => {
+      if (dxvkToggle) {
+        dxvkToggle.checked = status.enabled;
+      }
+    });
+  }
 
   // Update driver update button text based on detected GPU
   if (typeof updateDriverUpdateButton === "function") {
@@ -720,7 +1261,8 @@ if (openDiagnosticsButton && diagnosticsScreen) {
     diagnosticsScreen.classList.add("visible");
 
     // Reset scroll position to top when opening
-    const settingsContent = diagnosticsScreen.querySelector(".settings-content");
+    const settingsContent =
+      diagnosticsScreen.querySelector(".settings-content");
     if (settingsContent) {
       settingsContent.scrollTop = 0;
     }
@@ -742,13 +1284,15 @@ if (closeDiagnosticsButton && diagnosticsScreen) {
 // Function to load and display current game path
 async function loadCurrentGamePath() {
   const currentGamePathElement = document.getElementById("currentGamePath");
-  const currentGamePathDisplay = document.getElementById("currentGamePathDisplay");
-  
+  const currentGamePathDisplay = document.getElementById(
+    "currentGamePathDisplay"
+  );
+
   if (!currentGamePathElement) return;
 
   try {
     const gamePath = await window.api.getGameInstallationPath();
-    
+
     if (gamePath) {
       currentGamePathElement.textContent = gamePath;
       currentGamePathDisplay.style.display = "block";
@@ -764,7 +1308,9 @@ async function loadCurrentGamePath() {
 }
 
 // Change Game Location button handler
-const changeGameLocationButton = document.getElementById("changeGameLocationButton");
+const changeGameLocationButton = document.getElementById(
+  "changeGameLocationButton"
+);
 if (changeGameLocationButton) {
   changeGameLocationButton.addEventListener("click", async () => {
     try {
@@ -784,7 +1330,7 @@ if (changeGameLocationButton) {
           // User cancelled, do nothing
           return;
         }
-        
+
         // Show error
         showToast(result.error, "error", 5000);
         return;
@@ -803,24 +1349,25 @@ if (changeGameLocationButton) {
 
 // Function to show game move confirmation dialog
 function showGameMoveConfirmation(moveData) {
-  console.log('[Move Confirmation] Data received:', {
+  console.log("[Move Confirmation] Data received:", {
     requiresElevation: moveData.requiresElevation,
     sourceRequiresAdmin: moveData.sourceRequiresAdmin,
     destRequiresAdmin: moveData.destRequiresAdmin,
     currentPath: moveData.currentPath,
-    newPath: moveData.newPath
+    newPath: moveData.newPath,
   });
-  
+
   const modal = document.createElement("div");
   modal.className = "visible modal-screen";
   modal.style.zIndex = "3000";
 
   // Add elevation warning if needed
-  const elevationWarning = moveData.requiresElevation ? `
+  const elevationWarning = moveData.requiresElevation
+    ? `
     <div style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid rgba(59, 130, 246, 0.6); padding: 12px; border-radius: 4px; margin-bottom: 16px;">
       <div style="font-size: 11px; color: #60a5fa; line-height: 1.5;">
         🔒 <strong>Administrator permission required:</strong> ${
-          moveData.sourceRequiresAdmin && moveData.destRequiresAdmin 
+          moveData.sourceRequiresAdmin && moveData.destRequiresAdmin
             ? 'Both folders are protected (like Program Files). A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
             : moveData.sourceRequiresAdmin
             ? 'The source folder is protected (like Program Files), so admin permission is needed to delete the old files. A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
@@ -828,7 +1375,8 @@ function showGameMoveConfirmation(moveData) {
         }
       </div>
     </div>
-  ` : '';
+  `
+    : "";
 
   modal.innerHTML = `
     <div class="modal-content" style="max-width: 500px;">
@@ -883,9 +1431,9 @@ function showGameMoveConfirmation(moveData) {
   // Close handlers
   const cancelButtons = [
     modal.querySelector("#cancelMoveButton"),
-    modal.querySelector("#cancelMoveButtonFooter")
+    modal.querySelector("#cancelMoveButtonFooter"),
   ];
-  cancelButtons.forEach(btn => {
+  cancelButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
       modal.remove();
     });
@@ -897,7 +1445,7 @@ function showGameMoveConfirmation(moveData) {
     // Disable buttons
     confirmButton.disabled = true;
     confirmButton.textContent = "Moving...";
-    cancelButtons.forEach(btn => btn.disabled = true);
+    cancelButtons.forEach((btn) => (btn.disabled = true));
 
     // Show progress modal
     modal.remove();
@@ -973,20 +1521,24 @@ async function executeGameMove(newPath, progressModal) {
 
     if (result.success) {
       // Show success message
-      showToast(`Game files moved successfully to ${result.newPath}`, "success", 5000);
-      
+      showToast(
+        `Game files moved successfully to ${result.newPath}`,
+        "success",
+        5000
+      );
+
       // Refresh installation status
       const installStatus = await window.api.checkGameInstalled();
       gameInstalled = installStatus.installed;
       updateUI();
-      
+
       // Reload settings from main process (includes updated mod statuses)
       const updatedSettings = await window.api.loadSettings();
       settings = updatedSettings;
-      
+
       // Update the displayed game path
       await loadCurrentGamePath();
-      
+
       // Update all UI elements with new settings
       loadSettings();
     } else {
@@ -995,12 +1547,12 @@ async function executeGameMove(newPath, progressModal) {
     }
   } catch (error) {
     console.error("[Execute Move] Error:", error);
-    
+
     // Remove progress modal
     if (progressModal && progressModal.parentNode) {
       progressModal.remove();
     }
-    
+
     showToast(`Move failed: ${error.message}`, "error", 7000);
   }
 }
@@ -1216,6 +1768,332 @@ if (gotItButton) {
   });
 }
 
+// FAQ Modal handlers
+const faqScreen = document.getElementById("faqScreen");
+const openFaqButton = document.getElementById("openFaqButton");
+const closeFaqButton = document.getElementById("closeFaqButton");
+
+if (openFaqButton) {
+  openFaqButton.addEventListener("click", () => {
+    playClickSound();
+    showFaqModal();
+  });
+}
+
+if (closeFaqButton) {
+  closeFaqButton.addEventListener("click", () => {
+    playClickSound();
+    faqScreen.classList.remove("visible");
+  });
+}
+
+// Function to show FAQ modal with accordion-style FAQs
+function showFaqModal() {
+  const faqContent = document.getElementById("faqContent");
+  if (!faqContent) return;
+
+  // FAQ data (hardcoded - can be easily updated)
+  const faqs = [
+    {
+      question: "Compatibility Warning on Launch",
+      answer: `
+        <p><strong>Problem:</strong> When launching the game, you may see a warning: "Shadowrun has one or more compatibility issues on this computer"</p>
+        <p><strong>Solution:</strong> This is completely normal and expected!</p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Check the box "Don't show this message again"</li>
+          <li>Click "Run" to launch the game</li>
+          <li>The game will work fine despite this warning</li>
+          <li>This message appears because the game was designed for Windows Vista, but runs perfectly on modern Windows</li>
+        </ul>
+      `,
+    },
+    {
+      question: "Direct3D Device Error / Unable to Create Direct3D Device",
+      answer: `
+        <p><strong>Problem:</strong> "Shadowrun was unable to create the Direct3D Device. Press Retry to try again, or Cancel to exit."</p>
+        <p><strong>Solutions (try in this order):</strong></p>
+        
+        <p><strong>1. Verify DirectX Installation:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Open the Diagnostics screen in the launcher</li>
+          <li>Check if DirectX 9 is installed</li>
+          <li>If missing, reinstall DirectX 9 from the launcher or Microsoft's website</li>
+        </ul>
+
+        <p style="margin-top: 12px;"><strong>2. Update GPU Drivers:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Go to Windows Update → Optional Updates</li>
+          <li>Or download latest drivers from your GPU manufacturer (NVIDIA/AMD/Intel)</li>
+          <li>Restart your computer after updating</li>
+        </ul>
+
+        <p style="margin-top: 12px;"><strong>3. Disable DXVK Support (if above doesn't work):</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Open Settings in the launcher</li>
+          <li>Find "DXVK Support" toggle and turn it OFF</li>
+          <li>This disables the d3d9.dll compatibility layer</li>
+          <li>Try launching the game again</li>
+        </ul>
+
+        <p style="margin-top: 12px;"><strong>⚠️ Pink Screen Issue (Older GPUs):</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>If you see pink fog/screen in-match after disabling DXVK, you need the Pink Screen Fix</li>
+          <li>Download the fix and install it to your game directory</li>
+          <li>Right-click Shadowrun.exe → Properties → Compatibility → Check "Run as administrator"</li>
+        </ul>
+
+        <p style="margin-top: 12px; padding: 12px; background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; border-radius: 4px;">
+          <strong>💬 Need Help?</strong><br>
+          If none of these solutions work, reach out for support on the Shadowrun Community Discord. Our community can help troubleshoot your specific issue!
+        </p>
+      `,
+    },
+    {
+      question: "Activation Issues - Key Entry Screen Not Appearing",
+      answer: `
+        <p><strong>Problem:</strong> First-time activation may take up to 20 minutes to load the key entry page after logging in.</p>
+        <p><strong>Solutions:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Click 'Retry' if you receive a "This key has been used too many times" message</li>
+          <li>Wait 5-10 minutes for the key entry window to appear</li>
+          <li>If the application appears frozen:
+            <ul style="margin-left: 20px; margin-top: 4px;">
+              <li>Use Win-Key + Tab to switch desktops</li>
+              <li>Drag Shadowrun to a second desktop</li>
+              <li>Open Task Manager to end the process if necessary</li>
+            </ul>
+          </li>
+        </ul>
+      `,
+    },
+    {
+      question: "Performance Issues - FPS Not Limited",
+      answer: `
+        <p><strong>Problem:</strong> Game malfunctions when FPS is not limited, affecting gun firing rates and in-game physics.</p>
+        <p><strong>Solution:</strong> Set FPS limit between 50-98 fps.</p>
+        <p><strong>Configure dxvk.conf with:</strong></p>
+        <pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; margin: 8px 0; overflow-x: auto;"><code>dxgi.maxFrameRate = 85
+d3d9.maxFrameRate = 85</code></pre>
+        <p><strong>NVIDIA Settings:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Background Max Frame Rate: Same as Max Frame Rate</li>
+          <li>Max Frame Rate: Up to 98</li>
+          <li>Vertical Sync: Off</li>
+          <li>Anisotropic Filtering: 16x</li>
+          <li>Antialiasing Mode: Enhance application setting</li>
+          <li>Antialiasing Setting: 8x</li>
+          <li>Antialiasing Transparency: 8x supersample</li>
+        </ul>
+      `,
+    },
+    {
+      question: "Controller Not Working",
+      answer: `
+        <p><strong>Xbox Controllers:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Natively supported; enable in main menu settings</li>
+        </ul>
+        <p><strong>PlayStation Controllers:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Add Shadowrun as a Non-Steam Game</li>
+          <li>Enable PlayStation Controller Support in Steam</li>
+          <li>Connect controller via USB or Bluetooth</li>
+        </ul>
+        <p><strong>⚠️ Important:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Controller settings can only be changed from the main menu</li>
+          <li>Cannot switch input methods during a match</li>
+        </ul>
+      `,
+    },
+    {
+      question: "Connection Issues - Can't Join Online Matches",
+      answer: `
+        <p><strong>Problem:</strong> Difficulty connecting to online matches.</p>
+        <p><strong>Solutions:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Enable open NAT or UPnP in router settings</li>
+          <li>Verify open NAT status in Xbox Console Companion App</li>
+          <li>Check for PCID registry conflicts</li>
+          <li>Contact ISP about Carrier Grade NAT (CGNAT)</li>
+        </ul>
+        <p><strong>Registry Fix:</strong></p>
+        <ol style="margin-left: 20px; margin-top: 8px;">
+          <li>Uninstall GFWL components</li>
+          <li>Open regedit as administrator</li>
+          <li>Navigate to <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px;">C:\\Users\\USERNAME\\AppData\\Local\\Microsoft\\Xlive</code></li>
+          <li>Delete the entire folder</li>
+          <li>Reinstall GFWL</li>
+        </ol>
+      `,
+    },
+    {
+      question: "Critical System Requirements Not Met Error",
+      answer: `
+        <p><strong>Problem:</strong> Launcher shows "Critical system requirements not met" but game can launch manually.</p>
+        <p><strong>Solutions:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>This error appears when diagnostic checks fail, but the game may still work</li>
+          <li>Network connectivity check may fail due to firewall/VPN - this is OK for offline play</li>
+          <li>If you can manually launch the game, the Play button should work</li>
+          <li>Check the Diagnostics screen for specific issues</li>
+          <li>Run launcher as Administrator if issues persist</li>
+        </ul>
+      `,
+    },
+    {
+      question: "Old Files Missing Error",
+      answer: `
+        <p><strong>Problem:</strong> Toast error about "old files missing" appears.</p>
+        <p><strong>Explanation:</strong> This error only appears during game directory move operations. If you didn't change the game directory, it may be from a previous incomplete move.</p>
+        <p><strong>Solutions:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>If you didn't move the game directory, this is usually harmless</li>
+          <li>Check both old and new game folder locations if you did move files</li>
+          <li>Game files may be in both locations - verify which location has the complete files</li>
+          <li>You can safely ignore this error if the game launches and plays normally</li>
+        </ul>
+      `,
+    },
+    {
+      question: "Game Won't Launch from Launcher",
+      answer: `
+        <p><strong>Solutions:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Verify game files exist at the location shown in Settings</li>
+          <li>Run launcher as Administrator</li>
+          <li>Check that DirectX 9 and GFWL are installed (use Diagnostics screen)</li>
+          <li>If game launches manually but not from launcher, check Diagnostics for specific errors</li>
+          <li>Try browsing for game folder again in Settings if path changed</li>
+        </ul>
+      `,
+    },
+    {
+      question: "GFWL Sign-In Issues",
+      answer: `
+        <p><strong>Solutions:</strong></p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Create a new Xbox Live account if you don't have one</li>
+          <li>Use the same account you use for Xbox/Microsoft services</li>
+          <li>If sign-in fails, restart the game and try again</li>
+          <li>Check that Windows License Manager Service is running (use Diagnostics screen)</li>
+          <li>Restart Xbox Live Networking Service if connection issues occur</li>
+        </ul>
+      `,
+    },
+  ];
+
+  // Generate FAQ HTML with accordion functionality
+  faqContent.innerHTML = faqs
+    .map(
+      (faq, index) => `
+    <div class="faq-item" style="margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden;">
+      <button class="faq-question" data-index="${index}" style="width: 100%; text-align: left; padding: 14px 16px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer; font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s;">
+        <span>${faq.question}</span>
+        <span class="faq-icon" style="font-size: 18px; transition: transform 0.3s;">+</span>
+      </button>
+      <div class="faq-answer" data-index="${index}" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background: rgba(0,0,0,0.1);">
+        <div style="padding: 16px; font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.9);">
+          ${faq.answer}
+        </div>
+      </div>
+    </div>
+  `
+    )
+    .join("");
+
+  // Add click handlers for accordion
+  const faqQuestions = faqContent.querySelectorAll(".faq-question");
+  faqQuestions.forEach((question) => {
+    question.addEventListener("click", () => {
+      const index = question.dataset.index;
+      const answer = faqContent.querySelector(
+        `.faq-answer[data-index="${index}"]`
+      );
+      const icon = question.querySelector(".faq-icon");
+
+      if (answer.style.maxHeight && answer.style.maxHeight !== "0px") {
+        // Close
+        answer.style.maxHeight = "0px";
+        icon.textContent = "+";
+        icon.style.transform = "rotate(0deg)";
+        question.style.background = "rgba(0,0,0,0.2)";
+      } else {
+        // Open
+        answer.style.maxHeight = answer.scrollHeight + "px";
+        icon.textContent = "−";
+        icon.style.transform = "rotate(0deg)";
+        question.style.background = "rgba(0,0,0,0.4)";
+      }
+    });
+  });
+
+  // Search functionality
+  const searchInput = document.getElementById("faqSearchInput");
+  const noResults = document.getElementById("faqNoResults");
+
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      const faqItems = faqContent.querySelectorAll(".faq-item");
+      let visibleCount = 0;
+
+      faqItems.forEach((item) => {
+        const question = item.querySelector(".faq-question");
+        const answer = item.querySelector(".faq-answer");
+        const questionText = question.textContent.toLowerCase();
+        const answerText = answer.textContent.toLowerCase();
+
+        if (
+          questionText.includes(searchTerm) ||
+          answerText.includes(searchTerm)
+        ) {
+          item.style.display = "block";
+          visibleCount++;
+        } else {
+          item.style.display = "none";
+        }
+      });
+
+      // Show/hide no results message
+      if (noResults) {
+        noResults.style.display = visibleCount === 0 ? "block" : "none";
+      }
+    });
+
+    // Focus search input when modal opens
+    setTimeout(() => searchInput.focus(), 100);
+  }
+
+  // Quick action buttons
+  const quickActions = document.querySelectorAll(".faq-quick-action");
+  quickActions.forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.action;
+      const faqItems = faqContent.querySelectorAll(".faq-item");
+
+      faqItems.forEach((item) => {
+        const question = item.querySelector(".faq-question");
+        const answer = item.querySelector(".faq-answer");
+        const icon = question.querySelector(".faq-icon");
+
+        if (action === "expand-all") {
+          answer.style.maxHeight = answer.scrollHeight + "px";
+          icon.textContent = "−";
+          question.style.background = "rgba(0,0,0,0.4)";
+        } else if (action === "collapse-all") {
+          answer.style.maxHeight = "0px";
+          icon.textContent = "+";
+          question.style.background = "rgba(0,0,0,0.2)";
+        }
+      });
+    });
+  });
+
+  // Show modal
+  faqScreen.classList.add("visible");
+}
+
 // Download progress event listeners
 window.api.onGameFilesProgress((progress) => {
   gameFilesProgress.style.width = `${progress}%`;
@@ -1328,25 +2206,28 @@ saveFrameRateButton.addEventListener("click", async () => {
   if (result.success) {
     // Show success feedback
     const feedback = document.getElementById("fpsFeedback");
-    
+
     if (result.requiresRestart) {
       // Game is running - show restart warning
       feedback.textContent = "FPS saved! Restart game to apply changes.";
       feedback.style.backgroundColor = "rgba(251, 191, 36, 0.9)"; // Orange/yellow warning color
     } else {
       // Game not running - normal success
-    feedback.textContent = "FPS setting saved successfully!";
+      feedback.textContent = "FPS setting saved successfully!";
       feedback.style.backgroundColor = "rgba(16, 185, 129, 0.9)"; // Green success color
     }
-    
+
     feedback.classList.add("visible");
 
     // Hide after 5 seconds (longer for restart message)
-    setTimeout(() => {
-      feedback.classList.remove("visible");
-      // Reset to default green color for next time
-      feedback.style.backgroundColor = "rgba(16, 185, 129, 0.9)";
-    }, result.requiresRestart ? 5000 : 3000);
+    setTimeout(
+      () => {
+        feedback.classList.remove("visible");
+        // Reset to default green color for next time
+        feedback.style.backgroundColor = "rgba(16, 185, 129, 0.9)";
+      },
+      result.requiresRestart ? 5000 : 3000
+    );
   } else {
     // Show error feedback
     const feedback = document.getElementById("fpsFeedback");
@@ -1374,6 +2255,22 @@ window.api.onShowNotification((data) => {
   setTimeout(() => {
     notification.remove();
   }, 3000);
+});
+
+// Launch error handler - shows detailed error information
+window.api.onLaunchError((data) => {
+  if (data.critical && data.issues && data.issues.length > 0) {
+    // Build detailed error message
+    const issueMessages = data.issues
+      .map((issue) => `• ${issue.message}`)
+      .join("\n");
+    const errorMessage = `Critical system requirements not met:\n\n${issueMessages}`;
+
+    // Show error toast with details
+    showToast(errorMessage, "error", 8000);
+
+    console.error("[Launch Error] Critical issues:", data.issues);
+  }
 });
 
 // Update the setGameRunning function to properly disable the button
@@ -1566,11 +2463,11 @@ async function loadChangelog() {
 
       // Compare up to the maximum length of either version
       const maxLength = Math.max(aParts.length, bParts.length);
-      
+
       for (let i = 0; i < maxLength; i++) {
         const aPart = aParts[i] || 0; // Default to 0 if part doesn't exist
         const bPart = bParts[i] || 0;
-        
+
         if (aPart !== bPart) {
           return bPart - aPart; // Descending order (newest first)
         }
@@ -1613,18 +2510,18 @@ async function loadChangelog() {
       entry.notes.forEach((note) => {
         // Check if note has a dash separator (title - description format)
         const dashIndex = note.indexOf(" - ");
-        
+
         if (dashIndex > 0) {
           // Split into title and description
           const title = note.substring(0, dashIndex).trim();
           const description = note.substring(dashIndex + 3).trim();
-          
+
           // Parse markdown-style bold text for title
           const formattedTitle = title.replace(
             /\*\*([^*]+)\*\*/g,
             '<strong style="color: #60a5fa;">$1</strong>'
           );
-          
+
           // Parse markdown-style bold text for description (if any)
           const formattedDescription = description.replace(
             /\*\*([^*]+)\*\*/g,
@@ -1644,12 +2541,12 @@ async function loadChangelog() {
           `;
         } else {
           // No dash separator - render as single line (backwards compatibility)
-        const formattedNote = note.replace(
-          /\*\*([^*]+)\*\*/g,
-          '<strong style="color: #60a5fa;">$1</strong>'
-        );
+          const formattedNote = note.replace(
+            /\*\*([^*]+)\*\*/g,
+            '<strong style="color: #60a5fa;">$1</strong>'
+          );
 
-        html += `
+          html += `
           <li style="margin-bottom: 4px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
             <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
             ${formattedNote}
@@ -1767,6 +2664,34 @@ ipcRenderer.on("skip-intro-final-state", (event, state) => {
 });
 */
 
+// Re-check game installation when window regains focus (catches renamed/moved folders)
+window.addEventListener("focus", async () => {
+  // Only check if we think the game is installed (to avoid unnecessary checks)
+  if (gameInstalled) {
+    console.log("[Window Focus] Re-checking game installation status...");
+    const checkResult = await window.api.checkGameInstalled();
+    // Check if game files exist (not all dependencies - user might have game files but missing GFWL/DirectX)
+    if (!checkResult.dependencies?.gameFiles) {
+      console.warn("[Window Focus] Game files no longer found, updating UI");
+      gameInstalled = false;
+      updateUI();
+      showToast(
+        "Game files not found. Please browse for your game folder in Settings.",
+        "error",
+        5000
+      );
+    } else if (checkResult.path) {
+      // Game files found - update gameInstalled flag to true if it was false
+      // This handles the case where user selected a custom path and window regains focus
+      if (!gameInstalled) {
+        console.log("[Window Focus] Game files found, updating UI");
+        gameInstalled = true;
+        updateUI();
+      }
+    }
+  }
+});
+
 // Keep this block (replaces your current DOMContentLoaded block)
 document.addEventListener("DOMContentLoaded", function () {
   console.log("[Renderer] DOMContentLoaded fired.");
@@ -1775,9 +2700,41 @@ document.addEventListener("DOMContentLoaded", function () {
   if (openGameDirButton) {
     console.log("Found Open Game Dir button!");
 
-    openGameDirButton.addEventListener("click", function () {
+    openGameDirButton.addEventListener("click", async function () {
       console.log("Button clicked!");
 
+      // If game is not installed, browse for existing game instead
+      if (!gameInstalled) {
+        try {
+          openGameDirButton.disabled = true;
+          openGameDirButton.textContent = "Searching...";
+
+          const result = await window.api.browseForExistingGame();
+
+          if (result.success) {
+            showToast("✓ Game found!", "success", 3000);
+            // The game-installation-status event will be triggered automatically
+            // which will update the UI
+          } else if (!result.canceled) {
+            showToast(
+              result.error || "Game files not found in selected folder",
+              "error",
+              4000
+            );
+          }
+
+          openGameDirButton.disabled = false;
+          // Button text will be updated by updateUI() when game-installation-status event fires
+        } catch (error) {
+          console.error("[Browse Game] Error:", error);
+          showToast(`Error: ${error.message}`, "error", 4000);
+          openGameDirButton.disabled = false;
+          openGameDirButton.textContent = "Find Existing Game";
+        }
+        return;
+      }
+
+      // If game is installed, open the game directory
       // Simplified approach - just call the API directly
       if (window.api && window.api.openGameDirectory) {
         console.log("Calling openGameDirectory API");
@@ -2549,12 +3506,12 @@ function showDiagnosticsResults(diag) {
       : `${diag.gpuInfo.vendor.toUpperCase()} - ${gpuName}`;
 
   modal.innerHTML = `
-    <div class="modal-content" style="max-width: 550px;">
-      <div class="modal-header" style="background: rgba(15, 23, 42, 0.95);">
+    <div class="modal-content" style="max-width: 550px; max-height: 85vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="background: rgba(15, 23, 42, 0.95); flex-shrink: 0;">
         <h2>🔍 Diagnostic Results</h2>
         <button class="close-button" onclick="this.closest('.modal-screen').remove()">×</button>
       </div>
-      <div class="modal-body" style="padding: 20px;">
+      <div class="modal-body" style="padding: 20px; overflow-y: auto; flex: 1; min-height: 0;">
         
         <!-- System Components -->
         <div style="margin-bottom: 20px;">
@@ -2995,7 +3952,9 @@ if (runSfcScanButton) {
 const openWindowsUpdateButton = document.getElementById(
   "openWindowsUpdateButton"
 );
-const driverUpdateDescription = document.getElementById("driverUpdateDescription");
+const driverUpdateDescription = document.getElementById(
+  "driverUpdateDescription"
+);
 
 // Update button text and description based on detected GPU
 async function updateDriverUpdateButton() {

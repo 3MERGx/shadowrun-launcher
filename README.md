@@ -45,6 +45,14 @@ A modern, feature-rich game launcher for the classic Shadowrun FPS (2007) with a
 
 ## 🚀 Quick Start
 
+### System Requirements
+
+- **Windows 10 or later** (Windows 7/8/8.1 are not supported)
+- **64-bit architecture** (x64)
+- **Administrator privileges** (for game activation and registry modifications)
+
+> **Note:** The launcher uses Electron 25, which requires Windows 10+. If you encounter a `KERNEL32.dll` error mentioning `DiscardVirtualMemory`, this indicates you're running Windows 7/8, which is not supported.
+
 ### For Users
 
 1. **Download** the latest `Shadowrun FPS Launcher Setup.exe`
@@ -271,6 +279,13 @@ npm run start:dev
 - Verify `MONGODB_URI` in Railway environment
 - Check Railway logs for "Connected to MongoDB"
 - Test with `/api/installs` endpoint
+
+**KERNEL32.dll error: "DiscardVirtualMemory could not be located"?**
+
+- This error occurs on Windows 7/8/8.1 systems
+- The launcher requires **Windows 10 or later**
+- Windows 7 reached end-of-life in January 2020 and is no longer supported
+- **Solution:** Upgrade to Windows 10 or later (free upgrade may still be available)
 
 ---
 

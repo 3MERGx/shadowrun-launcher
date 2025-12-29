@@ -2,6 +2,31 @@
 
 All notable changes to the Shadowrun Launcher will be documented in this file.
 
+## [0.9.94] - 2025-12-29
+
+### Added
+
+- **FAQ Section** - Comprehensive FAQ section with search, accordion-style questions, and quick actions
+- **FAQ Content** - Added 10 common troubleshooting FAQs including Direct3D errors, compatibility warnings, and connection issues
+- **AMD GPU Warning** - Warning note that FPS limiting may not work on AMD GPUs
+
+### Improved
+
+- **System Requirements Check** - Network connectivity check no longer blocks game launch (game can run offline)
+
+## [0.9.93] - 2025-12-24
+
+### Added
+
+- **Find Existing Location** - Manually select existing game files if located in a different location
+
+### Improved
+
+- **Game Path Persistence** - Selected game folder is now remembered across sessions and window focus changes
+- **Folder Name Independence** - Launcher works with any folder name as long as Shadowrun.exe is present
+- **Dynamic Mod Status Updates** - Mod statuses (Skip Intro, DXVK, FPS, srs_shadowrun.dll) automatically update after selecting game location
+- **Window Focus Re-checking** - Launcher automatically detects when game files are moved or renamed while launcher is running
+
 ## [0.9.92] - 2025-12-20
 
 ### Added

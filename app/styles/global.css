@@ -581,23 +581,56 @@ button:focus {
   padding-top: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.instructions-faq-button {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 120px;
+  flex: 0 1 auto;
+}
+
+.instructions-faq-button:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.instructions-faq-button:active {
+  transform: translateY(0);
 }
 
 .instructions-got-it-button {
-  background-color: #3b82f6;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: white;
   border: none;
-  padding: 10px 32px;
+  padding: 12px 24px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  font-weight: 500;
-  transition: background-color 0.2s, transform 0.1s;
+  font-weight: 600;
+  transition: all 0.2s;
+  min-width: 140px;
+  flex: 1;
+  max-width: 200px;
 }
 
 .instructions-got-it-button:hover {
-  background-color: #2563eb;
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
 }
 
 .instructions-got-it-button:active {
@@ -1904,4 +1937,135 @@ button:focus {
   border-radius: 2px;
   transition: width 0.3s ease;
   box-shadow: 0 0 10px rgba(255, 107, 0, 0.5);
+}
+
+/* FAQ Button Styles */
+.instructions-faq-button {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-right: 12px;
+}
+
+.instructions-faq-button:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.instructions-faq-button:active {
+  transform: translateY(0);
+}
+
+/* FAQ Accordion Styles */
+.faq-item {
+  margin-bottom: 12px;
+  transition: opacity 0.2s;
+}
+
+.faq-question {
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border: none;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.2s;
+}
+
+.faq-question:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.faq-question:active {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.faq-icon {
+  font-size: 18px;
+  transition: transform 0.3s;
+  font-weight: 300;
+  min-width: 20px;
+  text-align: center;
+}
+
+.faq-answer {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.faq-answer > div {
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.faq-answer ul,
+.faq-answer ol {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.faq-answer li {
+  margin-bottom: 4px;
+}
+
+.faq-answer code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+}
+
+.faq-answer pre {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 10px;
+  border-radius: 4px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.faq-answer pre code {
+  background: none;
+  padding: 0;
+}
+
+/* FAQ Search Input */
+#faqSearchInput:focus {
+  border-color: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* FAQ Quick Actions */
+.faq-quick-action:hover {
+  background: rgba(59, 130, 246, 0.3) !important;
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  transform: translateY(-1px);
+}
+
+.faq-quick-action:active {
+  transform: translateY(0);
+}
+
+/* FAQ External Link */
+a[href*="shadowrunfps.com"]:hover {
+  background: rgba(16, 185, 129, 0.3) !important;
+  border-color: rgba(16, 185, 129, 0.6) !important;
+  transform: translateY(-1px);
 }

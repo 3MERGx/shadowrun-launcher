@@ -189,8 +189,8 @@
 
           <div class="setting-item">
             <div class="setting-label-group">
-              <label>Game Installation Folder</label>
-              <span class="setting-description"
+              <label id="gameFolderLabel">Game Installation Folder</label>
+              <span id="gameFolderDescription" class="setting-description"
                 >Open the folder where Shadowrun is installed</span
               >
             </div>
@@ -209,8 +209,9 @@
               <label for="maxFrameRate">Max Frame Rate</label>
               <span class="setting-description"
                 >Limit the maximum frames per second. Default is 85 FPS. Higher
-                values may cause instability.</span
-              >
+                values may cause instability.
+                <br><span style="color: #f59e0b; font-size: 11px;">⚠️ Note: FPS limiting may not work on AMD GPUs.</span>
+              </span>
             </div>
             <div class="fps-controls">
               <div class="input-with-label">
@@ -330,7 +331,7 @@
               >
             </div>
             <button id="runDiagnosticsButton" class="settings-action-button">
-Run Diagnostics
+              Run Diagnostics
             </button>
           </div>
 
@@ -350,13 +351,13 @@ Run Diagnostics
                   color: #e5e7eb;
                 "
               >
-                <div style="margin-bottom: 6px;">
+                <div style="margin-bottom: 6px">
                   Using a PlayStation, Switch Pro, or other non-Xbox controller?
                 </div>
-                <div style="margin-bottom: 6px;">
+                <div style="margin-bottom: 6px">
                   Launch the launcher through Steam as a non-Steam game.
                 </div>
-                <div style="font-size: 11px; color: #94a3b8;">
+                <div style="font-size: 11px; color: #94a3b8">
                   💡 Steam Input should work automatically.
                 </div>
               </div>
@@ -655,6 +656,10 @@ Run Diagnostics
               all components (game files, GFWL, DirectX 9) to install.
             </li>
             <li>
+              <strong>Activate:</strong> Click "Activate Game" and allow admin
+              permissions when prompted.
+            </li>
+            <li>
               <strong>Launch Game:</strong> Once complete, click "Play" to start
               Shadowrun.
             </li>
@@ -670,10 +675,6 @@ Run Diagnostics
               <strong>⚠️ Important:</strong> Press <kbd>Alt</kbd> +
               <kbd>Tab</kbd> to return here.
               <strong>Do NOT close the game</strong>.
-            </li>
-            <li>
-              <strong>Activate:</strong> Click "Activate Game" and allow admin
-              permissions when prompted.
             </li>
             <li>
               <strong>Return:</strong> Switch back to Shadowrun with
@@ -693,9 +694,60 @@ Run Diagnostics
             </ul>
           </div>
           <div class="instructions-actions">
+            <button id="openFaqButton" class="instructions-faq-button">
+              📚 FAQ
+            </button>
             <button id="gotItButton" class="instructions-got-it-button">
               Got it!
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FAQ Modal -->
+    <div id="faqScreen" class="modal-screen">
+      <div class="modal-content" style="max-width: 750px; max-height: 85vh;">
+        <div class="modal-header">
+          <h2>📚 FAQ / Troubleshooting</h2>
+          <button id="closeFaqButton" class="close-button">×</button>
+        </div>
+        <div class="modal-body" style="padding: 20px; overflow-y: auto; max-height: calc(85vh - 80px); display: flex; flex-direction: column;">
+          <!-- Search box -->
+          <div style="margin-bottom: 20px; flex-shrink: 0;">
+            <input 
+              type="text" 
+              id="faqSearchInput" 
+              placeholder="🔍 Search FAQs..." 
+              style="width: 100%; padding: 12px 16px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: white; font-size: 14px; outline: none; transition: border-color 0.2s;"
+            />
+          </div>
+          
+          <!-- FAQ content (scrollable) -->
+          <div style="flex: 1; overflow-y: auto; min-height: 0;">
+            <div id="faqContent">
+              <!-- FAQ content will be populated by JavaScript -->
+            </div>
+            
+            <!-- No results message -->
+            <div id="faqNoResults" style="display: none; text-align: center; padding: 40px 20px; color: rgba(255,255,255,0.5);">
+              <div style="font-size: 48px; margin-bottom: 12px;">🔍</div>
+              <div style="font-size: 16px; margin-bottom: 8px;">No FAQs found</div>
+              <div style="font-size: 13px;">Try a different search term</div>
+            </div>
+          </div>
+          
+          <!-- Quick actions at bottom -->
+          <div style="display: flex; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); flex-shrink: 0; flex-wrap: wrap;">
+            <button class="faq-quick-action" data-action="expand-all" style="padding: 8px 16px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 4px; color: #60a5fa; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+              Expand All
+            </button>
+            <button class="faq-quick-action" data-action="collapse-all" style="padding: 8px 16px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 4px; color: #60a5fa; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+              Collapse All
+            </button>
+            <a href="https://www.shadowrunfps.com/docs/troubleshoot" target="_blank" style="padding: 8px 16px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 4px; color: #10b981; font-size: 12px; cursor: pointer; text-decoration: none; transition: all 0.2s; display: inline-block;">
+              🌐 View Full Guide
+            </a>
           </div>
         </div>
       </div>

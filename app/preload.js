@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld("api", {
 
   // Add this with the other methods
   setMaxFrameRate: (fps) => ipcRenderer.invoke("set-max-frame-rate", fps),
+  getCurrentFpsFromDxvkConf: () => ipcRenderer.invoke("get-current-fps-from-dxvk-conf"),
 
   // Add this method
   checkGameInstalled: () => ipcRenderer.invoke("check-game-installed"),
@@ -205,10 +206,16 @@ contextBridge.exposeInMainWorld("api", {
   onGameMoveProgress: (callback) => {
     ipcRenderer.on("game-move-progress", (_, data) => callback(data));
   },
+  browseForExistingGame: () => ipcRenderer.invoke("browse-for-existing-game"),
   
   // Listen for settings updates
   onSettingsUpdated: (callback) => {
     ipcRenderer.on("settings-updated", (_, settings) => callback(settings));
+  },
+
+  // Launch error handler
+  onLaunchError: (callback) => {
+    ipcRenderer.on("launch-error", (_, data) => callback(data));
   },
 
   // For receiving messages from main (if you use them)

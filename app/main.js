@@ -921,9 +921,14 @@ async function launchGameLogic(gameSettings, source = "unknown") {
         });
       }
 
+      // Build detailed error message for the return value
+      const errorDetails = criticalIssues
+        .map((issue) => `${issue.message}${issue.fix ? ` (${issue.fix})` : ""}`)
+        .join("; ");
+
       return {
         success: false,
-        error: "Critical system requirements not met",
+        error: `Critical system requirements not met: ${errorDetails}`,
         details: criticalIssues,
       };
     }
@@ -975,9 +980,9 @@ async function launchGameLogic(gameSettings, source = "unknown") {
     setTimeout(() => {
       // Verify the process is actually running
       if (gameProcess && !gameProcess.killed) {
-    playerInGame = true;
+        playerInGame = true;
         gameStartTime = new Date(); // Track when game started for Discord presence
-    updateDiscordActivity(true);
+        updateDiscordActivity(true);
       }
     }, 2000); // 2 second delay to ensure game process has started
 
@@ -1828,19 +1833,39 @@ async function checkWindowsFirewall() {
 }
 
 // Check network connectivity
+// Note: This check may fail due to firewall/VPN/ISP blocking ICMP, even when internet is available
+// Network is only required for downloads, NOT for launching or playing the game
 async function checkNetworkConnectivity() {
   return new Promise((resolve) => {
-    // Ping Google DNS
-    exec("ping -n 1 8.8.8.8", (error, stdout) => {
+    // Ping Google DNS with timeout (2 seconds)
+    // Use -w 2000 for timeout in milliseconds
+    exec("ping -n 1 -w 2000 8.8.8.8", { timeout: 3000 }, (error, stdout) => {
       if (error) {
-        resolve({ online: false, status: "Offline" });
+        // Ping failed - could be offline, or firewall/VPN/ISP blocking ICMP
+        // Don't assume offline - just mark as "Unable to verify"
+        console.log(
+          "[Network Check] Ping failed - may be offline or blocked by firewall/VPN"
+        );
+        resolve({
+          online: false,
+          status: "Unable to verify (may be blocked by firewall/VPN)",
+        });
         return;
       }
 
       const success =
         stdout.toLowerCase().includes("reply from") ||
         stdout.toLowerCase().includes("bytes=");
-      resolve({ online: success, status: success ? "Online" : "Offline" });
+
+      if (success) {
+        resolve({ online: true, status: "Online" });
+      } else {
+        // No clear reply - mark as unable to verify
+        resolve({
+          online: false,
+          status: "Unable to verify (may be blocked by firewall/VPN)",
+        });
+      }
     });
   });
 }
@@ -2184,7 +2209,13 @@ async function runPreLaunchDiagnostics() {
     const driverInfo = await checkGPUDrivers();
     diagnostics.gpuDrivers = driverInfo.hasDrivers;
 
-    if (!driverInfo.hasDrivers) {
+    // If we can detect a GPU vendor/name, assume drivers are present (game wouldn't work without them)
+    // Only flag as critical if wmic explicitly fails AND we can't detect GPU at all
+    const hasDetectableGPU =
+      gpuInfo && gpuInfo.vendor !== "unknown" && gpuInfo.name !== "Unknown";
+
+    if (!driverInfo.hasDrivers && !hasDetectableGPU) {
+      // Only critical if we truly can't detect anything
       diagnostics.issues.push({
         type: "gpu_drivers",
         severity: "critical",
@@ -2192,11 +2223,19 @@ async function runPreLaunchDiagnostics() {
           "GPU drivers may be missing or outdated. This can cause graphics errors.",
         fix: "Update your GPU drivers through Windows Update (Optional Updates) or from your GPU manufacturer's website.",
       });
+    } else if (!driverInfo.hasDrivers && hasDetectableGPU) {
+      // If we can detect GPU but wmic failed, downgrade to warning (drivers likely present)
+      console.log(
+        `[Diagnostics] ⚠️  GPU driver check failed via wmic, but GPU detected: ${gpuInfo.name} - assuming drivers are present`
+      );
+      diagnostics.gpuDrivers = true; // Assume drivers are present if GPU is detectable
     } else {
       console.log(`[Diagnostics] ✅ GPU Drivers: OK (${gpuInfo.name})`);
     }
   } catch (error) {
     console.error("[Diagnostics] Error checking GPU:", error.message);
+    // If GPU detection itself fails, try to be lenient - don't block launch
+    // The game will fail on its own if there's a real GPU issue
   }
 
   // Check NAT Type (important for P2P!)
@@ -2218,21 +2257,22 @@ async function runPreLaunchDiagnostics() {
   }
 
   // Check Network Connectivity
+  // Note: Network is only required for downloading game files/components, NOT for launching or playing offline
   try {
     const networkInfo = await checkNetworkConnectivity();
     diagnostics.network = networkInfo;
+    // Don't add as an issue - network is only needed for downloads, not gameplay
+    // The check may also fail due to firewall/VPN/ISP blocking ping, even when internet is available
     if (!networkInfo.online) {
-      diagnostics.issues.push({
-        type: "network",
-        severity: "critical",
-        message:
-          "No internet connection detected. Online multiplayer requires internet access.",
-        fix: "Check your internet connection.",
-      });
+      console.log(
+        `[Diagnostics] ⚠️  Network check failed - this is OK for offline play. Network is only needed for downloading game files/components.`
+      );
+    } else {
+      console.log(`[Diagnostics] ✅ Network: ${networkInfo.status}`);
     }
-    console.log(`[Diagnostics] Network: ${networkInfo.status}`);
   } catch (error) {
     console.error("[Diagnostics] Error checking network:", error.message);
+    // Don't fail diagnostics if network check errors - it's not critical for gameplay
   }
 
   // Check .NET Framework
@@ -2295,7 +2335,7 @@ ipcMain.handle("download-game", async () => {
 
     downloadInProgress = true;
     cancelDownloadRequested = false;
-    
+
     // Update player tracking status
     playerTracker.setStatus("downloading");
 
@@ -3001,7 +3041,7 @@ d3d9.maxFrameRate = 85
 
     // Clean up downloads
     downloadInProgress = false;
-    
+
     // Update player tracking status back to menu
     playerTracker.setStatus("menu");
 
@@ -4532,7 +4572,7 @@ objShell.ShellExecute "cmd.exe", "/k echo Running System File Checker... && sfc 
         }
       } catch (cleanupError) {
         // Ignore cleanup errors
-        }
+      }
     }, 5000);
 
     return {
@@ -4756,6 +4796,17 @@ if (cancelDownloadRequested) {
   throw new Error("Download cancelled by user");
 }
 
+// Handle getting current FPS from dxvk.conf
+ipcMain.handle("get-current-fps-from-dxvk-conf", async () => {
+  try {
+    const fps = readCurrentFpsFromDxvkConf();
+    return fps;
+  } catch (error) {
+    console.error("Error getting FPS from dxvk.conf:", error);
+    return null;
+  }
+});
+
 // Handle setting max frame rate
 ipcMain.handle("set-max-frame-rate", async (event, fps) => {
   try {
@@ -4790,44 +4841,55 @@ d3d9.maxFrameRate = ${fps}
     console.log("Reading existing dxvk.conf file");
     let configContent = fs.readFileSync(dxvkConfPath, "utf8");
 
-    // Update or add the frame rate settings - always update both together
-    const dxgiRegex = /dxgi\.maxFrameRate\s*=\s*\d+/;
-    const d3d9Regex = /d3d9\.maxFrameRate\s*=\s*\d+/;
+    // Validate: Only edit the two specific FPS lines
+    // Regex patterns to find the exact lines we're allowed to modify
+    const dxgiPattern = /dxgi\.maxFrameRate\s*=\s*\d+/;
+    const d3d9Pattern = /d3d9\.maxFrameRate\s*=\s*\d+/;
 
-    // Update or add dxgi.maxFrameRate
-    if (dxgiRegex.test(configContent)) {
+    // Check if lines exist
+    const hasDxgi = dxgiPattern.test(configContent);
+    const hasD3d9 = d3d9Pattern.test(configContent);
+
+    // Update existing lines (only these two specific lines)
+    if (hasDxgi) {
       console.log("Updating existing dxgi.maxFrameRate setting");
       configContent = configContent.replace(
-        dxgiRegex,
+        dxgiPattern,
         `dxgi.maxFrameRate = ${fps}`
       );
-    } else {
-      console.log("Adding new dxgi.maxFrameRate setting");
-      // Add at the beginning if file is empty, otherwise add newline
-      if (configContent.trim() === "") {
-        configContent = `dxgi.maxFrameRate = ${fps}`;
-      } else {
-        configContent += `\ndxgi.maxFrameRate = ${fps}`;
-      }
     }
 
-    // Update or add d3d9.maxFrameRate - always ensure it matches dxgi
-    if (d3d9Regex.test(configContent)) {
+    if (hasD3d9) {
       console.log("Updating existing d3d9.maxFrameRate setting");
       configContent = configContent.replace(
-        d3d9Regex,
+        d3d9Pattern,
         `d3d9.maxFrameRate = ${fps}`
       );
-    } else {
-      console.log("Adding new d3d9.maxFrameRate setting");
-      configContent += `\nd3d9.maxFrameRate = ${fps}`;
+    }
+
+    // Add missing lines at the top of the file
+    const fpsLines = `dxgi.maxFrameRate = ${fps}\nd3d9.maxFrameRate = ${fps}`;
+
+    if (!hasDxgi || !hasD3d9) {
+      console.log("Adding missing FPS settings at the top of file");
+      const trimmedContent = configContent.trim();
+
+      if (trimmedContent === "") {
+        // File is empty, just write the FPS lines
+        configContent = fpsLines + "\n";
+      } else {
+        // Add FPS lines at the top, with a blank line separator
+        configContent = fpsLines + "\n\n" + trimmedContent;
+      }
     }
 
     console.log("New config content:", configContent);
 
     // Write updated config back to file
     fs.writeFileSync(dxvkConfPath, configContent);
-    console.log("Config file updated successfully");
+    console.log(
+      "Config file updated successfully - only modified dxgi.maxFrameRate and d3d9.maxFrameRate lines"
+    );
 
     return {
       success: true,
@@ -4861,7 +4923,8 @@ function initDiscord() {
       // This also ensures we catch any state changes (game crash, etc.)
       discordUpdateInterval = setInterval(() => {
         // Verify actual game state before updating
-        const isActuallyPlaying = gameProcess && !gameProcess.killed && playerInGame;
+        const isActuallyPlaying =
+          gameProcess && !gameProcess.killed && playerInGame;
         updateDiscordActivity(isActuallyPlaying);
       }, 30000); // 30 seconds - respects Discord's 15-second rate limit
     });
@@ -4925,12 +4988,12 @@ async function fetchPlayerCount() {
           res.on("end", () => {
             try {
               const stats = JSON.parse(data);
-              
+
               // Check if current version is outdated compared to other players
               const currentVersion = app.getVersion();
               const versionBreakdown = stats.versionBreakdown || {};
               const versions = Object.keys(versionBreakdown).sort();
-              
+
               // Find most common version (likely the latest)
               let mostCommonVersion = null;
               let maxCount = 0;
@@ -4940,16 +5003,20 @@ async function fetchPlayerCount() {
                   mostCommonVersion = version;
                 }
               }
-              
+
               // If most common version is different and newer, suggest update
               // (This is a fallback if auto-updater hasn't detected it yet)
               if (mostCommonVersion && mostCommonVersion !== currentVersion) {
                 // Simple version comparison (assumes semantic versioning)
-                const currentParts = currentVersion.split('.').map(Number);
-                const latestParts = mostCommonVersion.split('.').map(Number);
+                const currentParts = currentVersion.split(".").map(Number);
+                const latestParts = mostCommonVersion.split(".").map(Number);
                 let isNewer = false;
-                
-                for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
+
+                for (
+                  let i = 0;
+                  i < Math.max(currentParts.length, latestParts.length);
+                  i++
+                ) {
                   const current = currentParts[i] || 0;
                   const latest = latestParts[i] || 0;
                   if (latest > current) {
@@ -4959,14 +5026,14 @@ async function fetchPlayerCount() {
                     break;
                   }
                 }
-                
+
                 if (isNewer && !updateAvailable) {
                   // Other players are on a newer version
                   updateAvailable = true;
                   latestVersion = mostCommonVersion;
                 }
               }
-              
+
               resolve({
                 totalOnline: stats.totalOnline || 0,
                 inGame: stats.inGame || 0,
@@ -4999,10 +5066,10 @@ async function fetchPlayerCount() {
 // Helper function to verify game is actually running
 function isGameActuallyRunning() {
   if (!gameProcess) return false;
-  
+
   // Check if process is killed
   if (gameProcess.killed) return false;
-  
+
   // Additional check: verify process still exists (Windows)
   try {
     if (gameProcess.pid) {
@@ -5014,7 +5081,7 @@ function isGameActuallyRunning() {
     // Process doesn't exist (ESRCH error)
     return false;
   }
-  
+
   return true;
 }
 
@@ -5024,10 +5091,12 @@ async function updateDiscordActivity(playing) {
 
   // Verify actual game state - don't trust the 'playing' parameter alone
   const actuallyPlaying = playing && isGameActuallyRunning();
-  
+
   // If we thought we were playing but game isn't running, correct the state
   if (playing && !actuallyPlaying) {
-    console.log("[Discord RPC] Game state mismatch detected - correcting to idle");
+    console.log(
+      "[Discord RPC] Game state mismatch detected - correcting to idle"
+    );
     playerInGame = false;
     gameProcess = null;
     gameStartTime = null;
@@ -5038,7 +5107,7 @@ async function updateDiscordActivity(playing) {
   const now = Date.now();
   const timeSinceLastUpdate = now - lastDiscordUpdate;
   const stateChanged = lastDiscordState !== actuallyPlaying;
-  
+
   if (timeSinceLastUpdate < DISCORD_UPDATE_INTERVAL && !stateChanged) {
     // Queue the update for later (only if state hasn't changed)
     const delay = DISCORD_UPDATE_INTERVAL - timeSinceLastUpdate;
@@ -5062,7 +5131,7 @@ async function updateDiscordActivity(playing) {
 
   // Fetch player count from Railway API
   const playerStats = await fetchPlayerCount();
-  
+
   // Format version string with update indicator
   const currentVersion = app.getVersion();
   let versionText = `v${currentVersion}`;
@@ -5080,24 +5149,24 @@ async function updateDiscordActivity(playing) {
       : "In-Game";
 
     activity = {
-        details: "Playing Shadowrun (2007)",
+      details: "Playing Shadowrun (2007)",
       state: state,
-        largeImageKey: "game_logo",
+      largeImageKey: "game_logo",
       largeImageText: "Shadowrun FPS",
       smallImageKey: "launcher_logo",
       smallImageText: versionText, // Shows version or "Update: vX → vY" if update available
       startTimestamp: gameStartTime || new Date(), // Shows "Playing for X hours Y minutes" automatically
-        buttons: [
-          {
-            label: "🌐 Visit Website",
-            url: "https://www.shadowrunfps.com",
-          },
-          {
-            label: "💬 Join Discord",
-            url: "https://discord.gg/p9uzqbNPEK",
-          },
-        ],
-        instance: false,
+      buttons: [
+        {
+          label: "🌐 Visit Website",
+          url: "https://www.shadowrunfps.com",
+        },
+        {
+          label: "💬 Join Discord",
+          url: "https://discord.gg/p9uzqbNPEK",
+        },
+      ],
+      instance: false,
     };
   } else {
     // In launcher - show idle status and player count
@@ -5109,22 +5178,22 @@ async function updateDiscordActivity(playing) {
     activity = {
       details: "Idle in Launcher",
       state: state,
-        largeImageKey: "launcher_logo",
+      largeImageKey: "launcher_logo",
       largeImageText: "Shadowrun FPS Launcher",
       smallImageKey: "menu",
       smallImageText: versionText, // This will show "v1.0.0 → v1.0.2" if update available, or just "v1.0.2" if up to date
-        buttons: [
-          {
-            label: "🌐 Visit Website",
-            url: "https://www.shadowrunfps.com",
-          },
-          {
-            label: "💬 Join Discord",
-            url: "https://discord.gg/p9uzqbNPEK",
-          },
-        ],
-        instance: false,
-      };
+      buttons: [
+        {
+          label: "🌐 Visit Website",
+          url: "https://www.shadowrunfps.com",
+        },
+        {
+          label: "💬 Join Discord",
+          url: "https://discord.gg/p9uzqbNPEK",
+        },
+      ],
+      instance: false,
+    };
   }
 
   rpc.setActivity(activity).catch((error) => {
@@ -5150,13 +5219,13 @@ app.on("before-quit", () => {
     clearInterval(discordUpdateInterval);
     discordUpdateInterval = null;
   }
-  
+
   // Clear pending Discord update
   if (pendingDiscordUpdate) {
     clearTimeout(pendingDiscordUpdate);
     pendingDiscordUpdate = null;
   }
-  
+
   // Stop player tracking
   playerTracker.stop();
 
@@ -5178,6 +5247,31 @@ ipcMain.handle("move-window", (event, deltaX, deltaY) => {
 
 // Add this function to find the game in multiple locations
 async function findGameInstallation() {
+  // FIRST: Check saved custom game path from settings (highest priority - user explicitly selected this)
+  if (
+    settings.customGamePath &&
+    fs.existsSync(path.join(settings.customGamePath, "Shadowrun.exe"))
+  ) {
+    console.log(
+      `[Find Game] Using saved custom game path: ${settings.customGamePath}`
+    );
+    // Update GAME_INSTALL_DIR to match saved path
+    GAME_INSTALL_DIR = settings.customGamePath;
+    RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+    return GAME_INSTALL_DIR;
+  }
+
+  // SECOND: Check if GAME_INSTALL_DIR is already set and valid (e.g., from user selection or settings)
+  if (
+    GAME_INSTALL_DIR &&
+    fs.existsSync(path.join(GAME_INSTALL_DIR, "Shadowrun.exe"))
+  ) {
+    console.log(
+      `[Find Game] Using existing GAME_INSTALL_DIR: ${GAME_INSTALL_DIR}`
+    );
+    return GAME_INSTALL_DIR;
+  }
+
   // Potential locations to check (in order of priority)
   const possibleLocations = [
     // Default location
@@ -5282,6 +5376,21 @@ async function checkExistingInstallation() {
       // Update the global path even if dependencies are missing
       GAME_INSTALL_DIR = foundLocation;
       RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+
+      // If user has explicitly set a custom path, preserve it (don't overwrite with auto-found location)
+      // Only update custom path if it's not already set (to preserve user's explicit choice)
+      if (!settings.customGamePath) {
+        settings.customGamePath = foundLocation;
+        saveSettingsToDisk();
+        console.log(
+          `[Install Check] Saved auto-found location to custom game path: ${foundLocation}`
+        );
+      } else if (foundLocation === settings.customGamePath) {
+        // Path matches saved custom path - ensure GAME_INSTALL_DIR is synced
+        console.log(
+          `[Install Check] Found location matches saved custom path: ${foundLocation}`
+        );
+      }
     }
 
     // Send the status to the renderer process
@@ -5317,8 +5426,43 @@ async function checkExistingInstallation() {
 
 // Add IPC handler for manual check
 ipcMain.handle("check-game-installed", async () => {
-  const isInstalled = await checkExistingInstallation();
-  return { installed: isInstalled };
+  try {
+    // Check game files first (using findGameInstallation which checks custom path)
+    const foundLocation = await findGameInstallation();
+    const gameFilesExist = foundLocation !== null;
+
+    // Check other dependencies
+    const gfwlInstalled = await isGFWLInstalled();
+    const dx9Installed = await isDX9Installed();
+    const allDependenciesMet = gameFilesExist && gfwlInstalled && dx9Installed;
+
+    // Update GAME_INSTALL_DIR if found
+    if (foundLocation) {
+      GAME_INSTALL_DIR = foundLocation;
+      RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+    }
+
+    return {
+      installed: allDependenciesMet,
+      path: foundLocation,
+      dependencies: {
+        gameFiles: gameFilesExist,
+        gfwl: gfwlInstalled,
+        dx9: dx9Installed,
+      },
+    };
+  } catch (error) {
+    console.error("Error checking game installation:", error);
+    return {
+      installed: false,
+      path: null,
+      dependencies: {
+        gameFiles: false,
+        gfwl: false,
+        dx9: false,
+      },
+    };
+  }
 });
 
 // Add this function to check if a directory is writable
@@ -6458,11 +6602,11 @@ ipcMain.handle("get-changelog", async () => {
         try {
           const changelogData = fs.readFileSync(changelogPath, "utf8");
           console.log(`[Changelog] Found at: ${changelogPath}`);
-      return {
-        success: true,
-        data: JSON.parse(changelogData),
-        source: "local",
-      };
+          return {
+            success: true,
+            data: JSON.parse(changelogData),
+            source: "local",
+          };
         } catch (readError) {
           console.warn(
             `[Changelog] Error reading ${changelogPath}:`,
@@ -6665,7 +6809,11 @@ ipcMain.handle("execute-game-move", async (event, newPath) => {
   try {
     const oldPath = GAME_INSTALL_DIR;
 
-    console.log(`[Move Game] Starting move from ${oldPath} to ${newPath}`);
+    console.log(`[Move Game] ========================================`);
+    console.log(`[Move Game] MOVE OPERATION INITIATED`);
+    console.log(`[Move Game] Source: ${oldPath}`);
+    console.log(`[Move Game] Destination: ${newPath}`);
+    console.log(`[Move Game] ========================================`);
 
     // Check if game is running (double-check)
     if (gameProcess && !gameProcess.killed) {
@@ -6786,7 +6934,18 @@ try {
     }
     
     if ($verified) {
-        Remove-Item -Path $oldPath -Recurse -Force -ErrorAction Stop
+        # Try to remove old directory, but don't fail if it's already gone
+        if (Test-Path $oldPath) {
+            try {
+                Remove-Item -Path $oldPath -Recurse -Force -ErrorAction Stop
+            } catch {
+                # Old directory might already be deleted or in use - log but don't fail
+                [System.IO.File]::AppendAllText($logFile, "OLD_DIR_REMOVAL_WARNING: $($_.Exception.Message)$newline", [System.Text.Encoding]::UTF8)
+            }
+        } else {
+            # Old directory already missing - that's fine, files were already moved/deleted
+            [System.IO.File]::AppendAllText($logFile, "OLD_DIR_ALREADY_MISSING$newline", [System.Text.Encoding]::UTF8)
+        }
         [System.IO.File]::AppendAllText($logFile, "SUCCESS$newline", [System.Text.Encoding]::UTF8)
     } else {
         [System.IO.File]::AppendAllText($logFile, "VERIFICATION_FAILED$newline", [System.Text.Encoding]::UTF8)
@@ -6962,10 +7121,80 @@ objShell.ShellExecute "powershell.exe", "-ExecutionPolicy Bypass -WindowStyle Hi
       } else if (lastLine === "VERIFICATION_FAILED") {
         result = {
           success: false,
-          error: "File verification failed. Old files preserved.",
+          error:
+            "File verification failed during game move. Old files preserved - game files may be in both locations. Please check your game folders.",
         };
+      } else if (
+        lastLine.startsWith("OLD_DIR_ALREADY_MISSING") ||
+        lastLine.startsWith("OLD_DIR_REMOVAL_WARNING")
+      ) {
+        // Old directory was already missing or couldn't be removed - this is OK, files were moved successfully
+        // Check if SUCCESS was logged before this
+        const hasSuccess = logContent.includes("SUCCESS");
+        if (hasSuccess) {
+          // Files were moved successfully, just old dir cleanup had an issue - treat as success
+          GAME_INSTALL_DIR = newPath;
+          RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+          settings.customGamePath = newPath;
+
+          const skipIntroStatus = await checkSkipIntroStatus();
+          const dxvkStatus = await checkDxvkStatus();
+          settings.skipIntro = skipIntroStatus.installed;
+          settings.dxvk = dxvkStatus.enabled;
+          saveSettingsToDisk();
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("settings-updated", settings);
+          }
+
+          result = { success: true, newPath };
+          console.log(
+            "[Elevated Move] Move succeeded, old directory was already missing (not an error)"
+          );
+        } else {
+          // No SUCCESS marker - treat as error
+          result = {
+            success: false,
+            error:
+              "Move completed but verification unclear. Please check game files.",
+          };
+        }
       } else if (lastLine.startsWith("ERROR:")) {
-        result = { success: false, error: lastLine.substring(7) };
+        // Check if it's an error about old directory missing - that's not critical
+        const errorMsg = lastLine.substring(7);
+        if (
+          errorMsg.toLowerCase().includes("cannot find path") ||
+          errorMsg.toLowerCase().includes("does not exist") ||
+          errorMsg.toLowerCase().includes("old")
+        ) {
+          // Might be about old directory - check if files were actually moved
+          const hasSuccess = logContent.includes("SUCCESS");
+          if (hasSuccess) {
+            // Files moved successfully, old dir error is not critical
+            GAME_INSTALL_DIR = newPath;
+            RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+            settings.customGamePath = newPath;
+
+            const skipIntroStatus = await checkSkipIntroStatus();
+            const dxvkStatus = await checkDxvkStatus();
+            settings.skipIntro = skipIntroStatus.installed;
+            settings.dxvk = dxvkStatus.enabled;
+            saveSettingsToDisk();
+
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("settings-updated", settings);
+            }
+
+            result = { success: true, newPath };
+            console.log(
+              "[Elevated Move] Move succeeded, old directory error was non-critical"
+            );
+          } else {
+            result = { success: false, error: errorMsg };
+          }
+        } else {
+          result = { success: false, error: errorMsg };
+        }
       }
     }
 
@@ -7045,15 +7274,29 @@ async function executeNormalMove(oldPath, newPath) {
       return {
         success: false,
         error:
-          "File verification failed. Old files have not been deleted. Please try again.",
+          "File verification failed during game move. Old files have not been deleted - game files may be in both locations. Please check your game folders and try again.",
       };
     }
 
     console.log(`[Move Game] All files verified successfully`);
 
-    // Delete old directory
-    console.log(`[Move Game] Removing old directory...`);
-    fs.rmSync(oldPath, { recursive: true, force: true });
+    // Delete old directory (if it still exists)
+    if (fs.existsSync(oldPath)) {
+      console.log(`[Move Game] Removing old directory...`);
+      try {
+        fs.rmSync(oldPath, { recursive: true, force: true });
+      } catch (deleteError) {
+        // Old directory might be in use or already partially deleted - log warning but don't fail
+        console.warn(
+          `[Move Game] Could not remove old directory (may already be deleted or in use): ${deleteError.message}`
+        );
+        // This is not a critical error - files were successfully moved
+      }
+    } else {
+      console.log(
+        `[Move Game] Old directory already missing - files were successfully moved`
+      );
+    }
 
     // Update global paths
     GAME_INSTALL_DIR = newPath;
@@ -7309,6 +7552,82 @@ async function updateShortcuts(newPath) {
     return false;
   }
 }
+
+// Handler to browse for existing game installation
+ipcMain.handle("browse-for-existing-game", async () => {
+  try {
+    console.log("[Browse Game] Opening folder picker");
+
+    // Show folder picker
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: "Select Folder Containing Shadowrun.exe",
+      defaultPath: app.getPath("documents"),
+      properties: ["openDirectory"],
+      buttonLabel: "Select Folder",
+    });
+
+    if (canceled || !filePaths || filePaths.length === 0) {
+      console.log("[Browse Game] User canceled selection");
+      return { success: false, canceled: true };
+    }
+
+    const selectedPath = filePaths[0];
+    console.log(`[Browse Game] User selected: ${selectedPath}`);
+
+    // Check if Shadowrun.exe exists in the selected folder
+    const exePath = path.join(selectedPath, "Shadowrun.exe");
+    if (!fs.existsSync(exePath)) {
+      console.log(`[Browse Game] Shadowrun.exe not found at: ${exePath}`);
+      return {
+        success: false,
+        error:
+          "Shadowrun.exe not found in the selected folder. Please select the folder that directly contains Shadowrun.exe",
+      };
+    }
+
+    console.log(`[Browse Game] ✓ Found Shadowrun.exe at: ${exePath}`);
+
+    // Update the global path variables
+    GAME_INSTALL_DIR = selectedPath;
+    RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+
+    console.log(
+      `[Browse Game] Updated GAME_INSTALL_DIR to: ${GAME_INSTALL_DIR}`
+    );
+
+    // Save the custom path to settings
+    settings.customGamePath = GAME_INSTALL_DIR;
+    saveSettingsToDisk();
+    console.log("[Browse Game] Saved custom game path to settings");
+
+    // Re-check mod statuses at new location
+    console.log("[Browse Game] Re-checking mod statuses at new location");
+    const skipIntroStatus = await checkSkipIntroStatus();
+    const dxvkStatus = await checkDxvkStatus();
+    settings.skipIntro = skipIntroStatus.installed;
+    settings.dxvk = dxvkStatus.enabled;
+    saveSettingsToDisk();
+    console.log(
+      `[Browse Game] Skip Intro: ${skipIntroStatus.installed}, DXVK: ${dxvkStatus.enabled}`
+    );
+
+    // Re-check installation status to update UI
+    await checkExistingInstallation();
+
+    // Send updated settings to renderer so UI updates immediately
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("settings-updated", settings);
+    }
+
+    return {
+      success: true,
+      path: GAME_INSTALL_DIR,
+    };
+  } catch (error) {
+    console.error("[Browse Game] Error:", error);
+    return { success: false, error: error.message };
+  }
+});
 
 ipcMain.handle("show-notification", (event, data) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -7593,11 +7912,11 @@ function checkForUpdates(manual = false) {
 autoUpdater.on("update-available", (info) => {
   console.log("[Updater] Update available:", info.version);
   console.log("[Updater] Release notes:", info.releaseNotes);
-  
+
   // Track for Discord RPC
   updateAvailable = true;
   latestVersion = info.version;
-  
+
   // Update Discord presence to show update available
   if (rpc) {
     updateDiscordActivity(playerInGame);
@@ -7638,11 +7957,11 @@ autoUpdater.on("update-not-available", (info) => {
     "[Updater] No update available. Current version is latest:",
     info?.version || app.getVersion()
   );
-  
+
   // Clear update tracking
   updateAvailable = false;
   latestVersion = null;
-  
+
   // Update Discord presence
   if (rpc) {
     updateDiscordActivity(playerInGame);
