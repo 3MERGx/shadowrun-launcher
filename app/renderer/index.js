@@ -175,7 +175,7 @@ function showActivationConfirmDialog() {
 }
 
 // Function to show download confirmation dialog with option to find existing game
-function showDownloadConfirmDialog() {
+function showDownloadConfirmDialog(autoScanDisabled = false) {
   return new Promise((resolve) => {
     // Create dialog overlay
     const overlay = document.createElement("div");
@@ -344,17 +344,27 @@ function showDownloadConfirmDialog() {
       </style>
       <div class="confirm-dialog-header">
         <div class="confirm-title">
-          <span class="confirm-icon">🔍</span>
-          Game Not Found
+          <span class="confirm-icon">${autoScanDisabled ? "🎮" : "🔍"}</span>
+          ${autoScanDisabled ? "Game Installation" : "Game Not Found"}
         </div>
         <button class="confirm-close-button" id="closeBtn" aria-label="Close">×</button>
       </div>
       <div class="confirm-content">
         <div class="confirm-message">
-          Shadowrun game files were not detected on your system.
+          ${
+            autoScanDisabled
+              ? "Do you have an existing Shadowrun installation?"
+              : "Shadowrun game files were not detected on your system."
+          }
         </div>
         <div class="confirm-note">
-          <strong>Already have the game?</strong> Browse for your existing installation to avoid downloading again.
+          <strong>${
+            autoScanDisabled ? "Have the game?" : "Already have the game?"
+          }</strong> ${
+      autoScanDisabled
+        ? "Browse to your existing installation to avoid downloading again."
+        : "Browse for your existing installation to avoid downloading again."
+    }
         </div>
       </div>
       <div class="confirm-footer">
@@ -618,6 +628,19 @@ const playButton = document.getElementById("playButton");
 const activateButton = document.getElementById("activateButton");
 const discordButton = document.getElementById("discordButton");
 const websiteButton = document.getElementById("websiteButton");
+
+// Error alert bar elements
+const errorAlertBar = document.getElementById("errorAlertBar");
+const errorAlertMessage = document.getElementById("errorAlertMessage");
+const errorAlertDismiss = document.getElementById("errorAlertDismiss");
+const errorAlertCount = document.getElementById("errorAlertCount");
+const errorAlertFix = document.getElementById("errorAlertFix");
+const errorListPopup = document.getElementById("errorListPopup");
+const errorListContent = document.getElementById("errorListContent");
+const errorListClose = document.getElementById("errorListClose");
+
+// Store current issues for the popup
+let currentIssues = [];
 const settingsButton = document.getElementById("settingsButton");
 const minimizeButton = document.getElementById("minimizeButton");
 const closeButton = document.getElementById("closeButton");
@@ -628,10 +651,6 @@ const settingsScreen = document.getElementById("settingsScreen");
 const closeSettingsButton = document.getElementById("closeSettingsButton");
 const skipIntroButton = document.getElementById("skipIntroButton");
 const dxvkToggle = document.getElementById("dxvk");
-
-// srs_shadowrun.dll version buttons
-const srsDllNewerButton = document.getElementById("srsDllNewerButton");
-const srsDllOlderButton = document.getElementById("srsDllOlderButton");
 
 // Changelog elements
 const viewChangelogLink = document.getElementById("viewChangelogLink");
@@ -682,10 +701,50 @@ const saveFrameRateButton = document.getElementById("saveFrameRateButton");
 // Add this variable to track if game is running
 let gameRunning = false;
 
+// Track if a launch is in progress to prevent multiple launches
+let launchInProgress = false;
+
+// Track last launch time to prevent rapid clicking
+let lastLaunchTime = 0;
+const LAUNCH_COOLDOWN_MS = 2000; // 2 second cooldown after game closes
+
 // Add this listener near the top with other listeners
 window.api.onGameStateUpdate((state) => {
+  const wasRunning = gameRunning;
   gameRunning = state.running;
-  updateUI();
+
+  // If game just started running, clear launch in progress flag
+  if (!wasRunning && state.running) {
+    console.log(
+      "[Game State] Game started running, clearing launch in progress flag"
+    );
+    launchInProgress = false;
+    updateUI();
+  }
+  // If game just stopped running, add a cooldown before re-enabling button
+  else if (wasRunning && !state.running) {
+    console.log(
+      "[Game State] Game closed, applying cooldown before re-enabling button"
+    );
+    launchInProgress = false;
+
+    // Disable button immediately
+    if (playButton) {
+      playButton.disabled = true;
+      playButton.textContent = "Please wait...";
+    }
+
+    // Re-enable after cooldown period
+    setTimeout(() => {
+      if (!gameRunning && playButton && !launchInProgress) {
+        console.log("[Game State] Cooldown expired, re-enabling play button");
+        playButton.disabled = false;
+        updateUI();
+      }
+    }, LAUNCH_COOLDOWN_MS);
+  } else {
+    updateUI();
+  }
 });
 
 // Add this early in the script to check installation on load
@@ -734,18 +793,6 @@ window.api.onSettingsUpdated(async (updatedSettings) => {
   } catch (error) {
     console.error("Error reading FPS from dxvk.conf:", error);
   }
-
-  // Refresh srs_shadowrun.dll version
-  window.api
-    .checkSrsDllVersion()
-    .then((status) => {
-      if (status.exists && status.version) {
-        updateSrsDllButtonStates(status.version);
-      }
-    })
-    .catch((error) => {
-      console.error("Error checking srs_shadowrun.dll version:", error);
-    });
 });
 
 // Replace the existing activation status handler with this stripped-down version
@@ -861,17 +908,6 @@ function updateUI() {
         toggleContainer.style.pointerEvents = "auto";
       }
     }
-    // Enable srs_shadowrun.dll version buttons
-    if (srsDllNewerButton) {
-      srsDllNewerButton.disabled = false;
-      srsDllNewerButton.style.opacity = "1";
-      srsDllNewerButton.style.cursor = "pointer";
-    }
-    if (srsDllOlderButton) {
-      srsDllOlderButton.disabled = false;
-      srsDllOlderButton.style.opacity = "1";
-      srsDllOlderButton.style.cursor = "pointer";
-    }
     // Enable Change Game Location button
     const changeGameLocationButton = document.getElementById(
       "changeGameLocationButton"
@@ -915,19 +951,6 @@ function updateUI() {
         toggleContainer.style.opacity = "0.5";
         toggleContainer.style.pointerEvents = "none";
       }
-    }
-    // Disable srs_shadowrun.dll version buttons
-    if (srsDllNewerButton) {
-      srsDllNewerButton.disabled = true;
-      srsDllNewerButton.classList.remove("active");
-      srsDllNewerButton.style.opacity = "0.5";
-      srsDllNewerButton.style.cursor = "not-allowed";
-    }
-    if (srsDllOlderButton) {
-      srsDllOlderButton.disabled = true;
-      srsDllOlderButton.classList.remove("active");
-      srsDllOlderButton.style.opacity = "0.5";
-      srsDllOlderButton.style.cursor = "not-allowed";
     }
     // Disable Change Game Location button
     const changeGameLocationButton = document.getElementById(
@@ -987,11 +1010,38 @@ function addButtonSoundEffects() {
 
 // Button event handlers
 playButton.addEventListener("click", async () => {
-  // First check if button is disabled or if game is running
-  if (playButton.disabled || gameRunning) {
-    console.log("Button clicked while disabled or game running, ignoring...");
+  // First check if button is disabled, game is running, or launch is in progress
+  if (playButton.disabled || gameRunning || launchInProgress) {
+    console.log(
+      "Button clicked while disabled, game running, or launch in progress, ignoring..."
+    );
     return; // Exit early, don't process the click
   }
+
+  // Check cooldown period (prevent rapid clicking after game closes)
+  const timeSinceLastLaunch = Date.now() - lastLaunchTime;
+  if (timeSinceLastLaunch < LAUNCH_COOLDOWN_MS) {
+    const remainingTime = Math.ceil(
+      (LAUNCH_COOLDOWN_MS - timeSinceLastLaunch) / 1000
+    );
+    console.log(
+      `Button clicked too soon after last launch. Please wait ${remainingTime} second(s).`
+    );
+    showToast(
+      `Please wait ${remainingTime} second(s) before launching again`,
+      "warning",
+      2000
+    );
+    return;
+  }
+
+  // Mark launch as in progress and disable button immediately
+  launchInProgress = true;
+  lastLaunchTime = Date.now();
+  playButton.disabled = true;
+  playButton.textContent = "Launching...";
+
+  console.log("Play button clicked, launch in progress");
 
   // If game is installed, verify it still exists before launching
   if (gameInstalled) {
@@ -1011,48 +1061,108 @@ playButton.addEventListener("click", async () => {
       return;
     }
     console.log("Launching game...");
-    const launchResult = await window.api.launchGame(settings);
-    if (!launchResult.success) {
-      showToast(launchResult.error || "Failed to launch game", "error", 5000);
-      // If game executable not found, update UI
-      if (launchResult.error && launchResult.error.includes("not found")) {
-        gameInstalled = false;
+    try {
+      const launchResult = await window.api.launchGame(settings);
+      if (!launchResult.success) {
+        // Launch failed - re-enable button
+        launchInProgress = false;
+        playButton.disabled = false;
         updateUI();
+
+        // Show specific error message (already improved in main process)
+        const errorMsg =
+          launchResult.error ||
+          "Failed to launch game. Check diagnostics for details.";
+        showToast(errorMsg, "error", 6000);
+        // If game executable not found, update UI
+        if (launchResult.error && launchResult.error.includes("not found")) {
+          gameInstalled = false;
+          updateUI();
+        }
+      } else {
+        // Launch succeeded - button will be disabled by game-state-update event
+        // Keep launchInProgress true until we get confirmation game is running
+        console.log("Launch initiated, waiting for game state update...");
       }
+    } catch (error) {
+      // Error during launch - re-enable button
+      console.error("Error launching game:", error);
+      launchInProgress = false;
+      playButton.disabled = false;
+      updateUI();
+      showToast(
+        `Failed to launch game: ${
+          error.message || "Unknown error occurred"
+        }. Check diagnostics for details.`,
+        "error",
+        6000
+      );
     }
     return;
   }
 
   // If game is not installed, show confirmation dialog
-  const downloadChoice = await showDownloadConfirmDialog();
+  // Pass auto-scan disabled flag to show appropriate message
+  const autoScanDisabled = settings && !settings.autoScanEnabled;
+  const downloadChoice = await showDownloadConfirmDialog(autoScanDisabled);
+
+  // If user cancelled, re-enable button
+  if (!downloadChoice || downloadChoice === "cancel") {
+    launchInProgress = false;
+    playButton.disabled = false;
+    updateUI();
+    return;
+  }
 
   if (downloadChoice === "find") {
     // User wants to find existing game
     try {
       const result = await window.api.browseForExistingGame();
       if (result.success) {
-        showToast("✓ Game found!", "success", 3000);
+        showToast(
+          "✓ Game found! Shadowrun.exe detected in selected folder.",
+          "success",
+          3000
+        );
         // The game-installation-status event will be triggered automatically
         // which will update the UI
       } else if (!result.canceled) {
         showToast(
-          result.error || "Game files not found in selected folder",
+          result.error ||
+            "Shadowrun.exe not found in selected folder. Please select the folder containing Shadowrun.exe",
           "error",
-          4000
+          5000
         );
       }
+      // Re-enable button after browse operation
+      launchInProgress = false;
+      playButton.disabled = false;
+      updateUI();
     } catch (error) {
       console.error("[Find Game] Error:", error);
-      showToast(`Error: ${error.message}`, "error", 4000);
+      showToast(
+        `Failed to browse for game: ${
+          error.message || "Unknown error"
+        }. Please try selecting the folder manually.`,
+        "error",
+        5000
+      );
+      // Re-enable button on error
+      launchInProgress = false;
+      playButton.disabled = false;
+      updateUI();
     }
-    return;
-  } else if (downloadChoice === "cancel") {
-    // User canceled
     return;
   }
 
   // User chose to download - proceed with download
   console.log("Downloading game...");
+
+  // Re-enable button since download is handled separately
+  // The download screen will manage its own UI state
+  launchInProgress = false;
+  playButton.disabled = false;
+  updateUI();
 
   // Show the download progress screen
   downloadProgressScreen.classList.add("visible");
@@ -1202,19 +1312,6 @@ settingsButton.addEventListener("click", () => {
         toggleContainer.style.pointerEvents = "none";
       }
     }
-    // Disable srs_shadowrun.dll version buttons
-    if (srsDllNewerButton) {
-      srsDllNewerButton.disabled = true;
-      srsDllNewerButton.classList.remove("active");
-      srsDllNewerButton.style.opacity = "0.5";
-      srsDllNewerButton.style.cursor = "not-allowed";
-    }
-    if (srsDllOlderButton) {
-      srsDllOlderButton.disabled = true;
-      srsDllOlderButton.classList.remove("active");
-      srsDllOlderButton.style.opacity = "0.5";
-      srsDllOlderButton.style.cursor = "not-allowed";
-    }
     // Disable Change Game Location button
     const changeGameLocationButton = document.getElementById(
       "changeGameLocationButton"
@@ -1236,6 +1333,25 @@ settingsButton.addEventListener("click", () => {
         dxvkToggle.checked = status.enabled;
       }
     });
+
+    // Refresh FPS value from dxvk.conf whenever settings are opened
+    window.api
+      .getCurrentFpsFromDxvkConf()
+      .then((fps) => {
+        if (fps !== null && fps !== undefined && maxFrameRateInput) {
+          maxFrameRateInput.value = fps;
+          // Update settings object to keep it in sync
+          if (settings) {
+            settings.maxFrameRate = fps;
+          }
+        }
+      })
+      .catch((error) => {
+        console.error(
+          "Error reading FPS from dxvk.conf when opening settings:",
+          error
+        );
+      });
   }
 
   // Update driver update button text based on detected GPU
@@ -1272,6 +1388,9 @@ if (openDiagnosticsButton && diagnosticsScreen) {
 
     // Auto-detect system info when diagnostics opens (silently, no toast)
     detectAndDisplaySystemInfo(false);
+
+    // Update error badges based on current issues
+    updateErrorBadges();
   });
 }
 
@@ -1331,8 +1450,9 @@ if (changeGameLocationButton) {
           return;
         }
 
-        // Show error
-        showToast(result.error, "error", 5000);
+        // Show error with context
+        const errorMsg = result.error || "Failed to change game location";
+        showToast(`Cannot change game location: ${errorMsg}`, "error", 6000);
         return;
       }
 
@@ -1340,7 +1460,13 @@ if (changeGameLocationButton) {
       showGameMoveConfirmation(result);
     } catch (error) {
       console.error("[Change Location] Error:", error);
-      showToast(`Error: ${error.message}`, "error", 5000);
+      showToast(
+        `Failed to change game location: ${
+          error.message || "Unknown error"
+        }. Please try again.`,
+        "error",
+        6000
+      );
       changeGameLocationButton.disabled = false;
       changeGameLocationButton.textContent = "📁 Change Location";
     }
@@ -1522,9 +1648,9 @@ async function executeGameMove(newPath, progressModal) {
     if (result.success) {
       // Show success message
       showToast(
-        `Game files moved successfully to ${result.newPath}`,
+        `✓ Game files moved successfully to:\n${result.newPath}`,
         "success",
-        5000
+        6000
       );
 
       // Refresh installation status
@@ -1542,8 +1668,13 @@ async function executeGameMove(newPath, progressModal) {
       // Update all UI elements with new settings
       loadSettings();
     } else {
-      // Show error
-      showToast(`Move failed: ${result.error}`, "error", 7000);
+      // Show error with context
+      const errorMsg = result.error || "Unknown error occurred during move";
+      showToast(
+        `Failed to move game files: ${errorMsg}. Game files remain in original location.`,
+        "error",
+        8000
+      );
     }
   } catch (error) {
     console.error("[Execute Move] Error:", error);
@@ -1553,7 +1684,13 @@ async function executeGameMove(newPath, progressModal) {
       progressModal.remove();
     }
 
-    showToast(`Move failed: ${error.message}`, "error", 7000);
+    showToast(
+      `Failed to move game files: ${
+        error.message || "Unknown error"
+      }. Game files remain in original location.`,
+      "error",
+      8000
+    );
   }
 }
 
@@ -1652,8 +1789,9 @@ if (dxvkToggle) {
         // Revert toggle state on failure
         dxvkToggle.checked = !newState;
 
-        // Show error toast
-        showToast(result.message, "error", 5000);
+        // Show error toast with context
+        const errorMsg = result.message || "Failed to toggle DXVK support";
+        showToast(`DXVK toggle failed: ${errorMsg}`, "error", 6000);
       }
     } catch (error) {
       console.error("Error toggling DXVK:", error);
@@ -1661,7 +1799,13 @@ if (dxvkToggle) {
       // Revert toggle state on error
       dxvkToggle.checked = !newState;
 
-      showToast("An unexpected error occurred", "error");
+      showToast(
+        `Failed to toggle DXVK support: ${
+          error.message || "Unknown error"
+        }. Please try again.`,
+        "error",
+        6000
+      );
     } finally {
       // Restore label and re-enable toggle
       label.textContent = originalLabelText;
@@ -1695,11 +1839,28 @@ async function loadSettings() {
     dxvkToggle.checked = settings.dxvk;
   }
 
-  // Load frame rate setting if available, otherwise default to 85
-  if (settings.maxFrameRate) {
-    maxFrameRateInput.value = settings.maxFrameRate;
-  } else {
-    maxFrameRateInput.value = 85;
+  // Load frame rate setting - prioritize reading from dxvk.conf file
+  try {
+    const fpsFromConf = await window.api.getCurrentFpsFromDxvkConf();
+    if (fpsFromConf !== null && fpsFromConf !== undefined) {
+      // Use the value from dxvk.conf (most accurate)
+      maxFrameRateInput.value = fpsFromConf;
+      settings.maxFrameRate = fpsFromConf;
+    } else if (settings.maxFrameRate) {
+      // Fall back to stored settings if dxvk.conf doesn't have a value
+      maxFrameRateInput.value = settings.maxFrameRate;
+    } else {
+      // Default to 85 if neither source has a value
+      maxFrameRateInput.value = 85;
+    }
+  } catch (error) {
+    console.error("Error reading FPS from dxvk.conf:", error);
+    // Fall back to stored settings or default
+    if (settings.maxFrameRate) {
+      maxFrameRateInput.value = settings.maxFrameRate;
+    } else {
+      maxFrameRateInput.value = 85;
+    }
   }
 }
 
@@ -2260,14 +2421,36 @@ window.api.onShowNotification((data) => {
 // Launch error handler - shows detailed error information
 window.api.onLaunchError((data) => {
   if (data.critical && data.issues && data.issues.length > 0) {
-    // Build detailed error message
-    const issueMessages = data.issues
-      .map((issue) => `• ${issue.message}`)
-      .join("\n");
-    const errorMessage = `Critical system requirements not met:\n\n${issueMessages}`;
+    // Build clearer, more specific error message
+    let errorMessage;
+
+    if (data.issues.length === 1) {
+      // Single issue - show specific message
+      const issue = data.issues[0];
+      if (issue.type === "directx") {
+        errorMessage =
+          "DirectX 9+ isn't detected. Please install DirectX 9 from the launcher's setup options.";
+      } else {
+        // Fallback for any other critical issues
+        errorMessage = `${issue.message}${
+          issue.fix ? `\n\nFix: ${issue.fix}` : ""
+        }`;
+      }
+    } else {
+      // Multiple issues - list them clearly
+      const issueMessages = data.issues
+        .map((issue) => {
+          if (issue.type === "directx") {
+            return "• DirectX 9+ isn't detected/installed";
+          }
+          return `• ${issue.message}`;
+        })
+        .join("\n");
+      errorMessage = `Critical issues detected:\n\n${issueMessages}\n\nPlease fix these issues before launching the game.`;
+    }
 
     // Show error toast with details
-    showToast(errorMessage, "error", 8000);
+    showToast(errorMessage, "error", 10000); // Increased to 10 seconds for readability
 
     console.error("[Launch Error] Critical issues:", data.issues);
   }
@@ -2312,91 +2495,6 @@ window.api.onDxvkProgress((data) => {
 });
 
 // ============================================================
-// SRS_SHADOWRUN.DLL VERSION SWITCHING
-// ============================================================
-
-// Function to update button states
-function updateSrsDllButtonStates(activeVersion) {
-  if (activeVersion === "newer") {
-    srsDllNewerButton.classList.add("active");
-    srsDllOlderButton.classList.remove("active");
-  } else if (activeVersion === "older") {
-    srsDllNewerButton.classList.remove("active");
-    srsDllOlderButton.classList.add("active");
-  }
-}
-
-// Function to handle version switching
-async function switchSrsDllVersion(targetVersion) {
-  // Disable both buttons during operation
-  srsDllNewerButton.disabled = true;
-  srsDllOlderButton.disabled = true;
-
-  // Add loading state to target button
-  const targetButton =
-    targetVersion === "newer" ? srsDllNewerButton : srsDllOlderButton;
-  targetButton.classList.add("loading");
-
-  try {
-    const result = await window.api.switchSrsDllVersion(targetVersion);
-
-    if (result.success) {
-      // Update button states
-      updateSrsDllButtonStates(targetVersion);
-
-      // Show success toast
-      showToast(result.message, "success");
-    } else {
-      // Show error toast
-      showToast(result.message, "error", 5000);
-    }
-  } catch (error) {
-    console.error("Error switching srs_shadowrun.dll version:", error);
-    showToast("An unexpected error occurred", "error");
-  } finally {
-    // Re-enable buttons and remove loading state
-    srsDllNewerButton.disabled = false;
-    srsDllOlderButton.disabled = false;
-    targetButton.classList.remove("loading");
-  }
-}
-
-// Event listeners for segmented buttons
-if (srsDllNewerButton) {
-  srsDllNewerButton.addEventListener("click", () => {
-    if (!srsDllNewerButton.classList.contains("active")) {
-      switchSrsDllVersion("newer");
-    }
-  });
-}
-
-if (srsDllOlderButton) {
-  srsDllOlderButton.addEventListener("click", () => {
-    if (!srsDllOlderButton.classList.contains("active")) {
-      switchSrsDllVersion("older");
-    }
-  });
-}
-
-// Progress handler for srs_shadowrun.dll switching
-window.api.onSrsDllProgress((data) => {
-  // Optional: Could add a progress indicator here if needed
-  // For now, the loading state on the button is sufficient
-  // Progress updates are silent - loading spinner on button shows activity
-});
-
-// Check current version on load
-window.api
-  .checkSrsDllVersion()
-  .then((status) => {
-    if (status.exists && status.version) {
-      updateSrsDllButtonStates(status.version);
-    }
-  })
-  .catch((error) => {
-    console.error("Error checking srs_shadowrun.dll version:", error);
-  });
-
 // ============================================================
 // CHANGELOG VIEWER
 // ============================================================
@@ -2690,11 +2788,264 @@ window.addEventListener("focus", async () => {
       }
     }
   }
+
+  // Check for persistent issues on window focus
+  checkPersistentIssues();
 });
+
+// Function to check for persistent issues and display alert
+async function checkPersistentIssues() {
+  try {
+    const result = await window.api.checkPersistentIssues();
+
+    if (result.hasIssues && result.issues.length > 0) {
+      // Store issues globally for popup
+      currentIssues = result.issues;
+
+      // Determine severity (error > warning)
+      const hasError = result.issues.some(
+        (issue) => issue.severity === "error"
+      );
+      const severity = hasError ? "error" : "warning";
+
+      // Build message - more compact format for multiple issues
+      let message;
+
+      if (result.issues.length === 1) {
+        // Single issue: show full message, hide count badge
+        message = result.issues[0].message;
+        if (errorAlertCount) {
+          errorAlertCount.style.display = "none";
+        }
+      } else {
+        // Multiple issues: show first issue + count badge
+        message = result.issues[0].message;
+        if (errorAlertCount) {
+          errorAlertCount.textContent = result.issues.length;
+          errorAlertCount.style.display = "block";
+        }
+      }
+
+      // Show alert bar (only if stacked alerts aren't visible)
+      if (errorAlertBar && errorAlertMessage && !window.stackedAlerts?.length) {
+        errorAlertMessage.textContent = message;
+        errorAlertBar.className = `error-alert-bar ${severity}`;
+        errorAlertBar.style.display = "block";
+      }
+
+      // Update error badges in diagnostics
+      updateErrorBadges();
+    } else {
+      // Hide alert bar if no issues
+      currentIssues = [];
+      hideStackedErrorAlerts();
+      if (errorAlertBar) {
+        errorAlertBar.style.display = "none";
+      }
+      updateErrorBadges();
+    }
+  } catch (error) {
+    console.error("[Persistent Issues] Error checking issues:", error);
+  }
+}
+
+// Update error indicator badges in diagnostics section
+function updateErrorBadges() {
+  const licenseManagerBadge = document.getElementById(
+    "licenseManagerErrorBadge"
+  );
+  const xboxNetworkingBadge = document.getElementById(
+    "xboxNetworkingErrorBadge"
+  );
+
+  if (licenseManagerBadge) {
+    const hasLicenseIssue = currentIssues.some(
+      (issue) => issue.type === "license_manager"
+    );
+    licenseManagerBadge.style.display = hasLicenseIssue ? "inline" : "none";
+  }
+
+  if (xboxNetworkingBadge) {
+    const hasXboxIssue = currentIssues.some(
+      (issue) => issue.type === "xbox_networking"
+    );
+    xboxNetworkingBadge.style.display = hasXboxIssue ? "inline" : "none";
+  }
+}
+
+// Show stacked error alerts (instead of popup)
+function showStackedErrorAlerts() {
+  if (!currentIssues || currentIssues.length <= 1) return;
+
+  // Hide the main alert temporarily
+  if (errorAlertBar) {
+    errorAlertBar.style.display = "none";
+  }
+
+  // Calculate the width needed for the longest message
+  const maxWidth = Math.max(
+    ...currentIssues.map((issue) => {
+      // Rough estimate: 7px per character + padding
+      return Math.min(issue.message.length * 7 + 100, 600);
+    }),
+    350 // Minimum width
+  );
+
+  // Create stacked alerts for each issue
+  const alerts = [];
+  currentIssues.forEach((issue, index) => {
+    const hasError = currentIssues.some((i) => i.severity === "error");
+    const severity = hasError ? "error" : "warning";
+
+    const alert = document.createElement("div");
+    alert.className = `error-alert-bar ${severity} stacked-alert`;
+    alert.style.bottom = `${8 + index * 50}px`; // Stack them vertically
+    alert.style.zIndex = 999 + index;
+    alert.style.minWidth = `${maxWidth}px`; // Set consistent width
+    alert.style.maxWidth = "600px";
+
+    alert.innerHTML = `
+      <div class="error-alert-content">
+        <span class="error-alert-icon">⚠️</span>
+        <span class="error-alert-message">${issue.message}</span>
+        <button class="error-alert-fix" title="Open Diagnostics">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+          </svg>
+        </button>
+        <button class="error-alert-dismiss stacked-dismiss" title="Dismiss">×</button>
+      </div>
+    `;
+
+    // Add fix button handler
+    const fixBtn = alert.querySelector(".error-alert-fix");
+    if (fixBtn) {
+      fixBtn.addEventListener("click", async () => {
+        hideStackedErrorAlerts();
+        const diagnosticsScreen = document.getElementById("diagnosticsScreen");
+        if (diagnosticsScreen) {
+          diagnosticsScreen.classList.add("visible");
+
+          // Reset scroll position to top when opening
+          const settingsContent =
+            diagnosticsScreen.querySelector(".settings-content");
+          if (settingsContent) {
+            settingsContent.scrollTop = 0;
+          }
+
+          // Load and display current game path
+          await loadCurrentGamePath();
+
+          // Auto-detect system info when diagnostics opens (silently, no toast)
+          detectAndDisplaySystemInfo(false);
+
+          // Update error badges based on current issues
+          updateErrorBadges();
+        }
+      });
+    }
+
+    // Add dismiss handler
+    const dismissBtn = alert.querySelector(".stacked-dismiss");
+    if (dismissBtn) {
+      dismissBtn.addEventListener("click", () => {
+        hideStackedErrorAlerts();
+      });
+    }
+
+    document.body.appendChild(alert);
+    alerts.push(alert);
+  });
+
+  // Store alerts for cleanup
+  window.stackedAlerts = alerts;
+}
+
+// Hide stacked error alerts
+function hideStackedErrorAlerts() {
+  if (window.stackedAlerts) {
+    window.stackedAlerts.forEach((alert) => {
+      if (alert.parentNode) {
+        alert.parentNode.removeChild(alert);
+      }
+    });
+    window.stackedAlerts = [];
+  }
+
+  // Show main alert again
+  if (errorAlertBar && currentIssues && currentIssues.length > 0) {
+    errorAlertBar.style.display = "block";
+  }
+}
+
+// Count badge click handler - show stacked alerts
+if (errorAlertCount) {
+  errorAlertCount.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (currentIssues && currentIssues.length > 1) {
+      showStackedErrorAlerts();
+    }
+  });
+}
+
+// Fix button click handler - opens diagnostics
+if (errorAlertFix) {
+  errorAlertFix.addEventListener("click", async () => {
+    // Close stacked alerts if open
+    hideStackedErrorAlerts();
+
+    // Open diagnostics screen
+    const diagnosticsScreen = document.getElementById("diagnosticsScreen");
+    if (diagnosticsScreen) {
+      diagnosticsScreen.classList.add("visible");
+
+      // Reset scroll position to top when opening
+      const settingsContent =
+        diagnosticsScreen.querySelector(".settings-content");
+      if (settingsContent) {
+        settingsContent.scrollTop = 0;
+      }
+
+      // Load and display current game path
+      await loadCurrentGamePath();
+
+      // Auto-detect system info when diagnostics opens (silently, no toast)
+      detectAndDisplaySystemInfo(false);
+
+      // Update error badges based on current issues
+      updateErrorBadges();
+    }
+  });
+}
+
+// Dismiss button handler
+if (errorAlertDismiss) {
+  errorAlertDismiss.addEventListener("click", () => {
+    if (errorAlertBar) {
+      errorAlertBar.style.display = "none";
+    }
+  });
+}
 
 // Keep this block (replaces your current DOMContentLoaded block)
 document.addEventListener("DOMContentLoaded", function () {
   console.log("[Renderer] DOMContentLoaded fired.");
+
+  // Check for persistent issues on load
+  checkPersistentIssues();
+
+  // Check for persistent issues periodically (every 30 seconds)
+  setInterval(() => {
+    checkPersistentIssues();
+  }, 30000);
+
+  // Check for persistent issues on load
+  checkPersistentIssues();
+
+  // Check for persistent issues periodically (every 30 seconds)
+  setInterval(() => {
+    checkPersistentIssues();
+  }, 30000);
   const openGameDirButton = document.getElementById("openGameDirButton");
 
   if (openGameDirButton) {
@@ -2712,14 +3063,19 @@ document.addEventListener("DOMContentLoaded", function () {
           const result = await window.api.browseForExistingGame();
 
           if (result.success) {
-            showToast("✓ Game found!", "success", 3000);
+            showToast(
+              "✓ Game found! Shadowrun.exe detected in selected folder.",
+              "success",
+              3000
+            );
             // The game-installation-status event will be triggered automatically
             // which will update the UI
           } else if (!result.canceled) {
             showToast(
-              result.error || "Game files not found in selected folder",
+              result.error ||
+                "Shadowrun.exe not found in selected folder. Please select the folder containing Shadowrun.exe",
               "error",
-              4000
+              5000
             );
           }
 
@@ -2727,7 +3083,13 @@ document.addEventListener("DOMContentLoaded", function () {
           // Button text will be updated by updateUI() when game-installation-status event fires
         } catch (error) {
           console.error("[Browse Game] Error:", error);
-          showToast(`Error: ${error.message}`, "error", 4000);
+          showToast(
+            `Failed to browse for game folder: ${
+              error.message || "Unknown error"
+            }. Please try selecting the folder manually.`,
+            "error",
+            5000
+          );
           openGameDirButton.disabled = false;
           openGameDirButton.textContent = "Find Existing Game";
         }
@@ -2841,24 +3203,32 @@ window.api.onUpdateDownloadStarted(() => {
     launcherUpdateStatus.textContent = "Starting download...";
     launcherUpdateDetails.textContent = "";
     launcherUpdateMessage.textContent =
-      "Downloading launcher update. You can continue using the launcher.";
+      "Downloading launcher update. Launcher will restart in a moment to complete the update.";
   }
 });
 
 // Listen for update download progress
 window.api.onUpdateDownloadProgress((progress) => {
   console.log(`[Renderer] Update download progress: ${progress.percent}%`);
-  if (launcherUpdateProgress) {
-    launcherUpdateProgress.style.width = `${progress.percent}%`;
-  }
-  if (launcherUpdateStatus) {
-    launcherUpdateStatus.textContent = `Downloading... ${progress.percent}%`;
-  }
-  if (launcherUpdateDetails) {
-    // Format bytes to MB
-    const transferredMB = (progress.transferred / 1024 / 1024).toFixed(2);
-    const totalMB = (progress.total / 1024 / 1024).toFixed(2);
-    launcherUpdateDetails.textContent = `${transferredMB} MB / ${totalMB} MB`;
+  
+  // Update modal progress bar (if modal is visible)
+  if (launcherUpdateProgressScreen && launcherUpdateProgressScreen.style.display === "flex") {
+    if (launcherUpdateProgress) {
+      launcherUpdateProgress.style.width = `${Math.max(0, Math.min(100, progress.percent || 0))}%`;
+    }
+    if (launcherUpdateStatus) {
+      launcherUpdateStatus.textContent = `Downloading... ${Math.round(progress.percent || 0)}%`;
+    }
+    if (launcherUpdateDetails) {
+      // Format bytes to MB
+      const transferredMB = ((progress.transferred || 0) / 1024 / 1024).toFixed(2);
+      const totalMB = ((progress.total || 0) / 1024 / 1024).toFixed(2);
+      if (progress.total && progress.total > 0) {
+        launcherUpdateDetails.textContent = `${transferredMB} MB / ${totalMB} MB`;
+      } else {
+        launcherUpdateDetails.textContent = `${transferredMB} MB`;
+      }
+    }
   }
 });
 
@@ -2874,6 +3244,17 @@ window.api.onUpdateDownloadComplete(() => {
   if (launcherUpdateMessage) {
     launcherUpdateMessage.textContent =
       "Update downloaded successfully. You'll be prompted to restart.";
+  }
+
+  // Remove the progress toast
+  if (updateToastId) {
+    updateToastId.classList.remove("show");
+    setTimeout(() => {
+      if (updateToastId && updateToastId.parentNode) {
+        updateToastId.remove();
+      }
+      updateToastId = null;
+    }, 300);
   }
 
   // Hide the progress screen after 2 seconds (dialog will show instead)
@@ -2904,29 +3285,10 @@ const updateAvailableIndicator = document.getElementById(
 let pendingUpdateData = null;
 let updateToastId = null; // Track the update progress toast
 
-// Listen for SILENT update available (automatic background download)
-window.api.onUpdateAvailableSilent((data) => {
-  console.log("");
-  console.log("=================================================");
-  console.log("🔄 UPDATE AVAILABLE - DOWNLOADING IN BACKGROUND");
-  console.log("=================================================");
-  console.log("[Renderer] Current version:", data.currentVersion);
-  console.log("[Renderer] New version:", data.version);
-  console.log("[Renderer] Starting automatic download...");
+// Silent update handler removed - all updates now require user confirmation
+// (This handler is no longer used as automatic downloading is disabled)
 
-  // Store update data
-  pendingUpdateData = data;
-
-  // Show a persistent toast with progress
-  updateToastId = showUpdateToast(
-    `Downloading update v${data.version}... 0%`,
-    "info",
-    0, // 0 = persistent toast
-    true // show progress bar
-  );
-});
-
-// Listen for update available from manual check (show dialog for manual checks)
+// Listen for update available (both manual and automatic checks)
 window.api.onShowUpdateDialog((data) => {
   console.log("");
   console.log("=================================================");
@@ -2956,12 +3318,16 @@ window.api.onShowUpdateDialog((data) => {
     updateReleaseNotes.style.display = "none";
   }
 
+  // Show the update badge immediately (in case user closes dialog)
+  if (updateAvailableIndicator) {
+    updateAvailableIndicator.style.display = "block";
+    console.log("[Renderer] Update badge shown");
+  }
+
   // Show the dialog
   if (updateDialog) {
     updateDialog.classList.add("visible");
   }
-
-  // (OLD CODE REMOVED - Button will be recreated)
 });
 
 // Listen for no update available
@@ -3102,19 +3468,29 @@ window.api.onUpdateCheckDevMode(() => {
 });
 
 // ========================================
-// SILENT UPDATE PROGRESS HANDLERS
+// UPDATE DOWNLOAD PROGRESS HANDLERS
 // ========================================
 
-// Listen for download progress and update the toast
+// Listen for download progress (after user confirms)
 window.api.onUpdateDownloadProgress((progress) => {
   console.log(`[Renderer] Update download progress: ${progress.percent}%`);
 
-  if (updateToastId) {
+  // Show or update a progress toast
+  if (!updateToastId) {
+    // Create a new progress toast if it doesn't exist
+    updateToastId = showUpdateToast(
+      `Downloading update... ${progress.percent}%`,
+      "info",
+      0, // 0 = persistent toast
+      true // show progress bar
+    );
+  } else {
+    // Update existing toast
     const messageEl = updateToastId.querySelector(".toast-message");
     const progressFill = updateToastId.querySelector(".toast-progress-fill");
 
-    if (messageEl && pendingUpdateData) {
-      messageEl.textContent = `Downloading update v${pendingUpdateData.version}... ${progress.percent}%`;
+    if (messageEl) {
+      messageEl.textContent = `Downloading update... ${progress.percent}%`;
     }
     if (progressFill) {
       progressFill.style.width = `${progress.percent}%`;
@@ -3122,26 +3498,30 @@ window.api.onUpdateDownloadProgress((progress) => {
   }
 });
 
-// Listen for download complete
+// Listen for download complete (after user-initiated download)
 window.api.onUpdateDownloadedSilent((data) => {
   console.log("");
   console.log("=================================================");
-  console.log("✅ UPDATE DOWNLOADED - INSTALLING SILENTLY");
+  console.log("✅ UPDATE DOWNLOADED - READY TO INSTALL");
   console.log("=================================================");
-  console.log("[Renderer] Update will install automatically in 3 seconds");
+  console.log("[Renderer] Update will install on launcher restart");
 
   // Remove the progress toast
   if (updateToastId) {
     updateToastId.classList.remove("show");
-    setTimeout(() => updateToastId.remove(), 300);
-    updateToastId = null;
+    setTimeout(() => {
+      if (updateToastId && updateToastId.parentNode) {
+        updateToastId.remove();
+      }
+      updateToastId = null;
+    }, 300);
   }
 
   // Show a completion toast
   showToast(
-    `Update v${data.version} downloaded! Launcher will restart in 3 seconds...`,
+    `Update v${data.version} downloaded! Launcher will restart in 5 seconds...`,
     "success",
-    3000
+    5000
   );
 });
 
@@ -3245,6 +3625,206 @@ if (updateDownloadButton) {
     }
   });
 }
+
+// ========================================
+// UPDATE ERROR HANDLERS
+// ========================================
+
+// Listen for update download errors
+window.api.onUpdateError((data) => {
+  console.error("[Renderer] Update error received:", data);
+  
+  // Remove any existing progress toasts
+  if (updateToastId && updateToastId.parentNode) {
+    updateToastId.remove();
+    updateToastId = null;
+  }
+  
+  // Show error dialog with retry option
+  if (updateDialog) {
+    const dialogHeader = updateDialog.querySelector("h2");
+    const dialogContent = updateDialog.querySelector(".update-description");
+    const dialogActions = updateDialog.querySelector(".update-dialog-actions");
+    
+    if (dialogHeader) {
+      dialogHeader.textContent = "⚠️ Update Failed";
+    }
+    
+    if (dialogContent) {
+      dialogContent.innerHTML = `
+        <p style="color: #ef4444; font-size: 16px; margin-bottom: 15px;">
+          ${data.message}
+        </p>
+        <p style="font-size: 14px; color: #9ca3af;">
+          ${data.type === 'network' ? 'Please check your internet connection and try again.' : 
+            data.type === 'timeout' ? 'The download is taking too long. Your connection may be unstable.' :
+            'If this problem persists, you can download the update manually.'}
+        </p>
+      `;
+    }
+    
+    if (dialogActions) {
+      dialogActions.innerHTML = "";
+      
+      // Add manual download button
+      const manualBtn = document.createElement("button");
+      manualBtn.className = "update-button secondary";
+      manualBtn.textContent = "Download Manually";
+      manualBtn.onclick = async () => {
+        try {
+          const result = await window.api.getManualDownloadUrl();
+          if (result.success) {
+            // Open URL in default browser
+            window.api.openExternal(result.url);
+            showToast("Opening download in browser...", "info", 3000);
+            updateDialog.classList.remove("visible");
+          }
+        } catch (error) {
+          console.error("[Renderer] Error getting manual download URL:", error);
+        }
+      };
+      
+      // Add retry button
+      const retryBtn = document.createElement("button");
+      retryBtn.className = "update-button primary";
+      retryBtn.textContent = "Retry Download";
+      retryBtn.onclick = async () => {
+        try {
+          updateDialog.classList.remove("visible");
+          const result = await window.api.retryUpdateDownload();
+          if (result.success) {
+            console.log("[Renderer] Retrying update download");
+          }
+        } catch (error) {
+          console.error("[Renderer] Error retrying update:", error);
+        }
+      };
+      
+      // Add close button
+      const closeBtn = document.createElement("button");
+      closeBtn.className = "update-button secondary";
+      closeBtn.textContent = "Close";
+      closeBtn.onclick = () => {
+        updateDialog.classList.remove("visible");
+        // Show update indicator again
+        if (updateAvailableIndicator && data.updateInfo) {
+          updateAvailableIndicator.style.display = "block";
+          pendingUpdateData = data.updateInfo;
+        }
+      };
+      
+      dialogActions.appendChild(closeBtn);
+      dialogActions.appendChild(manualBtn);
+      dialogActions.appendChild(retryBtn);
+      dialogActions.style.display = "flex";
+    }
+    
+    // Show dialog
+    updateDialog.classList.add("visible");
+  } else {
+    // Fallback: show error toast
+    showToast(data.message, "error", 8000);
+  }
+});
+
+// Listen for installation failure (on app restart)
+window.api.onUpdateInstallationFailed((data) => {
+  console.error("[Renderer] Update installation failed:", data);
+  
+  setTimeout(() => {
+    if (updateDialog) {
+      const dialogHeader = updateDialog.querySelector("h2");
+      const dialogContent = updateDialog.querySelector(".update-description");
+      const dialogActions = updateDialog.querySelector(".update-dialog-actions");
+      
+      if (dialogHeader) {
+        dialogHeader.textContent = "❌ Update Installation Failed";
+      }
+      
+      if (dialogContent) {
+        dialogContent.innerHTML = `
+          <p style="color: #ef4444; font-size: 16px; margin-bottom: 15px;">
+            ${data.message}
+          </p>
+          <p style="font-size: 14px; color: #9ca3af; margin-bottom: 10px;">
+            This can happen due to:
+          </p>
+          <ul style="font-size: 14px; color: #9ca3af; margin-left: 20px; margin-bottom: 15px;">
+            <li>Insufficient permissions (try running as Administrator)</li>
+            <li>Antivirus blocking the installer</li>
+            <li>Corrupted download</li>
+          </ul>
+          <p style="font-size: 14px; color: #9ca3af;">
+            You can try checking for updates again or download manually.
+          </p>
+        `;
+      }
+      
+      if (dialogActions) {
+        dialogActions.innerHTML = "";
+        
+        // Add manual download button
+        const manualBtn = document.createElement("button");
+        manualBtn.className = "update-button secondary";
+        manualBtn.textContent = "Download Manually";
+        manualBtn.onclick = async () => {
+          try {
+            const result = await window.api.getManualDownloadUrl();
+            if (result.success) {
+              // Open URL in default browser
+              window.api.openExternal(result.url);
+              showToast("Opening download in browser...", "info", 3000);
+              updateDialog.classList.remove("visible");
+            }
+          } catch (error) {
+            console.error("[Renderer] Error getting manual download URL:", error);
+          }
+        };
+        
+        // Add check updates button
+        const checkBtn = document.createElement("button");
+        checkBtn.className = "update-button primary";
+        checkBtn.textContent = "Check for Updates";
+        checkBtn.onclick = async () => {
+          updateDialog.classList.remove("visible");
+          try {
+            await window.api.checkForUpdates();
+          } catch (error) {
+            console.error("[Renderer] Error checking for updates:", error);
+          }
+        };
+        
+        // Add close button
+        const closeBtn = document.createElement("button");
+        closeBtn.className = "update-button secondary";
+        closeBtn.textContent = "Close";
+        closeBtn.onclick = () => {
+          updateDialog.classList.remove("visible");
+        };
+        
+        dialogActions.appendChild(closeBtn);
+        dialogActions.appendChild(manualBtn);
+        dialogActions.appendChild(checkBtn);
+        dialogActions.style.display = "flex";
+      }
+      
+      // Show dialog
+      updateDialog.classList.add("visible");
+    } else {
+      // Fallback: show error toast
+      showToast(data.message, "error", 10000);
+    }
+  }, 3500); // Show after launcher fully loads
+});
+
+// Listen for successful installation (on app restart)
+window.api.onUpdateInstallationSuccess((data) => {
+  console.log("[Renderer] Update installed successfully:", data);
+  
+  setTimeout(() => {
+    showToast(`✅ Successfully updated to v${data.version}!`, "success", 5000);
+  }, 2500);
+});
 
 // ============================================================================
 // TOAST NOTIFICATION SYSTEM
@@ -3401,7 +3981,11 @@ function showUpdateToast(
       console.error("❌ Error checking for updates:", error);
 
       // Show error toast
-      showToast("Failed to check for updates. Please try again.", "error");
+      showToast(
+        "Failed to check for updates. Check your internet connection and try again.",
+        "error",
+        6000
+      );
 
       // Reset button on error
       btn.disabled = false;
@@ -3452,10 +4036,11 @@ if (runDiagnosticsButton) {
         // Create custom diagnostics result modal
         showDiagnosticsResults(diag);
       } else {
+        const errorMsg = result.error || "Unknown error occurred";
         showToast(
-          `❌ Error running diagnostics: ${result.error}`,
+          `Failed to run diagnostics: ${errorMsg}. Please try again or check console for details.`,
           "error",
-          5000
+          6000
         );
       }
     } catch (error) {
@@ -3468,9 +4053,11 @@ if (runDiagnosticsButton) {
       }
 
       showToast(
-        `❌ Failed to run diagnostics: ${error.message}`,
+        `Failed to run diagnostics: ${
+          error.message || "Unknown error"
+        }. Please try again or check console for details.`,
         "error",
-        5000
+        6000
       );
     } finally {
       runDiagnosticsButton.disabled = false;
@@ -3670,7 +4257,10 @@ const natInfo = document.getElementById("natInfo");
 let cachedSystemInfo = null;
 
 // Function to detect and display system info
-async function detectAndDisplaySystemInfo(shouldShowToast = true) {
+async function detectAndDisplaySystemInfo(
+  shouldShowToast = true,
+  forceRefresh = false
+) {
   if (detectSystemButton) detectSystemButton.disabled = true;
   if (gpuInfo) gpuInfo.textContent = "Detecting...";
   if (cpuInfo) cpuInfo.textContent = "Detecting...";
@@ -3678,7 +4268,7 @@ async function detectAndDisplaySystemInfo(shouldShowToast = true) {
   if (natInfo) natInfo.textContent = "Detecting...";
 
   try {
-    const result = await window.api.getSystemInfo();
+    const result = await window.api.getSystemInfo(forceRefresh);
     console.log("[System Detection]", result);
 
     if (result.success) {
@@ -3724,20 +4314,11 @@ async function detectAndDisplaySystemInfo(shouldShowToast = true) {
 
       // Only show toast if explicitly requested (manual button click)
       if (shouldShowToast) {
-        let vendorNote = "";
-        if (system.gpu.vendor === "amd") {
-          vendorNote =
-            "\n\nℹ️ AMD GPU detected: Enhanced FPS limiting is enabled for better compatibility.";
-        } else if (system.gpu.vendor === "nvidia") {
-          vendorNote =
-            "\n\nℹ️ NVIDIA GPU detected: Standard DXVK FPS limiting is being used.";
-        }
-
-        if (vendorNote) {
-          showToast(`System detected!${vendorNote}`, "info", 5000);
-        } else {
-          showToast("System information detected!", "success", 3000);
-        }
+        showToast(
+          `✓ System information ${result.cached ? "loaded" : "detected"}!`,
+          "success",
+          3000
+        );
       }
     } else {
       if (gpuInfo) gpuInfo.textContent = "Detection failed";
@@ -3834,7 +4415,7 @@ if (fixLicenseManagerButton) {
     console.log("[License Manager] Attempting fix...");
     const originalText = fixLicenseManagerButton.textContent;
     fixLicenseManagerButton.disabled = true;
-    fixLicenseManagerButton.textContent = "Fixing...";
+    fixLicenseManagerButton.textContent = "Requesting UAC...";
 
     try {
       const result = await window.api.fixLicenseManager();
@@ -3843,25 +4424,32 @@ if (fixLicenseManagerButton) {
       if (result.success) {
         if (result.alreadyRunning) {
           showToast(
-            "✅ License Manager service is already running!",
+            "✅ Windows License Manager service is already running. No action needed.",
             "success",
             4000
           );
         } else {
           showToast(
-            "✅ Successfully started Windows License Manager service!",
+            "✅ Successfully started Windows License Manager service. Error 0x80072746 should be resolved.",
             "success",
-            4000
+            5000
           );
         }
+      } else if (result.cancelled) {
+        // User cancelled UAC prompt
+        showToast(
+          "⚠️ UAC prompt was cancelled. Service was not started. Please run launcher as Administrator or start the service manually.",
+          "warning",
+          6000
+        );
+      } else if (result.isDisabled) {
+        // Service is disabled
+        alert(
+          `⚠️ Service is Disabled\n\n${result.message}\n\nHow to enable:\n1. Press Win + R and type: services.msc\n2. Find "Windows License Manager Service"\n3. Right-click → Properties\n4. Set "Startup type" to "Manual" or "Automatic"\n5. Click "Apply", then "Start"\n6. Click "OK"`
+        );
       } else {
-        if (result.needsAdmin) {
-          alert(
-            `⚠️ Administrator privileges required\n\n${result.message}\n\nPlease run the launcher as Administrator or manually start the service through services.msc`
-          );
-        } else {
-          alert(`❌ Error: ${result.message || result.error}`);
-        }
+        // Other error
+        alert(`❌ Error\n\n${result.message || result.error}`);
       }
     } catch (error) {
       console.error("[License Manager] Error:", error);
@@ -3893,10 +4481,18 @@ if (restartXboxNetworkingButton) {
         const message =
           result.message ||
           "Successfully restarted Xbox Live Networking service!";
-        showToast(`✅ ${message}`, "success", 5000);
+        showToast(
+          `✅ ${message} P2P connection issues should be resolved.`,
+          "success",
+          5000
+        );
       } else if (result.cancelled) {
         // User cancelled UAC prompt
-        showToast("⚠️ UAC prompt was cancelled", "warning", 3000);
+        showToast(
+          "⚠️ UAC prompt was cancelled. Service was not restarted. Please run launcher as Administrator or restart the service manually.",
+          "warning",
+          6000
+        );
       } else if (result.isDisabled) {
         // Service is disabled
         alert(
@@ -3956,25 +4552,78 @@ const driverUpdateDescription = document.getElementById(
   "driverUpdateDescription"
 );
 
-// Update button text and description based on detected GPU
+// Update button text and description based on detected GPU(s)
 async function updateDriverUpdateButton() {
   if (!openWindowsUpdateButton || !driverUpdateDescription) return;
 
   try {
-    const gpuResult = await window.api.getGpuInfo();
-    if (gpuResult.success && gpuResult.gpu) {
-      const vendor = gpuResult.gpu.vendor.toLowerCase();
-      const gpuName = gpuResult.gpu.name;
+    // Get all GPUs
+    const gpuResult = await window.api.getAllGpus();
+    if (gpuResult.success && gpuResult.gpus && gpuResult.gpus.length > 0) {
+      const allGpus = gpuResult.gpus;
+      // Prioritize dedicated GPUs over integrated (Intel) GPUs
+      const discreteGpus = allGpus.filter(
+        (gpu) => gpu.vendor !== "intel" && gpu.vendor !== "unknown"
+      );
 
-      if (vendor === "nvidia") {
-        openWindowsUpdateButton.textContent = "Open NVIDIA App";
-        driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${gpuName}`;
-      } else if (vendor === "amd") {
-        openWindowsUpdateButton.textContent = "Open AMD Software";
-        driverUpdateDescription.textContent = `Opens AMD Software: Adrenalin Edition to update drivers for ${gpuName}`;
-      } else {
+      if (discreteGpus.length === 0) {
+        // Only integrated GPU
         openWindowsUpdateButton.textContent = "Open Windows Update";
-        driverUpdateDescription.textContent = `Opens Windows Update to install optional driver updates for ${gpuName}`;
+        driverUpdateDescription.textContent = `Opens Windows Update to install optional driver updates`;
+      } else if (discreteGpus.length === 1) {
+        // Single discrete GPU
+        const gpu = discreteGpus[0];
+        const vendor = gpu.vendor.toLowerCase();
+        if (vendor === "nvidia") {
+          openWindowsUpdateButton.textContent = "Open NVIDIA App";
+          driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${gpu.name}`;
+        } else if (vendor === "amd") {
+          openWindowsUpdateButton.textContent = "Open AMD Software";
+          driverUpdateDescription.textContent = `Opens AMD Software: Adrenalin Edition to update drivers for ${gpu.name}`;
+        } else {
+          openWindowsUpdateButton.textContent = "Open Windows Update";
+          driverUpdateDescription.textContent = `Opens Windows Update to install optional driver updates for ${gpu.name}`;
+        }
+      } else {
+        // Multiple discrete GPUs
+        const vendors = [...new Set(discreteGpus.map((gpu) => gpu.vendor))];
+        const gpuNames = discreteGpus.map((gpu) => gpu.name).join(", ");
+
+        if (vendors.length > 1) {
+          // Mixed vendors (NVIDIA + AMD)
+          openWindowsUpdateButton.textContent = "Open Windows Update";
+          driverUpdateDescription.textContent = `Opens Windows Update to update drivers for multiple GPUs: ${gpuNames}`;
+        } else {
+          // Same vendor, multiple GPUs (SLI/CrossFire)
+          const vendor = discreteGpus[0].vendor.toLowerCase();
+          if (vendor === "nvidia") {
+            openWindowsUpdateButton.textContent = "Open NVIDIA App";
+            driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${discreteGpus.length} GPU(s): ${gpuNames}`;
+          } else if (vendor === "amd") {
+            openWindowsUpdateButton.textContent = "Open AMD Software";
+            driverUpdateDescription.textContent = `Opens AMD Software to update drivers for ${discreteGpus.length} GPU(s): ${gpuNames}`;
+          } else {
+            openWindowsUpdateButton.textContent = "Open Windows Update";
+            driverUpdateDescription.textContent = `Opens Windows Update to update drivers for ${discreteGpus.length} GPU(s): ${gpuNames}`;
+          }
+        }
+      }
+    } else {
+      // Fallback to single GPU detection
+      const singleGpuResult = await window.api.getGpuInfo();
+      if (singleGpuResult.success && singleGpuResult.gpu) {
+        const vendor = singleGpuResult.gpu.vendor.toLowerCase();
+        const gpuName = singleGpuResult.gpu.name;
+        if (vendor === "nvidia") {
+          openWindowsUpdateButton.textContent = "Open NVIDIA App";
+          driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${gpuName}`;
+        } else if (vendor === "amd") {
+          openWindowsUpdateButton.textContent = "Open AMD Software";
+          driverUpdateDescription.textContent = `Opens AMD Software: Adrenalin Edition to update drivers for ${gpuName}`;
+        } else {
+          openWindowsUpdateButton.textContent = "Open Windows Update";
+          driverUpdateDescription.textContent = `Opens Windows Update to install optional driver updates for ${gpuName}`;
+        }
       }
     }
   } catch (error) {
@@ -3994,6 +4643,24 @@ if (openWindowsUpdateButton) {
     try {
       const result = await window.api.openWindowsUpdate();
       if (result.success) {
+        // Update button text/description if multiple GPUs detected
+        if (result.gpus && result.gpus.length > 1) {
+          const gpuNames = result.gpus.map((gpu) => gpu.name).join(", ");
+          if (result.multipleVendors) {
+            openWindowsUpdateButton.textContent = "Open Windows Update";
+            driverUpdateDescription.textContent = `Opens Windows Update to update drivers for multiple GPUs: ${gpuNames}`;
+          } else {
+            // Same vendor, multiple GPUs (SLI/CrossFire)
+            const vendor = result.gpus[0].vendor.toLowerCase();
+            if (vendor === "nvidia") {
+              openWindowsUpdateButton.textContent = "Open NVIDIA App";
+              driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${result.gpus.length} GPU(s): ${gpuNames}`;
+            } else if (vendor === "amd") {
+              openWindowsUpdateButton.textContent = "Open AMD Software";
+              driverUpdateDescription.textContent = `Opens AMD Software to update drivers for ${result.gpus.length} GPU(s): ${gpuNames}`;
+            }
+          }
+        }
         // No toast needed - the application opening is sufficient feedback
       } else {
         alert(`Error: ${result.error}`);

@@ -103,6 +103,56 @@
         </button>
       </div>
 
+      <!-- Persistent Error Alert Bar -->
+      <div id="errorAlertBar" class="error-alert-bar" style="display: none">
+        <div class="error-alert-content">
+          <span class="error-alert-icon">⚠️</span>
+          <span class="error-alert-message" id="errorAlertMessage"></span>
+          <button
+            id="errorAlertCount"
+            class="error-alert-count"
+            style="display: none"
+            title="Click to view all issues"
+          ></button>
+          <button
+            id="errorAlertFix"
+            class="error-alert-fix"
+            title="Open Diagnostics"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+              ></path>
+            </svg>
+          </button>
+          <button
+            id="errorAlertDismiss"
+            class="error-alert-dismiss"
+            title="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+
+      <!-- Error List Popup (shown when clicking count badge) -->
+      <div id="errorListPopup" class="error-list-popup" style="display: none">
+        <div class="error-list-header">
+          <span class="error-list-title">Detected Issues</span>
+          <button id="errorListClose" class="error-list-close">×</button>
+        </div>
+        <div id="errorListContent" class="error-list-content"></div>
+      </div>
+
       <!-- Add this just before the version-info div
       <div class="player-count-container">
         <div class="player-count">
@@ -209,8 +259,10 @@
               <label for="maxFrameRate">Max Frame Rate</label>
               <span class="setting-description"
                 >Limit the maximum frames per second. Default is 85 FPS. Higher
-                values may cause instability.
-                <br><span style="color: #f59e0b; font-size: 11px;">⚠️ Note: FPS limiting may not work on AMD GPUs.</span>
+                values may cause instability. <br /><span
+                  style="color: #f59e0b; font-size: 11px"
+                  >⚠️ Note: FPS limiting may not work on AMD GPUs.</span
+                >
               </span>
             </div>
             <div class="fps-controls">
@@ -240,7 +292,8 @@
             <div class="setting-label-group">
               <label for="dxvk">DXVK Support</label>
               <span class="setting-description"
-                >Enable DXVK for better compatibility with modern systems</span
+                >Disable DXVK if you're receiving the Direct3D Device
+                error.</span
               >
             </div>
             <div class="toggle-switch">
@@ -432,6 +485,7 @@
                     id="detectSystemButton"
                     class="settings-action-button"
                     style="white-space: nowrap; min-width: 140px"
+                    title="Refresh system information"
                   >
                     Detect System
                   </button>
@@ -538,44 +592,22 @@
           </div>
         </div>
 
-        <!-- srs_shadowrun.dll Version Section -->
-        <div class="settings-section">
-          <h3 class="settings-section-title">Game Library Version</h3>
-
-          <div class="setting-item">
-            <div class="setting-label-group">
-              <label>srs_shadowrun.dll Toggle</label>
-              <span class="setting-description"
-                >Switch to older/larger library version (267 KB) for
-                compatibility</span
-              >
-            </div>
-            <div class="segmented-control">
-              <button
-                id="srsDllNewerButton"
-                class="segmented-button active"
-                data-version="newer"
-              >
-                Newer (14KB)
-              </button>
-              <button
-                id="srsDllOlderButton"
-                class="segmented-button"
-                data-version="older"
-              >
-                Older (268KB)
-              </button>
-            </div>
-          </div>
-        </div>
-
         <!-- Error Fixes Section -->
         <div class="settings-section">
           <h3 class="settings-section-title">Common Error Fixes</h3>
 
           <div class="setting-item">
             <div class="setting-label-group">
-              <label>Fix License Manager Error</label>
+              <label>
+                Fix License Manager Error
+                <span
+                  id="licenseManagerErrorBadge"
+                  class="error-indicator-badge"
+                  style="display: none"
+                  title="Issue detected"
+                  >*</span
+                >
+              </label>
               <span class="setting-description"
                 >Fixes error 0x80072746 by starting Windows License Manager
                 Service</span
@@ -588,7 +620,16 @@
 
           <div class="setting-item">
             <div class="setting-label-group">
-              <label>Restart Xbox Live Networking</label>
+              <label>
+                Restart Xbox Live Networking
+                <span
+                  id="xboxNetworkingErrorBadge"
+                  class="error-indicator-badge"
+                  style="display: none"
+                  title="Issue detected"
+                  >*</span
+                >
+              </label>
               <span class="setting-description"
                 >Restarts Xbox Live Networking Service to fix connection
                 issues</span
@@ -652,45 +693,91 @@
           </div>
           <ol class="instructions-list">
             <li>
-              <strong>Download & Install:</strong> Click "Download" and wait for
-              all components (game files, GFWL, DirectX 9) to install.
+              <div class="instruction-step">
+                <strong>📥 Download & Install</strong>
+                <p>
+                  Click "Download" and wait for all components to install (game
+                  files, GFWL, DirectX 9). You'll see progress indicators for
+                  each component.
+                </p>
+              </div>
             </li>
             <li>
-              <strong>Activate:</strong> Click "Activate Game" and allow admin
-              permissions when prompted.
+              <div class="instruction-step">
+                <strong>🚀 Launch Game First</strong>
+                <p>
+                  Once installation completes and you see the "Play" button,
+                  click it to launch the game at least once. This initializes
+                  required files.
+                </p>
+              </div>
             </li>
             <li>
-              <strong>Launch Game:</strong> Once complete, click "Play" to start
-              Shadowrun.
+              <div class="instruction-step">
+                <strong>🔐 Activate Game</strong>
+                <p>
+                  Close the game, then click "Activate Game" in the launcher.
+                  Allow administrator permissions when Windows prompts you (UAC
+                  dialog).
+                </p>
+              </div>
             </li>
             <li>
-              <strong>Sign In:</strong> When GFWL appears, sign in with your
-              Xbox Live account (create one if needed).
+              <div class="instruction-step">
+                <strong>🎮 Launch & Sign In</strong>
+                <p>
+                  Click "Play" to start Shadowrun. When the Games for Windows
+                  Live (GFWL) sign-in window appears, sign in with your Xbox
+                  Live account.
+                </p>
+              </div>
             </li>
             <li>
-              <strong>Product Key Screen:</strong> Continue until you see the
-              product key screen.
-            </li>
-            <li>
-              <strong>⚠️ Important:</strong> Press <kbd>Alt</kbd> +
-              <kbd>Tab</kbd> to return here.
-              <strong>Do NOT close the game</strong>.
-            </li>
-            <li>
-              <strong>Return:</strong> Switch back to Shadowrun with
-              <kbd>Alt</kbd> + <kbd>Tab</kbd>.
-            </li>
-            <li>
-              <strong>Complete:</strong> Product key should auto-fill. Once at
-              main menu, you're done!
+              <div class="instruction-step">
+                <strong>✅ Complete Setup</strong>
+                <p>
+                  Once you reach the main menu, close the game completely. You
+                  can now relaunch and play normally!
+                </p>
+              </div>
             </li>
           </ol>
-          <div class="instructions-tips">
-            <h3>💡 Tips:</h3>
+          <div class="instructions-warning">
+            <h3>⚠️ Important Notes:</h3>
             <ul>
-              <li>Launch game at least once before activating</li>
-              <li>Keep game running during activation</li>
-              <li>Run launcher as Administrator if issues occur</li>
+              <li>
+                <strong>First Launch:</strong> Always close the game after your
+                first successful login, then relaunch to begin playing.
+              </li>
+              <li>
+                <strong>After Activation:</strong> Failure to close the game
+                first after activating may lead to connection issues in a small
+                number of cases. Always close the game completely after
+                activation before launching again.
+              </li>
+              <li>
+                <strong>Offline Sign-In:</strong> If you see "Signed in offline"
+                when launching, close the game and run the activation steps
+                again.
+              </li>
+              <li>
+                <strong>Admin Rights:</strong> The launcher may need
+                administrator permissions for activation. Right-click and "Run
+                as Administrator" if prompted.
+              </li>
+            </ul>
+          </div>
+          <div class="instructions-tips">
+            <h3>💡 Pro Tips:</h3>
+            <ul>
+              <li>
+                Launch the game at least once before activating to ensure all
+                files & PCID are initialized
+              </li>
+              <li>
+                Run the launcher as Administrator if you encounter any
+                activation issues
+              </li>
             </ul>
           </div>
           <div class="instructions-actions">
@@ -707,45 +794,125 @@
 
     <!-- FAQ Modal -->
     <div id="faqScreen" class="modal-screen">
-      <div class="modal-content" style="max-width: 750px; max-height: 85vh;">
+      <div class="modal-content" style="max-width: 750px; max-height: 85vh">
         <div class="modal-header">
           <h2>📚 FAQ / Troubleshooting</h2>
           <button id="closeFaqButton" class="close-button">×</button>
         </div>
-        <div class="modal-body" style="padding: 20px; overflow-y: auto; max-height: calc(85vh - 80px); display: flex; flex-direction: column;">
+        <div
+          class="modal-body"
+          style="
+            padding: 20px;
+            overflow-y: auto;
+            max-height: calc(85vh - 80px);
+            display: flex;
+            flex-direction: column;
+          "
+        >
           <!-- Search box -->
-          <div style="margin-bottom: 20px; flex-shrink: 0;">
-            <input 
-              type="text" 
-              id="faqSearchInput" 
-              placeholder="🔍 Search FAQs..." 
-              style="width: 100%; padding: 12px 16px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: white; font-size: 14px; outline: none; transition: border-color 0.2s;"
+          <div style="margin-bottom: 20px; flex-shrink: 0">
+            <input
+              type="text"
+              id="faqSearchInput"
+              placeholder="🔍 Search FAQs..."
+              style="
+                width: 100%;
+                padding: 12px 16px;
+                background: rgba(0, 0, 0, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 6px;
+                color: white;
+                font-size: 14px;
+                outline: none;
+                transition: border-color 0.2s;
+              "
             />
           </div>
-          
+
           <!-- FAQ content (scrollable) -->
-          <div style="flex: 1; overflow-y: auto; min-height: 0;">
+          <div style="flex: 1; overflow-y: auto; min-height: 0">
             <div id="faqContent">
               <!-- FAQ content will be populated by JavaScript -->
             </div>
-            
+
             <!-- No results message -->
-            <div id="faqNoResults" style="display: none; text-align: center; padding: 40px 20px; color: rgba(255,255,255,0.5);">
-              <div style="font-size: 48px; margin-bottom: 12px;">🔍</div>
-              <div style="font-size: 16px; margin-bottom: 8px;">No FAQs found</div>
-              <div style="font-size: 13px;">Try a different search term</div>
+            <div
+              id="faqNoResults"
+              style="
+                display: none;
+                text-align: center;
+                padding: 40px 20px;
+                color: rgba(255, 255, 255, 0.5);
+              "
+            >
+              <div style="font-size: 48px; margin-bottom: 12px">🔍</div>
+              <div style="font-size: 16px; margin-bottom: 8px">
+                No FAQs found
+              </div>
+              <div style="font-size: 13px">Try a different search term</div>
             </div>
           </div>
-          
+
           <!-- Quick actions at bottom -->
-          <div style="display: flex; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); flex-shrink: 0; flex-wrap: wrap;">
-            <button class="faq-quick-action" data-action="expand-all" style="padding: 8px 16px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 4px; color: #60a5fa; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+          <div
+            style="
+              display: flex;
+              gap: 8px;
+              margin-top: 20px;
+              padding-top: 20px;
+              border-top: 1px solid rgba(255, 255, 255, 0.1);
+              flex-shrink: 0;
+              flex-wrap: wrap;
+            "
+          >
+            <button
+              class="faq-quick-action"
+              data-action="expand-all"
+              style="
+                padding: 8px 16px;
+                background: rgba(59, 130, 246, 0.2);
+                border: 1px solid rgba(59, 130, 246, 0.4);
+                border-radius: 4px;
+                color: #60a5fa;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.2s;
+              "
+            >
               Expand All
             </button>
-            <button class="faq-quick-action" data-action="collapse-all" style="padding: 8px 16px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 4px; color: #60a5fa; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+            <button
+              class="faq-quick-action"
+              data-action="collapse-all"
+              style="
+                padding: 8px 16px;
+                background: rgba(59, 130, 246, 0.2);
+                border: 1px solid rgba(59, 130, 246, 0.4);
+                border-radius: 4px;
+                color: #60a5fa;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.2s;
+              "
+            >
               Collapse All
             </button>
-            <a href="https://www.shadowrunfps.com/docs/troubleshoot" target="_blank" style="padding: 8px 16px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 4px; color: #10b981; font-size: 12px; cursor: pointer; text-decoration: none; transition: all 0.2s; display: inline-block;">
+            <a
+              href="https://www.shadowrunfps.com/docs/troubleshoot"
+              target="_blank"
+              style="
+                padding: 8px 16px;
+                background: rgba(16, 185, 129, 0.2);
+                border: 1px solid rgba(16, 185, 129, 0.4);
+                border-radius: 4px;
+                color: #10b981;
+                font-size: 12px;
+                cursor: pointer;
+                text-decoration: none;
+                transition: all 0.2s;
+                display: inline-block;
+              "
+            >
               🌐 View Full Guide
             </a>
           </div>

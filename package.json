@@ -1,7 +1,7 @@
 {
   "name": "shadowrun-fps-launcher",
   "productName": "Shadowrun FPS Launcher",
-  "version": "0.9.94",
+  "version": "0.9.104",
   "repository": {
     "type": "git",
     "url": "https://github.com/3MERGx/shadowrun-launcher.git"
@@ -89,7 +89,7 @@
         }
       ],
       "icon": "app/assets/icon2.ico",
-      "publisherName": "Sinful Hollowz",
+      "publisherName": "ShadowrunFPS",
       "verifyUpdateCodeSignature": false
     },
     "nsis": {
@@ -103,12 +103,14 @@
       "license": "LICENSE.txt",
       "artifactName": "${productName} Setup ${version}.exe",
       "installerHeader": "build/installerHeader.bmp",
-      "installerSidebar": "build/installerSidebar.bmp",
+      "installerSidebar": "build/launcher.bmp",
       "uninstallerIcon": "build/uninstallerIcon.ico",
       "installerIcon": "app/assets/icon2.ico",
       "uninstallDisplayName": "${productName}",
       "menuCategory": true,
       "shortcutName": "Shadowrun FPS Launcher",
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": false,
       "include": "build/installer.nsh",
       "warningsAsErrors": false,
       "guid": "d3f14c58-8b2e-4a3d-9f7c-1e4b2c3a5d6e"

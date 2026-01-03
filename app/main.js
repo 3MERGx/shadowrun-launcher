@@ -121,6 +121,13 @@ let gameStartTime = null;
 let updateAvailable = false;
 let latestVersion = null;
 
+// Track update download state
+let updateDownloadInProgress = false;
+let updateDownloadTimeout = null;
+let lastUpdateProgress = { transferred: 0, time: Date.now() };
+const UPDATE_TIMEOUT_MS = 180000; // 3 minutes with no progress = timeout
+let pendingUpdateInfo = null; // Store update info for retry
+
 // Add this variable to track the game process
 let gameProcess = null;
 
@@ -253,28 +260,110 @@ let settings = {
   dxvk: false,
   maxFrameRate: 240,
   audioMuted: false, // Persist background audio mute state
+  autoScanEnabled: false, // From installer preference (one-time choice)
 };
 
 const settingsPath = path.join(app.getPath("userData"), "settings.json");
 
+// Function to read installer preferences (one-time choice made during installation)
+function readInstallerPreferences() {
+  try {
+    // The installer saves preferences to installer-prefs.json in the app installation directory
+    // This is in the same directory as the app executable (process.resourcesPath is parent of app.asar)
+    const appDir = path.dirname(app.getPath("exe"));
+    const installerPrefsPath = path.join(appDir, "installer-prefs.json");
+
+    console.log(`[Installer Prefs] Looking for: ${installerPrefsPath}`);
+
+    if (fs.existsSync(installerPrefsPath)) {
+      const data = fs.readFileSync(installerPrefsPath, "utf8");
+      const prefs = JSON.parse(data);
+      console.log(`[Installer Prefs] Loaded:`, prefs);
+      return prefs;
+    } else {
+      console.log(
+        `[Installer Prefs] File not found, using defaults (no auto-scan)`
+      );
+      // If file doesn't exist (e.g., dev mode or old installation), default to disabled for privacy
+      return { autoScanEnabled: false };
+    }
+  } catch (error) {
+    console.error("[Installer Prefs] Error reading preferences:", error);
+    // On error, default to disabled for privacy
+    return { autoScanEnabled: false };
+  }
+}
+
 // Load settings from disk
 async function loadSettingsFromDisk() {
   try {
+    // Read installer preferences first (one-time choice during installation)
+    const installerPrefs = readInstallerPreferences();
+    settings.autoScanEnabled = installerPrefs.autoScanEnabled;
+    console.log(`[Settings] ============================================`);
+    console.log(
+      `[Settings] Auto-scan preference loaded: ${settings.autoScanEnabled}`
+    );
+    console.log(`[Settings] This setting was set during installation`);
+    console.log(`[Settings] ============================================`);
+
     if (fs.existsSync(settingsPath)) {
       const data = fs.readFileSync(settingsPath, "utf8");
       const loadedSettings = JSON.parse(data);
 
+      // Save installer preference before loading settings
+      const installerAutoScanSetting = settings.autoScanEnabled;
+
       // Assign properties individually rather than replacing the whole object
       Object.assign(settings, loadedSettings);
 
-      // Load custom game path if it exists
-      if (
-        loadedSettings.customGamePath &&
-        fs.existsSync(loadedSettings.customGamePath)
-      ) {
-        GAME_INSTALL_DIR = loadedSettings.customGamePath;
-        RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
-        console.log(`[Settings] Loaded custom game path: ${GAME_INSTALL_DIR}`);
+      // Check if user has manually set autoScanEnabled in settings.json
+      // If they have (it exists in loadedSettings), respect their manual choice
+      // Otherwise, use the installer preference
+      if (loadedSettings.hasOwnProperty("autoScanEnabled")) {
+        // User has explicitly set it in settings.json - respect their manual override
+        console.log(`[Settings] ============================================`);
+        console.log(`[Settings] Manual override detected in settings.json`);
+        console.log(
+          `[Settings] Using manual auto-scan setting: ${settings.autoScanEnabled}`
+        );
+        console.log(
+          `[Settings] (Installer preference was: ${installerAutoScanSetting}, but manual override takes priority)`
+        );
+        console.log(`[Settings] ============================================`);
+      } else {
+        // No manual setting found - use installer preference
+        settings.autoScanEnabled = installerAutoScanSetting;
+        console.log(
+          `[Settings] Using installer auto-scan preference: ${settings.autoScanEnabled} (no manual override found)`
+        );
+      }
+
+      // Load custom game path if it exists and is valid
+      if (loadedSettings.customGamePath) {
+        // Check if the path still exists and contains the game
+        const gameExePath = path.join(
+          loadedSettings.customGamePath,
+          "Shadowrun.exe"
+        );
+        if (fs.existsSync(gameExePath)) {
+          GAME_INSTALL_DIR = loadedSettings.customGamePath;
+          RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+          console.log(
+            `[Settings] Loaded custom game path: ${GAME_INSTALL_DIR}`
+          );
+        } else {
+          // Path exists but game is not there - clear it
+          console.warn(
+            `[Settings] Saved game path exists but Shadowrun.exe not found: ${loadedSettings.customGamePath}`
+          );
+          console.log(
+            `[Settings] Clearing invalid custom game path from settings`
+          );
+          settings.customGamePath = undefined;
+          delete loadedSettings.customGamePath;
+          saveSettingsToDisk();
+        }
       }
     }
 
@@ -286,6 +375,7 @@ async function loadSettingsFromDisk() {
     const dxvkStatus = await checkDxvkStatus();
     settings.dxvk = dxvkStatus.enabled;
 
+    console.log(`[Settings] Auto-scan: ${settings.autoScanEnabled}`);
     return settings;
   } catch (error) {
     log.error("Error loading settings", error);
@@ -733,6 +823,11 @@ app.whenReady().then(async () => {
 
     // Start player tracking
     playerTracker.start();
+    
+    // Check if an update installation failed
+    setTimeout(() => {
+      checkForFailedInstallation();
+    }, 2000); // Check before auto-update check
 
     // Check for updates after window is created
     setTimeout(() => {
@@ -921,14 +1016,33 @@ async function launchGameLogic(gameSettings, source = "unknown") {
         });
       }
 
-      // Build detailed error message for the return value
-      const errorDetails = criticalIssues
-        .map((issue) => `${issue.message}${issue.fix ? ` (${issue.fix})` : ""}`)
-        .join("; ");
+      // Build clearer error message for the return value
+      let errorMessage;
+      if (criticalIssues.length === 1) {
+        const issue = criticalIssues[0];
+        if (issue.type === "directx") {
+          errorMessage =
+            "DirectX 9+ isn't detected. Please install DirectX 9 from the launcher's setup options.";
+        } else {
+          errorMessage = `${issue.message}${
+            issue.fix ? ` (${issue.fix})` : ""
+          }`;
+        }
+      } else {
+        const errorDetails = criticalIssues
+          .map((issue) => {
+            if (issue.type === "directx") {
+              return "DirectX 9+ isn't detected/installed";
+            }
+            return issue.message;
+          })
+          .join("; ");
+        errorMessage = `Critical issues detected: ${errorDetails}`;
+      }
 
       return {
         success: false,
-        error: `Critical system requirements not met: ${errorDetails}`,
+        error: errorMessage,
         details: criticalIssues,
       };
     }
@@ -1265,13 +1379,41 @@ async function detectGPUVendor() {
   return new Promise((resolve) => {
     console.log("[GPU Detection] Detecting GPU vendor...");
 
-    // Use WMIC to query GPU information
+    // Use WMIC to query GPU information with timeout
     const command = "wmic path win32_VideoController get name";
 
-    exec(command, (error, stdout, stderr) => {
+    exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
       if (error) {
-        console.error("[GPU Detection] Error detecting GPU:", error.message);
-        resolve({ vendor: "unknown", name: "Unknown GPU" });
+        console.error("[GPU Detection] WMIC error:", error.message);
+        // Try PowerShell fallback
+        console.log("[GPU Detection] Trying PowerShell fallback...");
+        // Try PowerShell with Get-WmiObject (older) or Get-CimInstance (newer)
+        const psCommand = `
+          $gpus = Get-CimInstance -ClassName Win32_VideoController -ErrorAction SilentlyContinue;
+          if (-not $gpus) { $gpus = Get-WmiObject Win32_VideoController -ErrorAction SilentlyContinue; }
+          if ($gpus) {
+            # Prioritize discrete GPUs
+            $discrete = $gpus | Where-Object { $_.Name -notmatch 'Intel|Basic|Remote|VMware|Virtual' } | Select-Object -First 1;
+            if ($discrete) { $discrete.Name } else { ($gpus | Select-Object -First 1).Name }
+          }
+        `;
+        exec(
+          `powershell -Command "${psCommand
+            .replace(/\n/g, " ")
+            .replace(/\s+/g, " ")}"`,
+          { timeout: 5000 },
+          (psError, psStdout, psStderr) => {
+            if (psError || !psStdout || !psStdout.trim()) {
+              console.error("[GPU Detection] PowerShell fallback also failed");
+              resolve({ vendor: "unknown", name: "Unknown GPU" });
+              return;
+            }
+            const gpuName = psStdout.trim();
+            console.log("[GPU Detection] PowerShell detected:", gpuName);
+            const vendor = detectVendorFromName(gpuName);
+            resolve({ vendor, name: gpuName });
+          }
+        );
         return;
       }
 
@@ -1280,43 +1422,94 @@ async function detectGPUVendor() {
       let vendor = "unknown";
       let gpuName = "Unknown GPU";
 
-      // Extract GPU name from output - get first discrete GPU (usually the gaming GPU)
+      // Extract GPU name from output - prioritize discrete GPUs over integrated
+      // Filter out virtual/software renderers and headers
       const lines = stdout.split("\n").filter((line) => {
         const trimmed = line.trim();
+        const lower = trimmed.toLowerCase();
         return (
           trimmed &&
           !trimmed.includes("Name") &&
-          !trimmed.toLowerCase().includes("microsoft basic")
+          !lower.includes("microsoft basic") &&
+          !lower.includes("remote desktop") &&
+          !lower.includes("vmware") &&
+          !lower.includes("virtualbox") &&
+          !lower.includes("parallels") &&
+          !lower.includes("software renderer") &&
+          !lower.includes("null renderer")
         );
       });
 
-      if (lines.length > 0) {
+      // Prioritize discrete GPUs (NVIDIA/AMD) over integrated (Intel)
+      let discreteGpu = null;
+      let integratedGpu = null;
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        const lower = trimmed.toLowerCase();
+        const isDiscrete =
+          lower.includes("nvidia") ||
+          lower.includes("amd") ||
+          lower.includes("radeon") ||
+          lower.includes("geforce") ||
+          lower.includes("rtx") ||
+          lower.includes("gtx") ||
+          lower.includes("quadro") ||
+          /rx\s*\d+/i.test(trimmed);
+
+        const isIntegrated =
+          lower.includes("intel") ||
+          lower.includes("uhd") ||
+          lower.includes("iris") ||
+          lower.includes("arc") ||
+          lower.includes("xe");
+
+        if (isDiscrete && !discreteGpu) {
+          discreteGpu = trimmed;
+        } else if (isIntegrated && !integratedGpu) {
+          integratedGpu = trimmed;
+        }
+      }
+
+      // Prefer discrete GPU, fallback to integrated, then first available
+      if (discreteGpu) {
+        gpuName = discreteGpu;
+      } else if (integratedGpu) {
+        gpuName = integratedGpu;
+      } else if (lines.length > 0) {
         gpuName = lines[0].trim();
       }
 
-      // Detect vendor from the specific GPU name, not the entire output
-      const gpuLower = gpuName.toLowerCase();
-      if (
-        gpuLower.includes("amd") ||
-        gpuLower.includes("radeon") ||
-        gpuLower.includes("advanced micro devices")
-      ) {
-        vendor = "amd";
-      } else if (
-        gpuLower.includes("nvidia") ||
-        gpuLower.includes("geforce") ||
-        gpuLower.includes("quadro") ||
-        gpuLower.includes("rtx")
-      ) {
-        vendor = "nvidia";
-      } else if (
-        gpuLower.includes("intel") ||
-        gpuLower.includes("uhd") ||
-        gpuLower.includes("iris") ||
-        gpuLower.includes("arc")
-      ) {
-        vendor = "intel";
+      // If still unknown, try to detect from any line with vendor keywords
+      if (gpuName === "Unknown GPU" && stdout) {
+        const allLines = stdout.split("\n");
+        for (const line of allLines) {
+          const trimmed = line.trim();
+          const lower = trimmed.toLowerCase();
+          if (
+            trimmed &&
+            !trimmed.includes("Name") &&
+            (lower.includes("nvidia") ||
+              lower.includes("amd") ||
+              lower.includes("radeon") ||
+              lower.includes("geforce") ||
+              lower.includes("rtx") ||
+              lower.includes("gtx") ||
+              lower.includes("rx") ||
+              lower.includes("intel") ||
+              lower.includes("uhd") ||
+              lower.includes("iris") ||
+              lower.includes("arc"))
+          ) {
+            gpuName = trimmed;
+            break;
+          }
+        }
       }
+
+      vendor = detectVendorFromName(gpuName);
 
       console.log(
         `[GPU Detection] ✅ Detected: ${vendor.toUpperCase()} - ${gpuName}`
@@ -1326,18 +1519,245 @@ async function detectGPUVendor() {
   });
 }
 
+// Helper function to detect all discrete GPUs (for multi-GPU support)
+async function detectAllGPUs() {
+  return new Promise((resolve) => {
+    console.log("[GPU Detection] Detecting all GPUs...");
+
+    // Use WMIC to query all GPU information
+    const command = "wmic path win32_VideoController get name";
+
+    exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error("[GPU Detection] WMIC error:", error.message);
+        // Try PowerShell fallback
+        console.log("[GPU Detection] Trying PowerShell fallback...");
+        const psCommand = `
+          $gpus = Get-CimInstance -ClassName Win32_VideoController -ErrorAction SilentlyContinue;
+          if (-not $gpus) { $gpus = Get-WmiObject Win32_VideoController -ErrorAction SilentlyContinue; }
+          if ($gpus) {
+            $discrete = $gpus | Where-Object { $_.Name -notmatch 'Intel|Basic|Remote|VMware|Virtual|Microsoft' } | ForEach-Object { $_.Name };
+            if ($discrete) { $discrete -join '|' } else { ($gpus | Select-Object -First 1).Name }
+          }
+        `;
+        exec(
+          `powershell -Command "${psCommand
+            .replace(/\n/g, " ")
+            .replace(/\s+/g, " ")}"`,
+          { timeout: 5000 },
+          (psError, psStdout, psStderr) => {
+            if (psError || !psStdout || !psStdout.trim()) {
+              console.error("[GPU Detection] PowerShell fallback also failed");
+              resolve([]);
+              return;
+            }
+            const gpuNames = psStdout
+              .trim()
+              .split("|")
+              .filter((name) => name && name.trim());
+            const gpus = gpuNames.map((name) => {
+              const trimmed = name.trim();
+              return {
+                vendor: detectVendorFromName(trimmed),
+                name: trimmed,
+              };
+            });
+            console.log(
+              `[GPU Detection] PowerShell detected ${gpus.length} GPU(s):`,
+              gpus
+            );
+            resolve(gpus);
+          }
+        );
+        return;
+      }
+
+      console.log("[GPU Detection] GPU Output:", stdout);
+
+      // Extract all GPU names from output
+      const lines = stdout.split("\n").filter((line) => {
+        const trimmed = line.trim();
+        const lower = trimmed.toLowerCase();
+        return (
+          trimmed &&
+          !trimmed.includes("Name") &&
+          !lower.includes("microsoft basic") &&
+          !lower.includes("remote desktop") &&
+          !lower.includes("vmware") &&
+          !lower.includes("virtualbox") &&
+          !lower.includes("parallels") &&
+          !lower.includes("software renderer") &&
+          !lower.includes("null renderer")
+        );
+      });
+
+      // Separate discrete and integrated GPUs
+      const discreteGpus = [];
+      const integratedGpus = [];
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        const lower = trimmed.toLowerCase();
+
+        // Check if it's integrated/onboard GPU (Intel or AMD integrated graphics)
+        // AMD integrated graphics typically have "Graphics" in the name (e.g., "AMD Radeon(TM) Graphics")
+        const isIntegrated =
+          lower.includes("intel") ||
+          lower.includes("uhd") ||
+          lower.includes("iris") ||
+          lower.includes("arc") ||
+          lower.includes("xe") ||
+          (lower.includes("amd") &&
+            lower.includes("graphics") &&
+            !lower.includes("radeon rx") &&
+            !/rx\s*\d+/i.test(trimmed));
+
+        // Check if it's a discrete GPU (NVIDIA or AMD dedicated)
+        // Prioritize dedicated GPUs over integrated/onboard GPUs
+        const isDiscrete =
+          !isIntegrated &&
+          (lower.includes("nvidia") ||
+            lower.includes("geforce") ||
+            lower.includes("rtx") ||
+            lower.includes("gtx") ||
+            lower.includes("quadro") ||
+            lower.includes("titan") ||
+            lower.includes("tesla") ||
+            (lower.includes("amd") &&
+              (lower.includes("radeon rx") || /rx\s*\d+/i.test(trimmed))) ||
+            (lower.includes("radeon") && !lower.includes("graphics")));
+
+        if (isDiscrete) {
+          discreteGpus.push({
+            vendor: detectVendorFromName(trimmed),
+            name: trimmed,
+          });
+        } else if (isIntegrated) {
+          integratedGpus.push({
+            vendor: detectVendorFromName(trimmed),
+            name: trimmed,
+          });
+        }
+      }
+
+      // Return discrete GPUs first, then integrated (if no discrete found)
+      const allGpus = discreteGpus.length > 0 ? discreteGpus : integratedGpus;
+
+      console.log(
+        `[GPU Detection] ✅ Detected ${allGpus.length} GPU(s):`,
+        allGpus
+      );
+      resolve(allGpus);
+    });
+  });
+}
+
+// Helper function to detect vendor from GPU name
+function detectVendorFromName(gpuName) {
+  if (!gpuName || gpuName === "Unknown GPU") return "unknown";
+
+  const gpuLower = gpuName.toLowerCase();
+
+  // AMD detection - expanded patterns
+  if (
+    gpuLower.includes("amd") ||
+    gpuLower.includes("radeon") ||
+    gpuLower.includes("advanced micro devices") ||
+    gpuLower.includes("rx ") || // RX 580, RX 6900 XT, etc.
+    gpuLower.includes("radeon rx") ||
+    gpuLower.includes("radeon pro") ||
+    gpuLower.includes("firepro") ||
+    gpuLower.includes("firepro w") ||
+    /rx\s*\d+/i.test(gpuName) // Match RX 580, RX 6900, etc.
+  ) {
+    return "amd";
+  }
+  // NVIDIA detection - expanded patterns
+  else if (
+    gpuLower.includes("nvidia") ||
+    gpuLower.includes("geforce") ||
+    gpuLower.includes("quadro") ||
+    gpuLower.includes("rtx") ||
+    gpuLower.includes("gtx") ||
+    gpuLower.includes("titan") ||
+    gpuLower.includes("tesla") ||
+    gpuLower.includes("grid") ||
+    gpuLower.includes("nvs") ||
+    /rtx\s*\d+|gtx\s*\d+|geforce\s*rtx\s*\d+|geforce\s*gtx\s*\d+/i.test(gpuName) // Match RTX 5070, GTX 1080, etc.
+  ) {
+    return "nvidia";
+  }
+  // Intel detection - expanded patterns
+  else if (
+    gpuLower.includes("intel") ||
+    gpuLower.includes("uhd") ||
+    gpuLower.includes("iris") ||
+    gpuLower.includes("arc") ||
+    gpuLower.includes("xe") || // Intel Xe graphics
+    gpuLower.includes("hd graphics") ||
+    gpuLower.includes("integrated graphics") ||
+    /intel\s*(uhd|iris|arc|xe)/i.test(gpuName)
+  ) {
+    return "intel";
+  }
+  // Matrox (rare but possible)
+  else if (gpuLower.includes("matrox")) {
+    return "matrox";
+  }
+  // VMware/Virtual GPU
+  else if (gpuLower.includes("vmware") || gpuLower.includes("virtual")) {
+    return "virtual";
+  }
+
+  return "unknown";
+}
+
 // Helper function to detect CPU
 async function detectCPU() {
   return new Promise((resolve) => {
     console.log("[CPU Detection] Detecting CPU...");
 
-    // Use WMIC to query CPU information
+    // Use WMIC to query CPU information with timeout
     const command = "wmic cpu get name";
 
-    exec(command, (error, stdout, stderr) => {
+    exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
       if (error) {
-        console.error("[CPU Detection] Error detecting CPU:", error.message);
-        resolve({ name: "Unknown CPU" });
+        console.error("[CPU Detection] WMIC error:", error.message);
+        // Try PowerShell fallback
+        console.log("[CPU Detection] Trying PowerShell fallback...");
+        // Try PowerShell with Get-CimInstance (newer) or Get-WmiObject (older)
+        const psCommand = `
+          $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1;
+          if (-not $cpu) { $cpu = Get-WmiObject Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1; }
+          if ($cpu) { $cpu.Name }
+        `;
+        exec(
+          `powershell -Command "${psCommand
+            .replace(/\n/g, " ")
+            .replace(/\s+/g, " ")}"`,
+          { timeout: 5000 },
+          (psError, psStdout, psStderr) => {
+            if (psError || !psStdout || !psStdout.trim()) {
+              console.error("[CPU Detection] PowerShell fallback also failed");
+              resolve({ name: "Unknown CPU" });
+              return;
+            }
+            let cpuName = psStdout.trim();
+            // Clean up CPU name - same patterns as WMIC
+            cpuName = cpuName
+              .replace(/\s+\d+-Core\s+Processor$/i, "")
+              .replace(/\s+CPU\s+@\s+[\d.]+GHz$/i, "")
+              .replace(/\s+Processor$/i, "")
+              .replace(/\s*\([RT]\)/gi, "")
+              .replace(/\s*™/gi, "")
+              .replace(/\s+/g, " ")
+              .trim();
+            console.log(`[CPU Detection] ✅ PowerShell detected: ${cpuName}`);
+            resolve({ name: cpuName });
+          }
+        );
         return;
       }
 
@@ -1353,9 +1773,32 @@ async function detectCPU() {
         cpuName = lines[0].trim();
 
         // Clean up CPU name - remove processor core count and extra details
-        // Example: "AMD Ryzen 7 7800X3D 8-Core Processor" -> "AMD Ryzen 7 7800X3D"
-        cpuName = cpuName.replace(/\s+\d+-Core\s+Processor$/i, "");
-        cpuName = cpuName.replace(/\s+CPU\s+@\s+[\d.]+GHz$/i, "");
+        // Handle various CPU naming formats
+        cpuName = cpuName
+          // Remove "X-Core Processor" suffix
+          .replace(/\s+\d+-Core\s+Processor$/i, "")
+          // Remove "CPU @ X.XXGHz" suffix
+          .replace(/\s+CPU\s+@\s+[\d.]+GHz$/i, "")
+          // Remove "Processor" suffix (if not part of model name)
+          .replace(/\s+Processor$/i, "")
+          // Remove "(R)" and "(TM)" trademarks
+          .replace(/\s*\([RT]\)/gi, "")
+          .replace(/\s*™/gi, "")
+          // Remove extra whitespace
+          .replace(/\s+/g, " ")
+          .trim();
+
+        // Handle specific CPU naming patterns
+        // Intel: "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz" -> "Intel Core i7-8700K"
+        // AMD: "AMD Ryzen 7 7800X3D 8-Core Processor" -> "AMD Ryzen 7 7800X3D"
+        // ARM: Handle ARM-based CPUs (Surface Pro X, etc.)
+        if (
+          cpuName.toLowerCase().includes("arm") ||
+          cpuName.toLowerCase().includes("snapdragon")
+        ) {
+          // Keep ARM CPU names as-is, just clean up
+          cpuName = cpuName.replace(/\s+Processor$/i, "").trim();
+        }
       }
 
       console.log(`[CPU Detection] ✅ Detected: ${cpuName}`);
@@ -1415,14 +1858,53 @@ async function getSystemInfo() {
   let osDisplay = os.type();
   if (osDisplay === "Windows_NT") {
     const release = os.release();
-    const version = parseInt(release.split(".")[0]);
-    // Windows 10 is version 10.0.x, Windows 11 is 10.0.22000+
-    if (version === 10) {
-      const build = parseInt(release.split(".")[2] || "0");
-      osDisplay = build >= 22000 ? "Windows 11" : "Windows 10";
+    console.log("[OS Detection] Raw release:", release);
+
+    // Parse version more carefully
+    const parts = release.split(".");
+    const major = parseInt(parts[0]) || 0;
+    const minor = parseInt(parts[1]) || 0;
+    const build = parseInt(parts[2]) || 0;
+
+    // Windows 10/11 both report as 10.0.x
+    // Windows 11 is build 22000+
+    if (major === 10 && minor === 0) {
+      if (build >= 22000) {
+        osDisplay = "Windows 11";
+      } else if (build >= 19041) {
+        // Windows 10 version 2004 and later
+        osDisplay = "Windows 10";
+      } else {
+        osDisplay = "Windows 10";
+      }
+    } else if (major === 6) {
+      // Windows 7/8/8.1 report as 6.x
+      if (minor === 1) {
+        osDisplay = "Windows 7";
+      } else if (minor === 2) {
+        osDisplay = "Windows 8";
+      } else if (minor === 3) {
+        osDisplay = "Windows 8.1";
+      } else if (minor === 0) {
+        osDisplay = "Windows Vista";
+      } else {
+        osDisplay = `Windows ${major}.${minor}`;
+      }
+    } else if (major === 5) {
+      // Windows XP/2003
+      if (minor === 1) {
+        osDisplay = "Windows XP";
+      } else if (minor === 2) {
+        osDisplay = "Windows Server 2003";
+      } else {
+        osDisplay = `Windows ${major}.${minor}`;
+      }
     } else {
-      osDisplay = `Windows ${version}`;
+      // Future Windows versions or unknown
+      osDisplay = `Windows ${major}${minor > 0 ? `.${minor}` : ""}`;
     }
+
+    console.log("[OS Detection] Detected:", osDisplay);
   }
 
   return {
@@ -1534,6 +2016,244 @@ async function startWindowsLicenseManagerService() {
       );
       resolve({ success: true, message: "Service started successfully" });
     });
+  });
+}
+
+// Start Windows License Manager Service with UAC elevation
+async function startWindowsLicenseManagerServiceWithElevation() {
+  return new Promise((resolve) => {
+    console.log(
+      "[Service Fix] Attempting to start Windows License Manager Service with UAC elevation..."
+    );
+
+    // Create VBScript to elevate PowerShell (more reliable than nested PowerShell)
+    const fs = require("fs");
+    const os = require("os");
+    const path = require("path");
+
+    const tempDir = os.tmpdir();
+    const psScriptPath = path.join(tempDir, "license_manager_start.ps1");
+    const vbsScriptPath = path.join(tempDir, "license_manager_start.vbs");
+    const logPath = path.join(tempDir, "license_manager_start_log.txt");
+
+    // Delete old log if it exists
+    try {
+      if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
+    } catch (e) {
+      /* ignore */
+    }
+
+    // PowerShell script content with detailed logging
+    const psScript = `
+$logFile = "${logPath.replace(/\\/g, "\\\\")}"
+$service = Get-Service -Name LicenseManager -ErrorAction SilentlyContinue
+
+if ($null -eq $service) {
+    "NOT_FOUND" | Out-File -FilePath $logFile -Encoding UTF8
+    exit 1
+}
+
+if ($service.StartType -eq 'Disabled') {
+    "DISABLED" | Out-File -FilePath $logFile -Encoding UTF8
+    exit 2
+}
+
+try {
+    $initialStatus = $service.Status
+    "INITIAL_STATUS:$initialStatus" | Out-File -FilePath $logFile -Encoding UTF8
+    
+    if ($service.Status -eq 'Running') {
+        "ALREADY_RUNNING" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+        exit 0
+    } else {
+        "STARTING_SERVICE" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+        Start-Service -Name LicenseManager -ErrorAction Stop
+        "STARTED" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    }
+    
+    $finalStatus = (Get-Service -Name LicenseManager).Status
+    "FINAL_STATUS:$finalStatus" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    exit 0
+} catch {
+    "ERROR:$($_.Exception.Message)" | Out-File -FilePath $logFile -Encoding UTF8 -Append
+    exit 3
+}
+`;
+
+    // VBScript to run PowerShell with UAC elevation
+    const vbsScript = `Set UAC = CreateObject("Shell.Application")
+UAC.ShellExecute "powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File ""${psScriptPath.replace(
+      /\\/g,
+      "\\\\"
+    )}""", "", "runas", 0
+WScript.Sleep 3000`;
+
+    try {
+      // Write scripts to temp files
+      fs.writeFileSync(psScriptPath, psScript, "utf8");
+      fs.writeFileSync(vbsScriptPath, vbsScript, "utf8");
+
+      // Execute VBScript (triggers UAC)
+      exec(
+        `cscript //nologo "${vbsScriptPath}"`,
+        { timeout: 10000 },
+        (error, stdout, stderr) => {
+          // Clean up temp files
+          try {
+            if (fs.existsSync(psScriptPath)) fs.unlinkSync(psScriptPath);
+            if (fs.existsSync(vbsScriptPath)) fs.unlinkSync(vbsScriptPath);
+          } catch (cleanupError) {
+            console.warn(
+              "[Service Fix] Could not clean up temp files:",
+              cleanupError.message
+            );
+          }
+
+          if (error) {
+            console.error("[Service Fix] ❌ Execution error:", error.message);
+            resolve({
+              success: false,
+              message:
+                "Failed to execute service start command. UAC may have been cancelled.",
+            });
+            return;
+          }
+
+          // Wait for the elevated script to complete, then read the log
+          setTimeout(() => {
+            try {
+              if (fs.existsSync(logPath)) {
+                const logContent = fs.readFileSync(logPath, "utf8").trim();
+                console.log("[Service Fix] Start log:", logContent);
+
+                // Clean up log file
+                try {
+                  fs.unlinkSync(logPath);
+                } catch (e) {
+                  /* ignore */
+                }
+
+                if (logContent.includes("NOT_FOUND")) {
+                  console.log("[Service Fix] ❌ Service not found");
+                  resolve({
+                    success: false,
+                    error:
+                      "Windows License Manager Service not found on this system.",
+                  });
+                  return;
+                }
+
+                if (logContent.includes("DISABLED")) {
+                  console.log("[Service Fix] ❌ Service is disabled");
+                  resolve({
+                    success: false,
+                    isDisabled: true,
+                    message:
+                      "Service is disabled. Please run services.msc and set LicenseManager to Automatic startup type.",
+                  });
+                  return;
+                }
+
+                if (logContent.includes("ALREADY_RUNNING")) {
+                  console.log("[Service Fix] ✅ Service already running");
+                  resolve({
+                    success: true,
+                    alreadyRunning: true,
+                    message:
+                      "Windows License Manager Service is already running!",
+                  });
+                  return;
+                }
+
+                if (logContent.includes("STARTED")) {
+                  console.log("[Service Fix] ✅ Service started successfully");
+                  resolve({
+                    success: true,
+                    message:
+                      "Successfully started Windows License Manager service!",
+                  });
+                  return;
+                }
+
+                if (logContent.includes("ERROR:")) {
+                  const errorMatch = logContent.match(/ERROR:(.+)/);
+                  const errorMsg = errorMatch ? errorMatch[1] : "Unknown error";
+                  console.log("[Service Fix] ❌ Error:", errorMsg);
+                  resolve({
+                    success: false,
+                    message: `Failed to start service: ${errorMsg}`,
+                  });
+                  return;
+                }
+
+                // Check final status
+                const finalStatusMatch = logContent.match(/FINAL_STATUS:(.+)/);
+                if (finalStatusMatch) {
+                  const finalStatus = finalStatusMatch[1].trim();
+                  if (finalStatus === "Running") {
+                    console.log("[Service Fix] ✅ Service is running");
+                    resolve({
+                      success: true,
+                      message:
+                        "Successfully started Windows License Manager service!",
+                    });
+                    return;
+                  } else {
+                    console.log(
+                      "[Service Fix] ⚠️  Service started but status is:",
+                      finalStatus
+                    );
+                    resolve({
+                      success: false,
+                      message: `Service status is ${finalStatus} (expected Running)`,
+                    });
+                    return;
+                  }
+                }
+
+                // Unknown log content
+                console.warn(
+                  "[Service Fix] ⚠️  Unexpected log content:",
+                  logContent
+                );
+                resolve({
+                  success: false,
+                  message: "Could not determine service status from log.",
+                });
+              } else {
+                // Log file doesn't exist - UAC was probably cancelled or script didn't run
+                console.warn(
+                  "[Service Fix] ⚠️  No log file found - UAC may have been cancelled"
+                );
+                resolve({
+                  success: false,
+                  cancelled: true,
+                  message: "UAC prompt may have been cancelled.",
+                });
+              }
+            } catch (readError) {
+              console.error(
+                "[Service Fix] Error reading log:",
+                readError.message
+              );
+              resolve({
+                success: false,
+                message: "Could not verify service status after start.",
+              });
+            }
+          }, 3500);
+        }
+      );
+    } catch (fileError) {
+      console.error(
+        "[Service Fix] ❌ Failed to create temp scripts:",
+        fileError.message
+      );
+      resolve({
+        success: false,
+        message: `Failed to create elevation scripts: ${fileError.message}`,
+      });
+    }
   });
 }
 
@@ -2215,10 +2935,14 @@ async function runPreLaunchDiagnostics() {
       gpuInfo && gpuInfo.vendor !== "unknown" && gpuInfo.name !== "Unknown";
 
     if (!driverInfo.hasDrivers && !hasDetectableGPU) {
-      // Only critical if we truly can't detect anything
+      // Only add as warning (not critical) - don't block launch
+      // If the game can run manually, it means drivers are actually present
+      console.log(
+        `[Diagnostics] ⚠️  GPU driver check failed, but not blocking launch (game may still work)`
+      );
       diagnostics.issues.push({
         type: "gpu_drivers",
-        severity: "critical",
+        severity: "warning", // Changed from "critical" to "warning" - don't block launch
         message:
           "GPU drivers may be missing or outdated. This can cause graphics errors.",
         fix: "Update your GPU drivers through Windows Update (Optional Updates) or from your GPU manufacturer's website.",
@@ -4153,6 +4877,29 @@ ipcMain.handle("open-website", async () => {
   return { success: true };
 });
 
+ipcMain.handle("open-external", async (event, url) => {
+  try {
+    // Validate URL before opening
+    if (!url || typeof url !== "string") {
+      console.error("[open-external] Invalid URL provided");
+      return { success: false, error: "Invalid URL" };
+    }
+    
+    // Only allow http/https URLs for security
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      console.error("[open-external] URL must start with http:// or https://");
+      return { success: false, error: "Invalid URL protocol" };
+    }
+    
+    console.log("[open-external] Opening URL:", url);
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error) {
+    console.error("[open-external] Error opening URL:", error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Helper function to download and handle the NoIntroFix
 async function handleSkipIntroToggle(skipIntro) {
   try {
@@ -4458,11 +5205,35 @@ ipcMain.handle("get-gpu-info", async () => {
   }
 });
 
-// Get full system information (GPU + CPU + OS)
-ipcMain.handle("get-system-info", async () => {
+// Get all detected GPUs (for UI display)
+ipcMain.handle("get-all-gpus", async () => {
   try {
+    const allGpus = await detectAllGPUs();
+    return { success: true, gpus: allGpus };
+  } catch (error) {
+    console.error("[IPC] Error getting all GPUs:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get full system information (GPU + CPU + OS)
+ipcMain.handle("get-system-info", async (event, forceRefresh = false) => {
+  try {
+    // Return cached if available and not forcing refresh
+    if (!forceRefresh && settings.cachedSystemInfo) {
+      console.log("[System Info] Returning cached system info");
+      return { success: true, system: settings.cachedSystemInfo, cached: true };
+    }
+
+    // Detect fresh system info
+    console.log("[System Info] Detecting system info...");
     const systemInfo = await getSystemInfo();
-    return { success: true, system: systemInfo };
+
+    // Cache it in settings
+    settings.cachedSystemInfo = systemInfo;
+    saveSettingsToDisk();
+
+    return { success: true, system: systemInfo, cached: false };
   } catch (error) {
     console.error("[IPC] Error getting system info:", error);
     return { success: false, error: error.message };
@@ -4489,7 +5260,8 @@ ipcMain.handle("fix-license-manager", async () => {
       };
     }
 
-    const result = await startWindowsLicenseManagerService();
+    // Use elevated version which prompts for UAC
+    const result = await startWindowsLicenseManagerServiceWithElevation();
     return result;
   } catch (error) {
     console.error("[IPC] Error fixing License Manager:", error);
@@ -4589,16 +5361,37 @@ objShell.ShellExecute "cmd.exe", "/k echo Running System File Checker... && sfc 
 // Open Windows Update or GPU-specific update software (for driver updates)
 ipcMain.handle("open-windows-update", async () => {
   try {
-    // Detect GPU vendor
-    const gpuInfo = await detectGPUVendor();
+    // Detect all GPUs for multi-GPU support
+    const allGpus = await detectAllGPUs();
+    // Prioritize dedicated GPUs over integrated (Intel) GPUs
+    // Filter out Intel and unknown vendors, keeping only dedicated GPUs
+    const discreteGpus = allGpus.filter(
+      (gpu) => gpu.vendor !== "intel" && gpu.vendor !== "unknown"
+    );
+
     console.log(
-      `[Driver Updates] Detected GPU: ${gpuInfo.vendor} - ${gpuInfo.name}`
+      `[Driver Updates] Detected ${allGpus.length} GPU(s), ${discreteGpus.length} discrete:`,
+      discreteGpus
     );
 
     let command = null;
     let appName = "";
 
-    if (gpuInfo.vendor === "nvidia") {
+    // If multiple vendors detected, use Windows Update (covers all)
+    const vendors = [...new Set(discreteGpus.map((gpu) => gpu.vendor))];
+    if (vendors.length > 1) {
+      console.log(
+        `[Driver Updates] Multiple GPU vendors detected (${vendors.join(
+          ", "
+        )}), using Windows Update`
+      );
+      command = "start ms-settings:windowsupdate";
+      appName = "Windows Update (Multiple GPU vendors detected)";
+    } else if (discreteGpus.length === 0) {
+      // No discrete GPUs, use Windows Update
+      command = "start ms-settings:windowsupdate";
+      appName = "Windows Update";
+    } else if (discreteGpus[0].vendor === "nvidia") {
       // Try NVIDIA App (new), NVIDIA GeForce Experience, or NVIDIA Control Panel
       const nvidiaPaths = [
         "C:\\Program Files\\NVIDIA Corporation\\NVIDIA app\\CEF\\NVIDIA App.exe",
@@ -4631,7 +5424,7 @@ ipcMain.handle("open-windows-update", async () => {
         command = "start ms-settings:windowsupdate";
         appName = "Windows Update (NVIDIA drivers not found)";
       }
-    } else if (gpuInfo.vendor === "amd") {
+    } else if (discreteGpus[0].vendor === "amd") {
       // Try AMD Software: Adrenalin Edition (RadeonSoftware.exe)
       const amdPaths = [
         "C:\\Program Files\\AMD\\CNext\\CNext\\RadeonSoftware.exe",
@@ -4670,7 +5463,12 @@ ipcMain.handle("open-windows-update", async () => {
       }
     });
 
-    return { success: true, appName };
+    return {
+      success: true,
+      appName,
+      gpus: discreteGpus.length > 0 ? discreteGpus : allGpus,
+      multipleVendors: vendors.length > 1,
+    };
   } catch (error) {
     console.error("[IPC] Error opening driver update software:", error);
     return { success: false, error: error.message };
@@ -4690,16 +5488,31 @@ function readCurrentFpsFromDxvkConf() {
 
     const content = fs.readFileSync(dxvkConfPath, "utf8");
 
-    // Try to find the dxgi.maxFrameRate setting
+    // Try to find both dxgi.maxFrameRate and d3d9.maxFrameRate settings
     const dxgiMatch = content.match(/dxgi\.maxFrameRate\s*=\s*(\d+)/);
-    if (dxgiMatch && dxgiMatch[1]) {
-      return parseInt(dxgiMatch[1]);
+    const d3d9Match = content.match(/d3d9\.maxFrameRate\s*=\s*(\d+)/);
+
+    const dxgiFps = dxgiMatch && dxgiMatch[1] ? parseInt(dxgiMatch[1]) : null;
+    const d3d9Fps = d3d9Match && d3d9Match[1] ? parseInt(d3d9Match[1]) : null;
+
+    // If both values exist, check if they match
+    if (dxgiFps !== null && d3d9Fps !== null) {
+      if (dxgiFps !== d3d9Fps) {
+        console.warn(
+          `FPS values in dxvk.conf don't match: dxgi.maxFrameRate = ${dxgiFps}, d3d9.maxFrameRate = ${d3d9Fps}. Using dxgi value.`
+        );
+      }
+      // Prefer dxgi value if both exist
+      return dxgiFps;
     }
 
-    // If not found, try the d3d9.maxFrameRate setting
-    const d3d9Match = content.match(/d3d9\.maxFrameRate\s*=\s*(\d+)/);
-    if (d3d9Match && d3d9Match[1]) {
-      return parseInt(d3d9Match[1]);
+    // Return whichever value exists
+    if (dxgiFps !== null) {
+      return dxgiFps;
+    }
+
+    if (d3d9Fps !== null) {
+      return d3d9Fps;
     }
 
     return null; // No FPS setting found
@@ -5272,6 +6085,16 @@ async function findGameInstallation() {
     return GAME_INSTALL_DIR;
   }
 
+  // THIRD: Only scan for existing installations if user opted-in during installation
+  if (!settings.autoScanEnabled) {
+    console.log(
+      `[Find Game] Auto-scan disabled (privacy setting). Skipping file system scan.`
+    );
+    return null;
+  }
+
+  console.log(`[Find Game] Auto-scan enabled. Searching common locations...`);
+
   // Potential locations to check (in order of priority)
   const possibleLocations = [
     // Default location
@@ -5350,7 +6173,13 @@ async function findGameInstallation() {
 // Update the checkExistingInstallation function to check ALL dependencies
 async function checkExistingInstallation() {
   try {
+    // IMPORTANT: Only auto-scan if user opted-in during installation
+    // If auto-scan is disabled (default for privacy), only check explicitly saved paths
+    console.log(`[Install Check] Auto-scan: ${settings.autoScanEnabled}`);
+
     // Check 1: Game files
+    // findGameInstallation will respect autoScanEnabled setting
+    // If disabled, it only checks saved custom paths (no file system scanning)
     const foundLocation = await findGameInstallation();
     const gameFilesExist = foundLocation !== null;
 
@@ -5461,6 +6290,85 @@ ipcMain.handle("check-game-installed", async () => {
         gfwl: false,
         dx9: false,
       },
+    };
+  }
+});
+
+// Check for persistent issues (services and dependencies)
+ipcMain.handle("check-persistent-issues", async () => {
+  try {
+    const issues = [];
+
+    // Check Windows License Manager Service
+    try {
+      const licenseManagerStatus = await checkWindowsLicenseManagerService();
+      if (licenseManagerStatus.exists && !licenseManagerStatus.running) {
+        issues.push({
+          type: "license_manager",
+          message: "Windows License Manager Service is not running",
+          severity: "warning",
+        });
+      }
+    } catch (error) {
+      console.error(
+        "[Persistent Issues] Error checking License Manager:",
+        error
+      );
+    }
+
+    // Check Xbox Live Networking Service
+    try {
+      const xboxServiceStatus = await checkXboxLiveNetworkingService();
+      if (xboxServiceStatus.exists && !xboxServiceStatus.running) {
+        issues.push({
+          type: "xbox_networking",
+          message: "Xbox Live Networking Service is not running",
+          severity: "warning",
+        });
+      }
+    } catch (error) {
+      console.error(
+        "[Persistent Issues] Error checking Xbox Networking:",
+        error
+      );
+    }
+
+    // Check dependencies (only if game files exist - don't show if game isn't installed)
+    try {
+      const foundLocation = await findGameInstallation();
+      if (foundLocation) {
+        const gfwlInstalled = await isGFWLInstalled();
+        const dx9Installed = await isDX9Installed();
+
+        if (!gfwlInstalled) {
+          issues.push({
+            type: "gfwl",
+            message: "Games for Windows Live is not installed",
+            severity: "error",
+          });
+        }
+
+        if (!dx9Installed) {
+          issues.push({
+            type: "directx",
+            message: "DirectX 9 is not installed",
+            severity: "error",
+          });
+        }
+      }
+    } catch (error) {
+      console.error("[Persistent Issues] Error checking dependencies:", error);
+    }
+
+    return {
+      hasIssues: issues.length > 0,
+      issues: issues,
+    };
+  } catch (error) {
+    console.error("Error checking persistent issues:", error);
+    return {
+      hasIssues: false,
+      issues: [],
     };
   }
 });
@@ -7553,6 +8461,34 @@ async function updateShortcuts(newPath) {
   }
 }
 
+// Handler to clear saved game path
+ipcMain.handle("clear-saved-game-path", async () => {
+  try {
+    console.log("[Clear Game Path] Clearing saved custom game path...");
+
+    // Clear from settings
+    settings.customGamePath = undefined;
+    delete settings.customGamePath;
+
+    // Reset to default location
+    GAME_INSTALL_DIR = path.join(app.getPath("home"), "Games", "Shadowrun");
+    RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+
+    // Save settings
+    saveSettingsToDisk();
+
+    console.log(
+      "[Clear Game Path] Saved game path cleared. Reset to default:",
+      GAME_INSTALL_DIR
+    );
+
+    return { success: true, message: "Saved game path cleared successfully" };
+  } catch (error) {
+    console.error("[Clear Game Path] Error:", error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Handler to browse for existing game installation
 ipcMain.handle("browse-for-existing-game", async () => {
   try {
@@ -7886,6 +8822,73 @@ ipcMain.handle("show-logs", () => {
 // Track whether the current check is manual (from button) or automatic (on startup)
 let isManualUpdateCheck = false;
 
+// Check if a previous update installation failed
+function checkForFailedInstallation() {
+  try {
+    const currentVersion = app.getVersion();
+    const pendingVersion = settings.pendingUpdateVersion;
+    
+    // Clean up stale update marker file (if it exists)
+    const updateMarkerPath = path.join(app.getPath("userData"), ".update-in-progress");
+    if (fs.existsSync(updateMarkerPath)) {
+      try {
+        const markerData = JSON.parse(fs.readFileSync(updateMarkerPath, "utf8"));
+        console.log(`[Updater] Found stale update marker file (version: ${markerData.version}, timestamp: ${new Date(markerData.timestamp).toLocaleString()})`);
+        fs.unlinkSync(updateMarkerPath);
+        console.log("[Updater] Cleaned up stale update marker file");
+      } catch (e) {
+        console.warn("[Updater] Failed to clean up marker file:", e);
+        // Try to delete it anyway
+        try {
+          fs.unlinkSync(updateMarkerPath);
+        } catch (e2) {
+          // Ignore
+        }
+      }
+    }
+    
+    if (pendingVersion && pendingVersion !== currentVersion) {
+      console.error(
+        `[Updater] Installation failure detected - Expected v${pendingVersion}, but still on v${currentVersion}`
+      );
+      
+      // Clear pending version
+      delete settings.pendingUpdateVersion;
+      saveSettingsToDisk();
+      
+      // Notify user of installation failure
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        setTimeout(() => {
+          mainWindow.webContents.send("update-installation-failed", {
+            expectedVersion: pendingVersion,
+            currentVersion: currentVersion,
+            message: `Update to v${pendingVersion} failed to install. You're still on v${currentVersion}.`,
+          });
+        }, 3000); // Wait for UI to be ready
+      }
+    } else if (pendingVersion && pendingVersion === currentVersion) {
+      console.log(
+        `[Updater] ✅ Update installed successfully - Now on v${currentVersion}`
+      );
+      
+      // Clear pending version
+      delete settings.pendingUpdateVersion;
+      saveSettingsToDisk();
+      
+      // Show success toast
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        setTimeout(() => {
+          mainWindow.webContents.send("update-installation-success", {
+            version: currentVersion,
+          });
+        }, 2000);
+      }
+    }
+  } catch (error) {
+    console.error("[Updater] Error checking for failed installation:", error);
+  }
+}
+
 // Function to check for updates
 function checkForUpdates(manual = false) {
   isManualUpdateCheck = manual;
@@ -7916,6 +8919,13 @@ autoUpdater.on("update-available", (info) => {
   // Track for Discord RPC
   updateAvailable = true;
   latestVersion = info.version;
+  
+  // Store update info for potential retry
+  pendingUpdateInfo = {
+    version: info.version,
+    releaseNotes: info.releaseNotes,
+    currentVersion: app.getVersion(),
+  };
 
   // Update Discord presence to show update available
   if (rpc) {
@@ -7923,32 +8933,14 @@ autoUpdater.on("update-available", (info) => {
   }
 
   if (!mainWindow || mainWindow.isDestroyed()) {
-    // No window, start download anyway
-    autoUpdater.downloadUpdate();
+    console.log("[Updater] Main window not available - update will be shown on next launch");
     return;
   }
 
-  // If this is a manual check, show the full dialog
-  if (isManualUpdateCheck) {
-    console.log("[Updater] Manual check - showing dialog");
-    mainWindow.webContents.send("show-update-dialog", {
-      version: info.version,
-      releaseNotes: info.releaseNotes,
-      currentVersion: app.getVersion(),
-    });
-  } else {
-    // Automatic check - show minimal toast and auto-download
-    console.log("[Updater] Automatic check - silent download");
-    mainWindow.webContents.send("update-available-silent", {
-      version: info.version,
-      releaseNotes: info.releaseNotes,
-      currentVersion: app.getVersion(),
-    });
-
-    // Automatically start downloading in background
-    console.log("[Updater] Starting automatic background download...");
-    autoUpdater.downloadUpdate();
-  }
+  // Always show the confirmation dialog (both manual and automatic checks)
+  // User must confirm before downloading
+  console.log(`[Updater] ${isManualUpdateCheck ? "Manual" : "Automatic"} check - showing confirmation dialog`);
+  mainWindow.webContents.send("show-update-dialog", pendingUpdateInfo);
 });
 
 // When no update is available
@@ -7977,17 +8969,92 @@ autoUpdater.on("update-not-available", (info) => {
 
 // Download progress
 autoUpdater.on("download-progress", (progressObj) => {
-  const logMessage = `[Updater] Download progress: ${Math.round(
-    progressObj.percent
-  )}% (${progressObj.transferred}/${progressObj.total})`;
+  // Calculate percent manually if not provided or is 0/invalid
+  // This ensures progress always updates correctly, even when electron-updater
+  // doesn't provide a percent value or provides it inconsistently
+  let percent = progressObj.percent;
+
+  // Always prefer calculated value if we have valid transferred/total
+  // This is more reliable than trusting the percent property
+  if (
+    progressObj.transferred !== undefined &&
+    progressObj.transferred !== null &&
+    progressObj.total !== undefined &&
+    progressObj.total !== null &&
+    progressObj.total > 0
+  ) {
+    const calculatedPercent =
+      (progressObj.transferred / progressObj.total) * 100;
+
+    // Use calculated value if:
+    // 1. percent is missing/invalid, OR
+    // 2. percent is 0 but we have transferred bytes (download has started)
+    if (
+      !percent ||
+      percent === 0 ||
+      isNaN(percent) ||
+      (percent === 0 && progressObj.transferred > 0)
+    ) {
+      percent = calculatedPercent;
+    } else {
+      // If both are available, use the calculated one for consistency
+      // (calculated is more accurate as it's based on actual bytes)
+      percent = calculatedPercent;
+    }
+  } else if (!percent || isNaN(percent)) {
+    // If we can't calculate and percent is invalid, default to 0
+    percent = 0;
+  }
+
+  const roundedPercent = Math.max(0, Math.min(100, Math.round(percent))); // Clamp between 0-100
+  const logMessage = `[Updater] Download progress: ${roundedPercent}% (${
+    progressObj.transferred || 0
+  }/${progressObj.total || 0})`;
   console.log(logMessage);
+  
+  // Track progress for timeout detection
+  const now = Date.now();
+  const transferred = progressObj.transferred || 0;
+  
+  // Check if progress has actually increased
+  if (transferred > lastUpdateProgress.transferred) {
+    // Progress detected - reset timeout
+    lastUpdateProgress = { transferred, time: now };
+    
+    // Clear and restart timeout
+    if (updateDownloadTimeout) {
+      clearTimeout(updateDownloadTimeout);
+    }
+    
+    updateDownloadTimeout = setTimeout(() => {
+      console.error("[Updater] Download timeout - no progress for 3 minutes");
+      
+      // Send timeout error to renderer
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("update-error", {
+          message: "Download timed out. Your connection may be too slow or unstable. Please try again.",
+          type: "timeout",
+          canRetry: true,
+          updateInfo: pendingUpdateInfo,
+        });
+      }
+      
+      // Cancel the download (electron-updater doesn't have a native cancel, so we restart the app)
+      updateDownloadInProgress = false;
+      updateDownloadTimeout = null;
+    }, UPDATE_TIMEOUT_MS);
+  } else if (now - lastUpdateProgress.time > UPDATE_TIMEOUT_MS) {
+    // Already timed out - don't send duplicate error
+    console.log("[Updater] Download already timed out, ignoring progress event");
+    return;
+  }
 
   // Send progress to renderer
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("update-download-progress", {
-      percent: Math.round(progressObj.percent),
-      transferred: progressObj.transferred,
-      total: progressObj.total,
+      percent: roundedPercent,
+      transferred: progressObj.transferred || 0,
+      total: progressObj.total || 0,
     });
   }
 });
@@ -7996,6 +9063,13 @@ autoUpdater.on("download-progress", (progressObj) => {
 autoUpdater.on("update-downloaded", (info) => {
   console.log("[Updater] Update downloaded, ready to install");
   console.log("[Updater] New version:", info.version);
+  
+  // Clear download state and timeouts
+  updateDownloadInProgress = false;
+  if (updateDownloadTimeout) {
+    clearTimeout(updateDownloadTimeout);
+    updateDownloadTimeout = null;
+  }
 
   if (!mainWindow || mainWindow.isDestroyed()) {
     // If window is destroyed, just quit and install
@@ -8011,6 +9085,30 @@ autoUpdater.on("update-downloaded", (info) => {
   // Auto-install after brief delay (silent one-click install)
   setTimeout(() => {
     console.log("[Updater] Auto-installing update silently...");
+    
+    // Store expected version for installation verification
+    try {
+      settings.pendingUpdateVersion = info.version;
+      saveSettingsToDisk();
+      console.log(`[Updater] Stored pending update version: ${info.version}`);
+      
+      // Create a marker file to help installer detect this is an update
+      // This is a backup indicator in case other detection methods fail
+      const updateMarkerPath = path.join(app.getPath("userData"), ".update-in-progress");
+      try {
+        fs.writeFileSync(updateMarkerPath, JSON.stringify({
+          version: info.version,
+          timestamp: Date.now(),
+          currentVersion: app.getVersion()
+        }), "utf8");
+        console.log(`[Updater] Created update marker file: ${updateMarkerPath}`);
+      } catch (markerError) {
+        console.warn("[Updater] Failed to create update marker file (non-critical):", markerError);
+      }
+    } catch (e) {
+      console.error("[Updater] Failed to store pending update version:", e);
+    }
+    
     if (gameProcess) {
       console.log("[Updater] Closing game before update...");
       try {
@@ -8022,7 +9120,7 @@ autoUpdater.on("update-downloaded", (info) => {
     // quitAndInstall(isSilent, isForceRunAfter)
     // true = silent install (no window), true = force run after update
     autoUpdater.quitAndInstall(true, true);
-  }, 3000); // 3 second delay so user sees the toast
+  }, 5000); // 5 second delay so user can read the toast
 
   /* OLD CODE - Required user to click "Restart Now"
   dialog
@@ -8061,8 +9159,53 @@ autoUpdater.on("update-downloaded", (info) => {
 // Error handling
 autoUpdater.on("error", (error) => {
   console.error("[Updater] Error:", error);
-  // Silently fail - don't bother user with update errors
-  // They can always download manually from website
+  
+  // Clear download tracking
+  updateDownloadInProgress = false;
+  if (updateDownloadTimeout) {
+    clearTimeout(updateDownloadTimeout);
+    updateDownloadTimeout = null;
+  }
+  
+  // Determine error type and create user-friendly message
+  let errorMessage = "Update failed. Please try again.";
+  let errorType = "unknown";
+  
+  if (error.message) {
+    const msg = error.message.toLowerCase();
+    
+    if (msg.includes("network") || msg.includes("enotfound") || msg.includes("etimedout")) {
+      errorMessage = "Network error. Please check your internet connection and try again.";
+      errorType = "network";
+    } else if (msg.includes("404") || msg.includes("not found")) {
+      errorMessage = "Update file not found on server. Please try again later.";
+      errorType = "not_found";
+    } else if (msg.includes("403") || msg.includes("forbidden")) {
+      errorMessage = "Server access denied. Please try again later.";
+      errorType = "forbidden";
+    } else if (msg.includes("timeout")) {
+      errorMessage = "Download timed out. Please check your connection and try again.";
+      errorType = "timeout";
+    } else if (msg.includes("corrupted") || msg.includes("checksum")) {
+      errorMessage = "Downloaded file is corrupted. Please try again.";
+      errorType = "corrupted";
+    } else if (msg.includes("permission") || msg.includes("eacces")) {
+      errorMessage = "Permission denied. Try running launcher as Administrator.";
+      errorType = "permission";
+    }
+  }
+  
+  console.error(`[Updater] Error type: ${errorType} - ${errorMessage}`);
+  
+  // Send error notification to renderer
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update-error", {
+      message: errorMessage,
+      type: errorType,
+      canRetry: true,
+      updateInfo: pendingUpdateInfo, // Include update info for retry
+    });
+  }
 });
 
 // Check for rollback configuration
@@ -8292,6 +9435,33 @@ ipcMain.handle("confirm-rollback-download", async (event, downloadUrl) => {
 ipcMain.handle("confirm-update-download", async () => {
   try {
     console.log("[Updater] User confirmed update download");
+    
+    // Initialize download tracking
+    updateDownloadInProgress = true;
+    lastUpdateProgress = { transferred: 0, time: Date.now() };
+    
+    // Clear any existing timeout
+    if (updateDownloadTimeout) {
+      clearTimeout(updateDownloadTimeout);
+    }
+    
+    // Start initial timeout
+    updateDownloadTimeout = setTimeout(() => {
+      console.error("[Updater] Download timeout - no progress detected");
+      
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("update-error", {
+          message: "Download failed to start. Please check your internet connection and try again.",
+          type: "timeout",
+          canRetry: true,
+          updateInfo: pendingUpdateInfo,
+        });
+      }
+      
+      updateDownloadInProgress = false;
+      updateDownloadTimeout = null;
+    }, UPDATE_TIMEOUT_MS);
+    
     autoUpdater.downloadUpdate();
 
     // Show download progress notification
@@ -8302,6 +9472,52 @@ ipcMain.handle("confirm-update-download", async () => {
     return { success: true };
   } catch (error) {
     console.error("[Updater] Error starting update download:", error);
+    
+    // Clear download state on error
+    updateDownloadInProgress = false;
+    if (updateDownloadTimeout) {
+      clearTimeout(updateDownloadTimeout);
+      updateDownloadTimeout = null;
+    }
+    
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle retry of failed update download
+ipcMain.handle("retry-update-download", async () => {
+  try {
+    console.log("[Updater] User requested retry of update download");
+    
+    if (!pendingUpdateInfo) {
+      console.error("[Updater] No pending update info available for retry");
+      return { success: false, error: "No update information available" };
+    }
+    
+    // Re-show the update dialog so user can confirm again
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("show-update-dialog", pendingUpdateInfo);
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error("[Updater] Error retrying update:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Provide manual download URL
+ipcMain.handle("get-manual-download-url", async () => {
+  try {
+    const version = pendingUpdateInfo?.version || app.getVersion();
+    const downloadUrl = `${UPDATE_SERVER_URL}/Shadowrun%20FPS%20Launcher%20Setup%20${version}.exe`;
+    
+    return {
+      success: true,
+      url: downloadUrl,
+      version: version,
+    };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 });

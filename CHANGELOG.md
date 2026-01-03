@@ -2,17 +2,22 @@
 
 All notable changes to the Shadowrun Launcher will be documented in this file.
 
-## [0.9.94] - 2025-12-29
+## [0.9.100] - 2025-12-31
 
 ### Added
 
-- **FAQ Section** - Comprehensive FAQ section with search, accordion-style questions, and quick actions
-- **FAQ Content** - Added 10 common troubleshooting FAQs including Direct3D errors, compatibility warnings, and connection issues
-- **AMD GPU Warning** - Warning note that FPS limiting may not work on AMD GPUs
+- **Update Error Notifications** - Comprehensive error messages for download failures with specific error type detection (network, timeout, server errors, etc.)
+- **Download Timeout Detection** - Automatic detection of stalled downloads with 3-minute timeout and user notification
+- **Update Retry Functionality** - One-click retry button for failed downloads without needing to re-check for updates
+- **Installation Failure Detection** - Automatic detection of failed update installations on app restart with detailed error messages
+- **Manual Download Fallback** - Direct download link option when auto-update fails, opens installer in browser
 
 ### Improved
 
-- **System Requirements Check** - Network connectivity check no longer blocks game launch (game can run offline)
+- **Update Error Handling** - Enhanced error classification and user-friendly error messages with troubleshooting guidance
+- **Update Download Reliability** - Progress tracking prevents silent failures and provides clear feedback during downloads
+- **Update Installation Verification** - Automatic verification of successful installations on app restart with success confirmation
+- **Update User Experience** - Improved error dialogs with retry, manual download, and close options for better user control
 
 ## [0.9.93] - 2025-12-24
 

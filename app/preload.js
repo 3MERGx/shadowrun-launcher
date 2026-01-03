@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("api", {
   activateGame: () => ipcRenderer.invoke("activate-game"),
   openDiscord: () => ipcRenderer.invoke("open-discord"),
   openWebsite: () => ipcRenderer.invoke("open-website"),
+  openExternal: (url) => ipcRenderer.invoke("open-external", url),
 
   // Settings
   saveSettings: (settings) => ipcRenderer.invoke("save-settings", settings),
@@ -94,6 +95,9 @@ contextBridge.exposeInMainWorld("api", {
   toggleSkipIntro: (enabled) =>
     ipcRenderer.invoke("toggle-skip-intro", enabled),
 
+  // Clear saved game path
+  clearSavedGamePath: () => ipcRenderer.invoke("clear-saved-game-path"),
+
   // Add this to your exposed API in preload.js
   onSkipIntroProgress: (callback) => {
     ipcRenderer.on("skip-intro-progress", (_, data) => callback(data));
@@ -146,7 +150,8 @@ contextBridge.exposeInMainWorld("api", {
   // Diagnostics and error handling methods
   runDiagnostics: () => ipcRenderer.invoke("run-diagnostics"),
   getGpuInfo: () => ipcRenderer.invoke("get-gpu-info"),
-  getSystemInfo: () => ipcRenderer.invoke("get-system-info"),
+  getAllGpus: () => ipcRenderer.invoke("get-all-gpus"),
+  getSystemInfo: (forceRefresh) => ipcRenderer.invoke("get-system-info", forceRefresh),
   fixLicenseManager: () => ipcRenderer.invoke("fix-license-manager"),
   restartXboxNetworking: () => ipcRenderer.invoke("restart-xbox-networking"),
   checkDirectX: () => ipcRenderer.invoke("check-directx"),
@@ -158,6 +163,8 @@ contextBridge.exposeInMainWorld("api", {
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
   confirmUpdateDownload: () => ipcRenderer.invoke("confirm-update-download"),
+  retryUpdateDownload: () => ipcRenderer.invoke("retry-update-download"),
+  getManualDownloadUrl: () => ipcRenderer.invoke("get-manual-download-url"),
   confirmRollbackDownload: (downloadUrl) =>
     ipcRenderer.invoke("confirm-rollback-download", downloadUrl),
   onShowUpdateDialog: (callback) => {
@@ -191,12 +198,22 @@ contextBridge.exposeInMainWorld("api", {
   onUpdateDownloadComplete: (callback) => {
     ipcRenderer.on("update-download-complete", callback);
   },
-  // Silent update handlers
+  // Silent update handlers (deprecated - automatic updates disabled)
+  // Kept for backward compatibility but no longer triggered
   onUpdateAvailableSilent: (callback) => {
     ipcRenderer.on("update-available-silent", (event, data) => callback(data));
   },
   onUpdateDownloadedSilent: (callback) => {
     ipcRenderer.on("update-downloaded-silent", (event, data) => callback(data));
+  },
+  onUpdateError: (callback) => {
+    ipcRenderer.on("update-error", (event, data) => callback(data));
+  },
+  onUpdateInstallationFailed: (callback) => {
+    ipcRenderer.on("update-installation-failed", (event, data) => callback(data));
+  },
+  onUpdateInstallationSuccess: (callback) => {
+    ipcRenderer.on("update-installation-success", (event, data) => callback(data));
   },
 
   // Game location management
@@ -217,6 +234,9 @@ contextBridge.exposeInMainWorld("api", {
   onLaunchError: (callback) => {
     ipcRenderer.on("launch-error", (_, data) => callback(data));
   },
+
+  // Check for persistent issues (services, dependencies)
+  checkPersistentIssues: () => ipcRenderer.invoke("check-persistent-issues"),
 
   // For receiving messages from main (if you use them)
   on: (channel, callback) => {

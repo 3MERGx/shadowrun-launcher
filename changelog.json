@@ -1,12 +1,17 @@
 {
-  "0.9.94": {
-    "version": "0.9.94",
-    "date": "2025-12-29",
+  "0.9.100": {
+    "version": "0.9.100",
+    "date": "2025-12-31",
     "notes": [
-      "**Added:** **FAQ Section** - Comprehensive FAQ section with search, accordion-style questions, and quick actions",
-      "**Added:** **FAQ Content** - Added 10 common troubleshooting FAQs including Direct3D errors, compatibility warnings, and connection issues",
-      "**Added:** **AMD GPU Warning** - Warning note that FPS limiting may not work on AMD GPUs",
-      "**Improved:** **System Requirements Check** - Network connectivity check no longer blocks game launch (game can run offline)"
+      "**Added:** **Update Error Notifications** - Comprehensive error messages for download failures with specific error type detection (network, timeout, server errors, etc.)",
+      "**Added:** **Download Timeout Detection** - Automatic detection of stalled downloads with 3-minute timeout and user notification",
+      "**Added:** **Update Retry Functionality** - One-click retry button for failed downloads without needing to re-check for updates",
+      "**Added:** **Installation Failure Detection** - Automatic detection of failed update installations on app restart with detailed error messages",
+      "**Added:** **Manual Download Fallback** - Direct download link option when auto-update fails, opens installer in browser",
+      "**Improved:** **Update Error Handling** - Enhanced error classification and user-friendly error messages with troubleshooting guidance",
+      "**Improved:** **Update Download Reliability** - Progress tracking prevents silent failures and provides clear feedback during downloads",
+      "**Improved:** **Update Installation Verification** - Automatic verification of successful installations on app restart with success confirmation",
+      "**Improved:** **Update User Experience** - Improved error dialogs with retry, manual download, and close options for better user control"
     ]
   },
   "0.9.93": {
