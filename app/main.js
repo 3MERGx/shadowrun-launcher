@@ -55,7 +55,7 @@ const log = {
 const GAME_FILES_URL = "http://157.245.214.234/releases/build.zip";
 const GFWL_URL = "http://157.245.214.234/releases/gfwlivesetup.zip";
 const DX9_URL =
-  "https://download.microsoft.com/download/8/4/A/84A35BF1-DAFE-4AE8-82AF-AD2AE20B6B14/directx_Jun2010_redist.exe";
+  "https://download.microsoft.com/download/1/7/1/1718ccc4-6315-4d8e-9543-8e28a4e18c4c/dxwebsetup.exe";
 
 // Define installation directories
 // Use user-writable location by default (doesn't require admin)
@@ -253,6 +253,26 @@ try {
 
 // Skip app initialization if squirrel installer is running
 if (squirrelStartup) return;
+
+// Prevent multiple instances of the launcher from running
+// This ensures only one instance can run at a time
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  // Another instance is already running, quit this one
+  log.info("Another instance of Shadowrun FPS Launcher is already running. Exiting.");
+  app.quit();
+  process.exit(0);
+} else {
+  // This is the first instance, handle second-instance events
+  app.on("second-instance", () => {
+    // Someone tried to run a second instance, focus our window instead
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
 
 let mainWindow;
 let settings = {
@@ -1276,67 +1296,40 @@ ipcMain.handle("launch-game", async (event, gameSettings) => {
 });
 
 // Helper function to check if DirectX 9 is installed
+// Checks for d3dx9_43.dll which indicates DirectX 9 runtime components are installed
 function isDX9Installed() {
   return new Promise((resolve) => {
-    console.log("[DirectX Check] Checking for DirectX 9+ installation...");
+    console.log("[DirectX Check] Checking for DirectX 9 runtime components...");
 
-    // Check registry keys for DirectX
-    const command = 'reg query "HKLM\\SOFTWARE\\Microsoft\\DirectX" /v Version';
-    console.log(`[DirectX Check] Running command: ${command}`);
+    const systemRoot = process.env.SystemRoot || "C:\\Windows";
 
-    exec(command, (error, stdout, stderr) => {
-      if (!error && stdout) {
-        // Check for DirectX 9 specifically (version 4.09.x.x)
-        if (stdout.includes("4.09") || stdout.includes("9.")) {
-          resolve(true);
-          return;
-        }
+    const paths = [
+      path.join(systemRoot, "System32"),
+      path.join(systemRoot, "SysWOW64"),
+    ];
 
-        // Check for any DirectX version present (Windows 10/11 have DirectX 12 built-in)
-        if (stdout.includes("REG_SZ") || stdout.includes("Version")) {
-          resolve(true);
-          return;
-        }
+    // Check for d3dx9_43.dll - the latest DirectX 9 Extensions DLL
+    // If this exists, DirectX 9 runtime components are installed
+    const requiredDll = "d3dx9_43.dll";
+
+    // Check each directory (System32 and SysWOW64)
+    for (const dir of paths) {
+      if (!fs.existsSync(dir)) {
+        continue; // Skip if directory doesn't exist
       }
 
-      // Fallback 1: Check for d3d9.dll in System32 (DirectX 9 DLL - present on all Windows with DX9+)
-      const dx9DllPath = path.join(
-        process.env.SystemRoot || "C:\\Windows",
-        "System32",
-        "d3d9.dll"
-      );
-
-      if (fs.existsSync(dx9DllPath)) {
-        resolve(true);
-        return;
-      }
-
-      // Fallback 2: Check for d3d11.dll (DirectX 11 - present on Windows 7+)
-      const dx11DllPath = path.join(
-        process.env.SystemRoot || "C:\\Windows",
-        "System32",
-        "d3d11.dll"
-      );
-
-      if (fs.existsSync(dx11DllPath)) {
-        resolve(true);
-        return;
-      }
-
-      // Fallback 3: On Windows 10/11, DirectX 12 is built-in
-      const osVersion = os.release();
-      const majorVersion = parseInt(osVersion.split(".")[0]);
-      if (majorVersion >= 10) {
+      const dllPath = path.join(dir, requiredDll);
+      if (fs.existsSync(dllPath)) {
         console.log(
-          "[DirectX Check] ✅ Windows 10+ detected - DirectX 12 is built-in (includes DX9)"
+          `[DirectX Check] ✅ Found DirectX 9 component: ${path.basename(dir)}\\${requiredDll}`
         );
         resolve(true);
         return;
       }
+    }
 
-      console.log("[DirectX Check] ❌ DirectX 9+ not found");
-      resolve(false);
-    });
+    console.log("[DirectX Check] ❌ DirectX 9 runtime components not found (d3dx9_43.dll missing)");
+    resolve(false);
   });
 }
 
@@ -3080,7 +3073,10 @@ ipcMain.handle("download-game", async () => {
     console.log("========================================");
     const dx9Installed = await isDX9Installed();
     const gfwlInstalled = await isGFWLInstalled();
-    const gameFilesAlreadyPresent = checkGameFilesExist();
+    // Use findGameInstallation() to be consistent with play button and other checks
+    // This respects custom paths and autoScanEnabled setting
+    const foundLocation = await findGameInstallation();
+    const gameFilesAlreadyPresent = foundLocation !== null;
 
     console.log(
       `[Component Check] DirectX 9+: ${
@@ -3232,11 +3228,11 @@ ipcMain.handle("download-game", async () => {
 
     // STEP 3: Download and install DirectX 9 FIRST (if needed) - BEFORE Shadowrun download
     if (!dx9Installed) {
-      // Download DirectX 9
-      const dx9Path = path.join(GAME_FILES_TEMP, "directx_Jun2010_redist.exe");
+      // Download DirectX 9 Web Installer (dxwebsetup.exe)
+      const dx9Path = path.join(GAME_FILES_TEMP, "dxwebsetup.exe");
       mainWindow.webContents.send(
         "download-message",
-        "📥 Downloading DirectX 9 (required graphics library)..."
+        "📥 Downloading DirectX 9 Web Installer (required graphics library)..."
       );
 
       const dx9Success = await downloadFile(
@@ -3548,7 +3544,15 @@ try {
     }
 
     // STEP 5: Check for Shadowrun game files
-    const gameFilesExist = checkGameFilesExist();
+    // Use findGameInstallation() to be consistent with other checks
+    const foundGameLocation = await findGameInstallation();
+    const gameFilesExist = foundGameLocation !== null;
+    
+    // Update GAME_INSTALL_DIR if we found a location
+    if (foundGameLocation) {
+      GAME_INSTALL_DIR = foundGameLocation;
+      RESOURCES_DIR = path.join(GAME_INSTALL_DIR, "Resources");
+    }
 
     // Download game files if needed
     if (gameFilesExist) {
@@ -4083,11 +4087,13 @@ function runSilentInstaller(installerPath) {
 
     if (
       installerPath.includes("directx9") ||
-      installerPath.includes("directx_Jun2010")
+      installerPath.includes("directx_Jun2010") ||
+      installerPath.includes("dxwebsetup")
     ) {
-      // Silent DirectX installation
-      console.log("[Silent Installer] Detected DirectX installer");
-      installCommand = `"${installerPath}" /Q /C /T:"${GAME_FILES_TEMP}\\dxtemp" && "${GAME_FILES_TEMP}\\dxtemp\\DXSETUP.exe" /silent`;
+      // Silent DirectX Web Installer installation
+      // dxwebsetup.exe uses /Q flag for quiet mode
+      console.log("[Silent Installer] Detected DirectX Web Installer");
+      installCommand = `"${installerPath}" /Q`;
     } else if (installerPath.includes("gfwlivesetup")) {
       // Silent GFWL installation - run the bootstrapper setup.exe
       console.log("[Silent Installer] Detected GFWL installer");

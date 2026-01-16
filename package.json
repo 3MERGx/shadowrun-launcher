@@ -1,7 +1,7 @@
 {
   "name": "shadowrun-fps-launcher",
   "productName": "Shadowrun FPS Launcher",
-  "version": "0.9.104",
+  "version": "0.9.105",
   "repository": {
     "type": "git",
     "url": "https://github.com/3MERGx/shadowrun-launcher.git"
@@ -24,7 +24,7 @@
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^7.6.0",
-    "electron": "^25.0.0",
+    "electron": "^39.2.7",
     "electron-builder": "^24.4.0",
     "tailwindcss": "^3.3.0"
   },
@@ -128,7 +128,7 @@
   "dependencies": {
     "axios": "^1.9.0",
     "discord-rpc": "^4.0.1",
-    "discord.js": "^14.19.3",
+    "discord.js": "^14.25.1",
     "dotenv": "^16.5.0",
     "electron-dl": "^4.0.0",
     "electron-squirrel-startup": "^1.0.1",

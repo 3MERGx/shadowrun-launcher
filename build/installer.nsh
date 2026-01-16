@@ -422,6 +422,11 @@ FunctionEnd
     ; Create shortcut if NOT explicitly set to "0" (unchecked)
     StrCmp $DesktopShortcut "0" desktop_skip_shortcut desktop_create_shortcut
     desktop_create_shortcut:
+        ; Validate that target executable exists before creating shortcut
+        IfFileExists "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 desktop_target_missing
+        ; Validate that desktop path is accessible
+        IfFileExists "$DESKTOP" 0 desktop_path_invalid
+        
         FileWrite $R0 "Creating desktop shortcut...$\r$\n"
         DetailPrint "  CREATING DESKTOP SHORTCUT NOW..."
         DetailPrint "  Full path will be: $DESKTOP\${SHORTCUT_NAME}.lnk"
@@ -433,6 +438,18 @@ FunctionEnd
         IfErrors 0 desktop_check_success
             FileWrite $R0 "ERROR: CreateShortCut returned an error!$\r$\n"
             DetailPrint "  ERROR: CreateShortCut returned an error!"
+            FileClose $R0
+            Goto desktop_done
+        desktop_target_missing:
+            FileWrite $R0 "ERROR: Target executable not found: $INSTDIR\${APP_EXECUTABLE_FILENAME}$\r$\n"
+            DetailPrint "  ERROR: Target executable not found at $INSTDIR\${APP_EXECUTABLE_FILENAME}"
+            DetailPrint "  Skipping desktop shortcut creation"
+            FileClose $R0
+            Goto desktop_done
+        desktop_path_invalid:
+            FileWrite $R0 "ERROR: Desktop path is not accessible: $DESKTOP$\r$\n"
+            DetailPrint "  ERROR: Desktop path is not accessible: $DESKTOP"
+            DetailPrint "  Skipping desktop shortcut creation"
             FileClose $R0
             Goto desktop_done
         desktop_check_success:
@@ -473,6 +490,11 @@ FunctionEnd
     ; Create shortcut if NOT explicitly set to "0" (unchecked)
     StrCmp $StartMenuShortcut "0" startmenu_skip_shortcut startmenu_create_shortcut
     startmenu_create_shortcut:
+        ; Validate that target executable exists before creating shortcut
+        IfFileExists "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 startmenu_target_missing
+        ; Validate that start menu path is accessible
+        IfFileExists "$SMPROGRAMS" 0 startmenu_path_invalid
+        
         FileWrite $R0 "Creating start menu shortcut...$\r$\n"
         DetailPrint "  CREATING START MENU SHORTCUT NOW..."
         CreateDirectory "$SMPROGRAMS\$MenuFolderName"
@@ -483,6 +505,18 @@ FunctionEnd
         IfErrors 0 startmenu_check_success
             FileWrite $R0 "ERROR: CreateShortCut returned an error!$\r$\n"
             DetailPrint "  ERROR: CreateShortCut returned an error!"
+            FileClose $R0
+            Goto startmenu_done
+        startmenu_target_missing:
+            FileWrite $R0 "ERROR: Target executable not found: $INSTDIR\${APP_EXECUTABLE_FILENAME}$\r$\n"
+            DetailPrint "  ERROR: Target executable not found at $INSTDIR\${APP_EXECUTABLE_FILENAME}"
+            DetailPrint "  Skipping start menu shortcut creation"
+            FileClose $R0
+            Goto startmenu_done
+        startmenu_path_invalid:
+            FileWrite $R0 "ERROR: Start menu path is not accessible: $SMPROGRAMS$\r$\n"
+            DetailPrint "  ERROR: Start menu path is not accessible: $SMPROGRAMS"
+            DetailPrint "  Skipping start menu shortcut creation"
             FileClose $R0
             Goto startmenu_done
         startmenu_check_success:
