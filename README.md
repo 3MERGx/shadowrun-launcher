@@ -183,6 +183,26 @@ GET /api/status
 Returns: { status, uptime, timestamp }
 ```
 
+### Data Transparency
+
+```
+GET /api/transparency
+Returns: Complete documentation of all data collected from launcher instances
+```
+
+This endpoint provides full transparency about what data is collected, when it's sent, and why. Perfect for open source visibility and user confidence. Shows:
+- Exact data fields sent from launcher
+- Example payloads
+- Privacy information
+- What data is NOT collected
+- Data retention policies
+- Rate limiting information
+
+**Example Usage:**
+```bash
+curl https://playertracker-production.up.railway.app/api/transparency
+```
+
 ---
 
 ## 🔄 Auto-Update System
