@@ -105,6 +105,7 @@ app.post("/api/heartbeat", (req, res) => {
     status,
     version,
     os,
+    osVersion,
     platform,
     gameSessionStart,
     sessionDuration,
@@ -139,6 +140,7 @@ app.post("/api/heartbeat", (req, res) => {
     status,
     version: version || "unknown",
     os: os || "unknown",
+    osVersion: osVersion || "unknown",
     platform: platform || "unknown",
     lastSeen: now,
     gameSessionStart: sessionStart || null,
@@ -155,7 +157,15 @@ app.post("/api/heartbeat", (req, res) => {
 
 // Report unique install - launcher calls this once on first launch
 app.post("/api/install", async (req, res) => {
-  const { playerId, version, timestamp, os, platform, architecture } = req.body;
+  const {
+    playerId,
+    version,
+    timestamp,
+    os,
+    osVersion,
+    platform,
+    architecture,
+  } = req.body;
 
   // Validation
   if (!playerId || typeof playerId !== "string" || playerId.length > 100) {
@@ -172,6 +182,7 @@ app.post("/api/install", async (req, res) => {
             playerId,
             version: version || "unknown",
             os: os || "unknown",
+            osVersion: osVersion || "unknown",
             platform: platform || "unknown",
             architecture: architecture || "unknown",
             firstInstall: timestamp || new Date().toISOString(),
@@ -241,10 +252,18 @@ app.get("/api/installs", async (req, res) => {
         ])
         .toArray();
 
-      // Get OS breakdown
+      // Get OS breakdown (platform identifier)
       const osBreakdown = await installsCollection
         .aggregate([
           { $group: { _id: "$os", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+        ])
+        .toArray();
+
+      // Get OS Version breakdown (actual OS version)
+      const osVersionBreakdown = await installsCollection
+        .aggregate([
+          { $group: { _id: "$osVersion", count: { $sum: 1 } } },
           { $sort: { count: -1 } },
         ])
         .toArray();
@@ -256,6 +275,10 @@ app.get("/api/installs", async (req, res) => {
           return acc;
         }, {}),
         osBreakdown: osBreakdown.reduce((acc, item) => {
+          acc[item._id || "unknown"] = item.count;
+          return acc;
+        }, {}),
+        osVersionBreakdown: osVersionBreakdown.reduce((acc, item) => {
           acc[item._id || "unknown"] = item.count;
           return acc;
         }, {}),
@@ -287,6 +310,7 @@ app.get("/api/stats", (req, res) => {
     players: [],
     versionBreakdown: {},
     osBreakdown: {},
+    osVersionBreakdown: {},
   };
 
   for (const [playerId, data] of activePlayers.entries()) {
@@ -306,9 +330,14 @@ app.get("/api/stats", (req, res) => {
     stats.versionBreakdown[version] =
       (stats.versionBreakdown[version] || 0) + 1;
 
-    // OS breakdown
+    // OS breakdown (platform identifier)
     const os = data.os || "unknown";
     stats.osBreakdown[os] = (stats.osBreakdown[os] || 0) + 1;
+
+    // OS Version breakdown (actual OS version)
+    const osVersion = data.osVersion || "unknown";
+    stats.osVersionBreakdown[osVersion] =
+      (stats.osVersionBreakdown[osVersion] || 0) + 1;
 
     // Optional: include anonymous player data
     stats.players.push({
@@ -333,161 +362,198 @@ app.get("/api/status", (req, res) => {
 
 // Transparency endpoint - shows exactly what data is collected
 app.get("/api/transparency", (req, res) => {
-  res.json({
-    purpose:
-      "This endpoint provides full transparency about what data is collected from launcher instances.",
-    privacy: {
-      noPersonalData: true,
-      noIPAddress: false, // IP is logged by Railway for rate limiting only
-      noLocation: true,
-      noEmail: true,
-      noUsername: true,
-      anonymousOnly: true,
-    },
-    dataCollection: {
-      install: {
-        endpoint: "POST /api/install",
-        frequency: "Once per launcher installation (first launch only)",
-        purpose: "Track unique installations for statistics",
-        data: {
-          playerId: {
-            type: "string (UUID v4)",
-            description:
-              "Anonymous unique identifier generated on first launch",
-            example: "550e8400-e29b-41d4-a716-446655440000",
-            persistent: true,
-            note: "Stored locally in launcher, survives reinstalls",
+  // Set content type and pretty-print JSON for readability
+  res.setHeader("Content-Type", "application/json");
+  res.send(
+    JSON.stringify(
+      {
+        purpose:
+          "This endpoint provides full transparency about what data is collected from launcher instances.",
+        privacy: {
+          noPersonalData: true,
+          noIPAddress: false, // IP is logged by Railway for rate limiting only
+          noLocation: true,
+          noEmail: true,
+          noUsername: true,
+          anonymousOnly: true,
+        },
+        dataCollection: {
+          install: {
+            endpoint: "POST /api/install",
+            frequency: "Once per launcher installation (first launch only)",
+            purpose: "Track unique installations for statistics",
+            data: {
+              playerId: {
+                type: "string (UUID v4)",
+                description:
+                  "Anonymous unique identifier generated on first launch",
+                example: "550e8400-e29b-41d4-a716-446655440000",
+                persistent: true,
+                note: "Stored locally in launcher, survives reinstalls",
+              },
+              version: {
+                type: "string",
+                description: "Launcher version number",
+                example: "0.9.105",
+              },
+              timestamp: {
+                type: "string (ISO 8601)",
+                description: "When the install was first reported",
+                example: "2024-01-16T00:00:00.000Z",
+              },
+              os: {
+                type: "string",
+                description:
+                  "Operating system platform identifier (Node.js os.platform())",
+                example: "win32",
+                possibleValues: ["win32", "darwin", "linux"],
+                note: "'win32' is the platform identifier for ALL Windows versions (Windows 10, 11, etc.). This is not the specific OS version, just the platform family.",
+              },
+              osVersion: {
+                type: "string",
+                description:
+                  "Actual operating system version (e.g., 'Windows 10', 'Windows 11', 'macOS Monterey')",
+                example: "Windows 11",
+                note: "Detected by parsing OS release version. For Windows: Windows 11 (build 22000+), Windows 10 (build < 22000), Windows 7/8/8.1, etc.",
+              },
+              platform: {
+                type: "string",
+                description:
+                  "Process platform (Node.js process.platform, usually same as os)",
+                example: "win32",
+                note: "Same as 'os' field - platform identifier, not OS version",
+              },
+              architecture: {
+                type: "string",
+                description: "CPU architecture",
+                example: "x64",
+                possibleValues: ["x64", "ia32", "arm64"],
+              },
+            },
+            examplePayload: {
+              playerId: "550e8400-e29b-41d4-a716-446655440000",
+              version: "0.9.105",
+              timestamp: "2024-01-16T00:00:00.000Z",
+              os: "win32",
+              osVersion: "Windows 11",
+              platform: "win32",
+              architecture: "x64",
+            },
+            storedIn: "MongoDB collection 'Installs' (persistent)",
           },
-          version: {
-            type: "string",
-            description: "Launcher version number",
-            example: "0.9.105",
-          },
-          timestamp: {
-            type: "string (ISO 8601)",
-            description: "When the install was first reported",
-            example: "2024-01-16T00:00:00.000Z",
-          },
-          os: {
-            type: "string",
-            description: "Operating system platform",
-            example: "win32",
-            possibleValues: ["win32", "darwin", "linux"],
-          },
-          platform: {
-            type: "string",
-            description: "Process platform (usually same as os)",
-            example: "win32",
-          },
-          architecture: {
-            type: "string",
-            description: "CPU architecture",
-            example: "x64",
-            possibleValues: ["x64", "ia32", "arm64"],
+          heartbeat: {
+            endpoint: "POST /api/heartbeat",
+            frequency: "Every 30 seconds while launcher is running",
+            purpose: "Track active players and game sessions",
+            data: {
+              playerId: {
+                type: "string (UUID v4)",
+                description: "Same anonymous identifier from install",
+                example: "550e8400-e29b-41d4-a716-446655440000",
+              },
+              status: {
+                type: "string",
+                description: "Current launcher/game state",
+                example: "in-game",
+                possibleValues: [
+                  "menu",
+                  "in-game",
+                  "downloading",
+                  "installing",
+                ],
+              },
+              version: {
+                type: "string",
+                description: "Launcher version number",
+                example: "0.9.105",
+              },
+              os: {
+                type: "string",
+                description:
+                  "Operating system platform identifier (Node.js os.platform())",
+                example: "win32",
+                note: "'win32' is the platform identifier for ALL Windows versions (Windows 10, 11, etc.)",
+              },
+              osVersion: {
+                type: "string",
+                description:
+                  "Actual operating system version (e.g., 'Windows 10', 'Windows 11', 'macOS Monterey')",
+                example: "Windows 11",
+                note: "Detected by parsing OS release version. Shows the specific OS version, not just the platform family.",
+              },
+              platform: {
+                type: "string",
+                description: "Process platform (Node.js process.platform)",
+                example: "win32",
+                note: "Same as 'os' field - platform identifier, not OS version",
+              },
+              gameSessionStart: {
+                type: "number (timestamp) or null",
+                description:
+                  "When current game session started (only when status is 'in-game')",
+                example: 1705392000000,
+                note: "null when not in-game",
+              },
+              sessionDuration: {
+                type: "number (milliseconds)",
+                description: "How long current game session has been active",
+                example: 3600000,
+                note: "0 when not in-game",
+              },
+            },
+            examplePayload: {
+              playerId: "550e8400-e29b-41d4-a716-446655440000",
+              status: "in-game",
+              version: "0.9.105",
+              os: "win32",
+              osVersion: "Windows 11",
+              platform: "win32",
+              gameSessionStart: 1705392000000,
+              sessionDuration: 3600000,
+            },
+            storedIn:
+              "In-memory Map (temporary, cleared after 90 seconds of inactivity)",
           },
         },
-        examplePayload: {
-          playerId: "550e8400-e29b-41d4-a716-446655440000",
-          version: "0.9.105",
-          timestamp: "2024-01-16T00:00:00.000Z",
-          os: "win32",
-          platform: "win32",
-          architecture: "x64",
+        whatWeDontCollect: [
+          "Personal information (name, email, username)",
+          "IP addresses (only used for rate limiting, not stored)",
+          "Location data",
+          "Hardware identifiers (MAC address, serial numbers)",
+          "File system paths",
+          "Game settings or preferences",
+          "Discord user IDs or tokens",
+          "Any data that could identify you personally",
+        ],
+        dataRetention: {
+          installs: "Permanently stored in MongoDB (for statistics)",
+          heartbeats: "Temporary - cleared after 90 seconds of inactivity",
         },
-        storedIn: "MongoDB collection 'Installs' (persistent)",
+        dataUsage: {
+          statistics: "Total unique installs, version breakdown, OS breakdown",
+          realTimeStats:
+            "Current online players, players in-game, players in menu",
+          discordIntegration:
+            "Display player count in Discord bot (no personal data)",
+        },
+        rateLimiting: {
+          enabled: true,
+          window: "1 minute",
+          maxRequests: "30 requests per IP per minute",
+          purpose: "Prevent abuse and protect server resources",
+        },
+        sourceCode: {
+          launcher: "https://github.com/3MERGx/shadowrun-launcher",
+          server: "Available in railway-api/server.js",
+          note: "All code is open source for transparency",
+        },
+        lastUpdated: "2024-01-16",
+        version: "1.0.0",
       },
-      heartbeat: {
-        endpoint: "POST /api/heartbeat",
-        frequency: "Every 30 seconds while launcher is running",
-        purpose: "Track active players and game sessions",
-        data: {
-          playerId: {
-            type: "string (UUID v4)",
-            description: "Same anonymous identifier from install",
-            example: "550e8400-e29b-41d4-a716-446655440000",
-          },
-          status: {
-            type: "string",
-            description: "Current launcher/game state",
-            example: "in-game",
-            possibleValues: ["menu", "in-game", "downloading", "installing"],
-          },
-          version: {
-            type: "string",
-            description: "Launcher version number",
-            example: "0.9.105",
-          },
-          os: {
-            type: "string",
-            description: "Operating system platform",
-            example: "win32",
-          },
-          platform: {
-            type: "string",
-            description: "Process platform",
-            example: "win32",
-          },
-          gameSessionStart: {
-            type: "number (timestamp) or null",
-            description:
-              "When current game session started (only when status is 'in-game')",
-            example: 1705392000000,
-            note: "null when not in-game",
-          },
-          sessionDuration: {
-            type: "number (milliseconds)",
-            description: "How long current game session has been active",
-            example: 3600000,
-            note: "0 when not in-game",
-          },
-        },
-        examplePayload: {
-          playerId: "550e8400-e29b-41d4-a716-446655440000",
-          status: "in-game",
-          version: "0.9.105",
-          os: "win32",
-          platform: "win32",
-          gameSessionStart: 1705392000000,
-          sessionDuration: 3600000,
-        },
-        storedIn:
-          "In-memory Map (temporary, cleared after 90 seconds of inactivity)",
-      },
-    },
-    whatWeDontCollect: [
-      "Personal information (name, email, username)",
-      "IP addresses (only used for rate limiting, not stored)",
-      "Location data",
-      "Hardware identifiers (MAC address, serial numbers)",
-      "File system paths",
-      "Game settings or preferences",
-      "Discord user IDs or tokens",
-      "Any data that could identify you personally",
-    ],
-    dataRetention: {
-      installs: "Permanently stored in MongoDB (for statistics)",
-      heartbeats: "Temporary - cleared after 90 seconds of inactivity",
-    },
-    dataUsage: {
-      statistics: "Total unique installs, version breakdown, OS breakdown",
-      realTimeStats: "Current online players, players in-game, players in menu",
-      discordIntegration:
-        "Display player count in Discord bot (no personal data)",
-    },
-    rateLimiting: {
-      enabled: true,
-      window: "1 minute",
-      maxRequests: "30 requests per IP per minute",
-      purpose: "Prevent abuse and protect server resources",
-    },
-    sourceCode: {
-      launcher: "https://github.com/3MERGx/shadowrun-launcher",
-      server: "Available in railway-api/server.js",
-      note: "All code is open source for transparency",
-    },
-    lastUpdated: "2024-01-16",
-    version: "1.0.0",
-  });
+      null,
+      2
+    )
+  );
 });
 
 // Health check for Railway

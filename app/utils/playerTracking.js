@@ -3,11 +3,86 @@ const https = require("https");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { app } = require("electron");
 
 // Configuration
 const TRACKING_API_URL = "https://playertracker-production.up.railway.app";
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+
+// Helper function to detect actual OS version (Windows 10, Windows 11, etc.)
+function getOSVersion() {
+  const platform = os.platform();
+  const release = os.release();
+  
+  if (platform === "win32") {
+    const parts = release.split(".");
+    const major = parseInt(parts[0]) || 0;
+    const minor = parseInt(parts[1]) || 0;
+    const build = parseInt(parts[2]) || 0;
+    
+    // Windows 10/11 both report as 10.0.x
+    // Windows 11 is build 22000+
+    if (major === 10 && minor === 0) {
+      if (build >= 22000) {
+        return "Windows 11";
+      } else if (build >= 19041) {
+        return "Windows 10";
+      } else {
+        return "Windows 10";
+      }
+    } else if (major === 6) {
+      // Windows 7/8/8.1 report as 6.x
+      if (minor === 1) {
+        return "Windows 7";
+      } else if (minor === 2) {
+        return "Windows 8";
+      } else if (minor === 3) {
+        return "Windows 8.1";
+      } else if (minor === 0) {
+        return "Windows Vista";
+      } else {
+        return `Windows ${major}.${minor}`;
+      }
+    } else if (major === 5) {
+      // Windows XP/2003
+      if (minor === 1) {
+        return "Windows XP";
+      } else if (minor === 2) {
+        return "Windows Server 2003";
+      } else {
+        return `Windows ${major}.${minor}`;
+      }
+    } else {
+      return `Windows ${major}${minor > 0 ? `.${minor}` : ""}`;
+    }
+  } else if (platform === "darwin") {
+    // macOS - parse version from release
+    const parts = release.split(".");
+    const major = parseInt(parts[0]) || 0;
+    const minor = parseInt(parts[1]) || 0;
+    // Map macOS versions (simplified)
+    if (major >= 22) return "macOS Ventura+";
+    if (major >= 21) return "macOS Monterey";
+    if (major >= 20) return "macOS Big Sur";
+    if (major >= 19) return "macOS Catalina";
+    return `macOS ${major}.${minor}`;
+  } else if (platform === "linux") {
+    // For Linux, try to get distro name if available
+    try {
+      const distro = fs.readFileSync("/etc/os-release", "utf8");
+      const nameMatch = distro.match(/^NAME="?([^"\n]+)"?/m);
+      if (nameMatch) {
+        return nameMatch[1].trim();
+      }
+    } catch (e) {
+      // Fallback to generic Linux
+    }
+    return "Linux";
+  }
+  
+  return platform; // Fallback to platform name
+}
 
 class PlayerTracker {
   constructor() {
@@ -105,12 +180,12 @@ class PlayerTracker {
   reportInstall() {
     console.log("[PlayerTracker] Reporting unique installation...");
 
-    const os = require("os");
     const data = JSON.stringify({
       playerId: this.playerId,
       version: app.getVersion(),
       timestamp: new Date().toISOString(),
       os: os.platform(),
+      osVersion: getOSVersion(), // Actual OS version (Windows 10, Windows 11, etc.)
       platform: process.platform,
       architecture: os.arch(),
     });
@@ -206,12 +281,12 @@ class PlayerTracker {
   }
 
   sendHeartbeat() {
-    const os = require("os");
     const data = JSON.stringify({
       playerId: this.playerId,
       status: this.currentStatus,
       version: app.getVersion(),
       os: os.platform(),
+      osVersion: getOSVersion(), // Actual OS version (Windows 10, Windows 11, etc.)
       platform: process.platform,
       gameSessionStart: this.gameSessionStart || null,
       sessionDuration: this.gameSessionStart
