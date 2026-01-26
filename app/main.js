@@ -54,6 +54,7 @@ const log = {
 // Download URLs
 const GAME_FILES_URL = "http://157.245.214.234/releases/build.zip";
 const GFWL_URL = "http://157.245.214.234/releases/gfwlivesetup.zip";
+// DirectX 9 Web Installer - Direct download link from Microsoft
 const DX9_URL =
   "https://download.microsoft.com/download/1/7/1/1718ccc4-6315-4d8e-9543-8e28a4e18c4c/dxwebsetup.exe";
 
@@ -260,7 +261,9 @@ const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
   // Another instance is already running, quit this one
-  log.info("Another instance of Shadowrun FPS Launcher is already running. Exiting.");
+  log.info(
+    "Another instance of Shadowrun FPS Launcher is already running. Exiting."
+  );
   app.quit();
   process.exit(0);
 } else {
@@ -843,7 +846,7 @@ app.whenReady().then(async () => {
 
     // Start player tracking
     playerTracker.start();
-    
+
     // Check if an update installation failed
     setTimeout(() => {
       checkForFailedInstallation();
@@ -1123,6 +1126,9 @@ async function launchGameLogic(gameSettings, source = "unknown") {
     // Get GPU-specific environment variables for enhanced FPS limiting
     const dxvkEnvVars = getEnhancedDxvkEnvVars(actualFps, gpuInfo.vendor);
 
+    // Create crash log file path
+    const crashLogPath = path.join(app.getPath("userData"), "game-crash.log");
+
     // Launch the game and store the process
     gameProcess = exec(
       `"${gameExePath}"`,
@@ -1137,12 +1143,83 @@ async function launchGameLogic(gameSettings, source = "unknown") {
         },
       },
       async (error, stdout, stderr) => {
+        const timestamp = new Date().toISOString();
+        const exitCode = error ? error.code : 0;
+        const signal = error ? error.signal : null;
+
+        // Log crash details to file
+        try {
+          const crashLog = [
+            `=== Game Crash Report - ${timestamp} ===`,
+            `Exit Code: ${exitCode || "0 (normal exit)"}`,
+            signal ? `Signal: ${signal}` : "",
+            `Game Path: ${gameExePath}`,
+            `Working Directory: ${GAME_INSTALL_DIR}`,
+            error ? `Error: ${error.message}` : "",
+            stdout ? `\n--- STDOUT ---\n${stdout}` : "",
+            stderr ? `\n--- STDERR ---\n${stderr}` : "",
+            `=== End of Report ===\n\n`,
+          ]
+            .filter((line) => line !== "")
+            .join("\n");
+
+          fs.appendFileSync(crashLogPath, crashLog, "utf8");
+          console.log(`[Game Crash] Log written to: ${crashLogPath}`);
+        } catch (logError) {
+          console.error(
+            "[Game Crash] Failed to write crash log:",
+            logError.message
+          );
+        }
+
         if (error) {
           console.error("Error launching game:", error);
+          console.error(`Exit code: ${exitCode}, Signal: ${signal}`);
+          if (stdout) console.error("Game stdout:", stdout);
+          if (stderr) console.error("Game stderr:", stderr);
+
+          // Detect Vulkan error
+          const stderrText = stderr || "";
+          const stdoutText = stdout || "";
+          const errorMessage = error.message || "";
+          const combinedOutput = stderrText + stdoutText + errorMessage;
+          const isVulkanError =
+            combinedOutput.includes("vkGetInstanceProcAddr not found") ||
+            combinedOutput.includes("Vulkan: vkGetInstanceProcAddr not found");
+
+          // Check if DXVK is enabled
+          let dxvkEnabled = false;
+          if (isVulkanError) {
+            try {
+              const dxvkStatus = await checkDxvkStatus();
+              dxvkEnabled = dxvkStatus.enabled;
+            } catch (dxvkCheckError) {
+              console.error(
+                "[Game Crash] Error checking DXVK status:",
+                dxvkCheckError
+              );
+            }
+          }
+
+          // Notify renderer of crash
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("game-crash", {
+              exitCode,
+              signal,
+              error: error.message,
+              logPath: crashLogPath,
+              isVulkanError,
+              dxvkEnabled,
+            });
+          }
         }
 
         // When game closes
-        console.log("[Game Close] Game process has exited");
+        console.log(
+          `[Game Close] Game process has exited${
+            exitCode ? ` with code ${exitCode}` : ""
+          }`
+        );
         playerInGame = false;
         gameProcess = null;
         gameStartTime = null; // Clear game start time
@@ -1216,6 +1293,79 @@ async function launchGameLogic(gameSettings, source = "unknown") {
         playerTracker.setStatus("menu");
       }
     );
+
+    // Add process event handlers to capture crashes and errors
+    if (gameProcess) {
+      // Capture stderr output in real-time
+      if (gameProcess.stderr) {
+        gameProcess.stderr.on("data", (data) => {
+          const errorOutput = data.toString();
+          console.error("[Game Process] stderr:", errorOutput);
+          try {
+            fs.appendFileSync(
+              crashLogPath,
+              `[${new Date().toISOString()}] STDERR: ${errorOutput}\n`,
+              "utf8"
+            );
+          } catch (logError) {
+            // Ignore log write errors
+          }
+        });
+      }
+
+      // Capture stdout output in real-time
+      if (gameProcess.stdout) {
+        gameProcess.stdout.on("data", (data) => {
+          const output = data.toString();
+          console.log("[Game Process] stdout:", output);
+          try {
+            fs.appendFileSync(
+              crashLogPath,
+              `[${new Date().toISOString()}] STDOUT: ${output}\n`,
+              "utf8"
+            );
+          } catch (logError) {
+            // Ignore log write errors
+          }
+        });
+      }
+
+      // Handle process errors (crashes, access violations, etc.)
+      gameProcess.on("error", (processError) => {
+        const timestamp = new Date().toISOString();
+        console.error("[Game Process] Process error:", processError);
+
+        try {
+          const errorLog = [
+            `=== Process Error - ${timestamp} ===`,
+            `Error: ${processError.message}`,
+            `Code: ${processError.code || "N/A"}`,
+            `Signal: ${processError.signal || "N/A"}`,
+            `Game Path: ${gameExePath}`,
+            `=== End of Error ===\n\n`,
+          ].join("\n");
+
+          fs.appendFileSync(crashLogPath, errorLog, "utf8");
+          console.log(`[Game Process] Error logged to: ${crashLogPath}`);
+        } catch (logError) {
+          console.error(
+            "[Game Process] Failed to log error:",
+            logError.message
+          );
+        }
+
+        // Notify renderer
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("game-crash", {
+            exitCode: processError.code,
+            signal: processError.signal,
+            error: processError.message,
+            logPath: crashLogPath,
+            type: "process-error",
+          });
+        }
+      });
+    }
 
     // Set game audio volume to 50% using native helper
     // This runs in the background and doesn't block game launch
@@ -1321,14 +1471,18 @@ function isDX9Installed() {
       const dllPath = path.join(dir, requiredDll);
       if (fs.existsSync(dllPath)) {
         console.log(
-          `[DirectX Check] ✅ Found DirectX 9 component: ${path.basename(dir)}\\${requiredDll}`
+          `[DirectX Check] ✅ Found DirectX 9 component: ${path.basename(
+            dir
+          )}\\${requiredDll}`
         );
         resolve(true);
         return;
       }
     }
 
-    console.log("[DirectX Check] ❌ DirectX 9 runtime components not found (d3dx9_43.dll missing)");
+    console.log(
+      "[DirectX Check] ❌ DirectX 9 runtime components not found (d3dx9_43.dll missing)"
+    );
     resolve(false);
   });
 }
@@ -2642,8 +2796,9 @@ async function downloadAndInstallDotNet6() {
       console.log("[.NET 6.0 Installer] Starting download and installation...");
 
       // .NET 6.0 Desktop Runtime x86 (32-bit) - Latest LTS
+      // Using direct download link from Microsoft's CDN (more reliable than redirect-based URLs)
       const DOTNET6_URL =
-        "https://download.visualstudio.microsoft.com/download/pr/bf0c50ea-2394-40af-a5a7-6cee0cef5572/31d359c30ff370525e06e43f92ab26aa/windowsdesktop-runtime-6.0.36-win-x86.exe";
+        "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/6.0.36/windowsdesktop-runtime-6.0.36-win-x86.exe";
       const installerPath = path.join(os.tmpdir(), "dotnet6-installer.exe");
 
       // Show progress message to user
@@ -2654,62 +2809,114 @@ async function downloadAndInstallDotNet6() {
         });
       }
 
-      console.log("[.NET 6.0 Installer] Downloading from Microsoft CDN...");
+      console.log("[.NET 6.0 Installer] Downloading from Microsoft...");
       console.log(`[.NET 6.0 Installer] Destination: ${installerPath}`);
 
-      // Download the installer
-      const downloadSuccess = await new Promise((downloadResolve) => {
-        const file = fs.createWriteStream(installerPath);
-        const request = https.get(DOTNET6_URL, (response) => {
-          if (response.statusCode !== 200) {
-            console.error(
-              `[.NET 6.0 Installer] Download failed: HTTP ${response.statusCode}`
-            );
+      // Helper function to download with redirect support
+      const downloadWithRedirects = (url, maxRedirects = 5) => {
+        return new Promise((downloadResolve) => {
+          if (maxRedirects === 0) {
+            console.error("[.NET 6.0 Installer] Too many redirects");
             downloadResolve(false);
             return;
           }
 
-          const totalSize = parseInt(response.headers["content-length"], 10);
-          let downloadedSize = 0;
+          const file = fs.createWriteStream(installerPath);
+          const urlObj = new URL(url);
+          const isHttps = urlObj.protocol === "https:";
+          const httpModule = isHttps ? https : http;
 
-          response.on("data", (chunk) => {
-            downloadedSize += chunk.length;
-            const progress = Math.round((downloadedSize / totalSize) * 100);
+          const options = {
+            hostname: urlObj.hostname,
+            port: urlObj.port || (isHttps ? 443 : 80),
+            path: urlObj.pathname + urlObj.search,
+            method: "GET",
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+          };
 
-            // Log progress every 10%
-            if (progress % 10 === 0) {
+          const request = httpModule.get(options, (response) => {
+            // Handle redirects
+            if (
+              response.statusCode >= 300 &&
+              response.statusCode < 400 &&
+              response.headers.location
+            ) {
               console.log(
-                `[.NET 6.0 Installer] Download progress: ${progress}%`
+                `[.NET 6.0 Installer] Following redirect to: ${response.headers.location}`
               );
+              file.close();
+              fs.unlink(installerPath, () => {});
+              // Resolve the redirect URL
+              const redirectUrl = response.headers.location.startsWith("http")
+                ? response.headers.location
+                : `${urlObj.protocol}//${urlObj.hostname}${response.headers.location}`;
+              downloadResolve(
+                downloadWithRedirects(redirectUrl, maxRedirects - 1)
+              );
+              return;
             }
-          });
 
-          response.pipe(file);
+            if (response.statusCode !== 200) {
+              console.error(
+                `[.NET 6.0 Installer] Download failed: HTTP ${response.statusCode}`
+              );
+              file.close();
+              fs.unlink(installerPath, () => {});
+              downloadResolve(false);
+              return;
+            }
 
-          file.on("finish", () => {
-            file.close(() => {
-              console.log("[.NET 6.0 Installer] ✅ Download complete");
-              downloadResolve(true);
+            const totalSize = parseInt(response.headers["content-length"], 10);
+            let downloadedSize = 0;
+
+            response.on("data", (chunk) => {
+              downloadedSize += chunk.length;
+              if (totalSize > 0) {
+                const progress = Math.round((downloadedSize / totalSize) * 100);
+                // Log progress every 10%
+                if (progress % 10 === 0) {
+                  console.log(
+                    `[.NET 6.0 Installer] Download progress: ${progress}%`
+                  );
+                }
+              }
+            });
+
+            response.pipe(file);
+
+            file.on("finish", () => {
+              file.close(() => {
+                console.log("[.NET 6.0 Installer] ✅ Download complete");
+                downloadResolve(true);
+              });
             });
           });
-        });
 
-        request.on("error", (error) => {
-          console.error(
-            `[.NET 6.0 Installer] Download error: ${error.message}`
-          );
-          fs.unlink(installerPath, () => {});
-          downloadResolve(false);
-        });
+          request.on("error", (error) => {
+            console.error(
+              `[.NET 6.0 Installer] Download error: ${error.message}`
+            );
+            file.close();
+            fs.unlink(installerPath, () => {});
+            downloadResolve(false);
+          });
 
-        file.on("error", (error) => {
-          console.error(
-            `[.NET 6.0 Installer] File write error: ${error.message}`
-          );
-          fs.unlink(installerPath, () => {});
-          downloadResolve(false);
+          file.on("error", (error) => {
+            console.error(
+              `[.NET 6.0 Installer] File write error: ${error.message}`
+            );
+            request.destroy();
+            fs.unlink(installerPath, () => {});
+            downloadResolve(false);
+          });
         });
-      });
+      };
+
+      // Download the installer with redirect support
+      const downloadSuccess = await downloadWithRedirects(DOTNET6_URL);
 
       if (!downloadSuccess) {
         resolve({
@@ -3139,7 +3346,7 @@ ipcMain.handle("download-game", async () => {
         "📥 Downloading Games for Windows Live (required for online play)..."
       );
 
-      const gfwlSuccess = await downloadFile(
+      const gfwlResult = await downloadFile(
         GFWL_URL,
         gfwlPath,
         (progress, statusMessage) => {
@@ -3156,15 +3363,18 @@ ipcMain.handle("download-game", async () => {
         return { success: false, cancelled: true };
       }
 
-      if (!gfwlSuccess) {
+      if (!gfwlResult.success) {
         downloadInProgress = false;
+        const errorMsg = gfwlResult.error
+          ? gfwlResult.error.message
+          : "Unknown error";
         mainWindow.webContents.send(
           "download-message",
-          "❌ Failed to download Games for Windows Live. Please check your internet connection."
+          `❌ Failed to download Games for Windows Live: ${errorMsg}`
         );
         mainWindow.webContents.send(
           "download-error",
-          "Failed to download Games for Windows Live. Check your internet connection."
+          `Failed to download Games for Windows Live: ${errorMsg}. Check your internet connection.`
         );
         return { success: false, error: "Failed to download GFWL" };
       }
@@ -3190,7 +3400,7 @@ ipcMain.handle("download-game", async () => {
 
       // Run GFWL installer SILENTLY
       console.log("\n========================================");
-      console.log("🎮 INSTALLING GFWL SILENTLY");
+      console.log("🎮 INSTALLING GFWL");
       console.log("========================================");
 
       const gfwlInstallerPath = path.join(GAME_FILES_TEMP, "gfwlivesetup.exe");
@@ -3204,15 +3414,36 @@ ipcMain.handle("download-game", async () => {
       if (fs.existsSync(gfwlInstallerPath)) {
         mainWindow.webContents.send(
           "download-message",
-          "⚙️ Installing GFWL silently in background..."
+          "⚙️ Installing GFWL..."
         );
 
-        console.log("[GFWL Install] Running silent installation...");
+        console.log("[GFWL Install] Running installation...");
+
+        // Start animated progress indicator for GFWL installation
+        let installStartTime = Date.now();
+        let progressInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - installStartTime) / 1000);
+          const minutes = Math.floor(elapsed / 60);
+          const seconds = elapsed % 60;
+          const timeStr =
+            minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+          mainWindow.webContents.send(
+            "gfwl-install-progress",
+            `⚙️ Installing GFWL... (${timeStr})`
+          );
+        }, 1000);
+
         try {
           await runSilentInstaller(gfwlInstallerPath);
+          clearInterval(progressInterval);
           console.log("[GFWL Install] ✅ Installation completed");
+          mainWindow.webContents.send(
+            "download-message",
+            "✅ GFWL installation completed"
+          );
           mainWindow.webContents.send("gfwl-progress", 100);
         } catch (error) {
+          clearInterval(progressInterval);
           console.error(
             `[GFWL Install] ❌ Installation error: ${error.message}`
           );
@@ -3235,7 +3466,7 @@ ipcMain.handle("download-game", async () => {
         "📥 Downloading DirectX 9 Web Installer (required graphics library)..."
       );
 
-      const dx9Success = await downloadFile(
+      const dx9Result = await downloadFile(
         DX9_URL,
         dx9Path,
         (progress, statusMessage) => {
@@ -3252,17 +3483,61 @@ ipcMain.handle("download-game", async () => {
         return { success: false, cancelled: true };
       }
 
-      if (!dx9Success) {
+      if (!dx9Result.success) {
         downloadInProgress = false;
-        mainWindow.webContents.send(
-          "download-message",
-          "❌ Failed to download DirectX 9. Please check your internet connection."
-        );
-        mainWindow.webContents.send(
-          "download-error",
-          "Failed to download DirectX 9. Check your internet connection."
-        );
-        return { success: false, error: "Failed to download DirectX 9" };
+        let errorMessage = "❌ Failed to download DirectX 9";
+        let detailedError = "Failed to download DirectX 9";
+
+        // Provide specific error guidance based on error code
+        if (dx9Result.error) {
+          const errorCode = dx9Result.error.code || "";
+          const errorMsg = dx9Result.error.message || "";
+
+          console.error(
+            `[DirectX Download] Error code: ${errorCode}, Message: ${errorMsg}`
+          );
+
+          if (
+            errorCode === "ETIMEDOUT" ||
+            errorCode === "ESOCKETTIMEDOUT" ||
+            errorMsg.includes("timeout")
+          ) {
+            errorMessage =
+              "❌ DirectX 9 download timed out. Microsoft's servers may be slow or unreachable.";
+            detailedError =
+              "DirectX 9 download timed out. Try again or check if you can access Microsoft servers (download.microsoft.com). You may need to check your network settings or disable any firewall/proxy blocking the connection.";
+          } else if (
+            errorCode === "ENOTFOUND" ||
+            errorCode === "EAI_AGAIN" ||
+            errorMsg.includes("getaddrinfo")
+          ) {
+            errorMessage =
+              "❌ Cannot reach Microsoft servers. DNS resolution failed.";
+            detailedError =
+              "DNS error - cannot resolve Microsoft download servers. Check your DNS settings or network configuration. Try setting DNS to 8.8.8.8 (Google DNS) or 1.1.1.1 (Cloudflare DNS) in your network adapter settings.";
+          } else if (
+            errorCode === "ECONNREFUSED" ||
+            errorCode === "ECONNRESET" ||
+            errorMsg.includes("ECONNREFUSED")
+          ) {
+            errorMessage =
+              "❌ Connection refused by Microsoft servers. Firewall may be blocking the download.";
+            detailedError =
+              "Connection refused. Your firewall, antivirus, or network security software may be blocking HTTPS connections to Microsoft. Check Windows Firewall settings and any third-party security software.";
+          } else {
+            errorMessage = `❌ Failed to download DirectX 9: ${errorMsg}`;
+            detailedError = `DirectX 9 download failed: ${errorMsg}. Check your internet connection and firewall settings.`;
+          }
+        } else {
+          errorMessage =
+            "❌ Failed to download DirectX 9. Please check your internet connection.";
+          detailedError =
+            "Failed to download DirectX 9. Check your internet connection, firewall, and VM network settings.";
+        }
+
+        mainWindow.webContents.send("download-message", errorMessage);
+        mainWindow.webContents.send("download-error", detailedError);
+        return { success: false, error: detailedError };
       }
 
       // Install DirectX 9 SILENTLY
@@ -3276,10 +3551,29 @@ ipcMain.handle("download-game", async () => {
         "⚙️ Installing DirectX 9 silently in background..."
       );
 
+      // Start animated progress indicator for DirectX 9 installation
+      let installStartTime = Date.now();
+      let progressInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - installStartTime) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+        mainWindow.webContents.send(
+          "dx-install-progress",
+          `⚙️ Installing DirectX 9... (${timeStr})`
+        );
+      }, 1000);
+
       try {
         await runSilentInstaller(dx9Path);
+        clearInterval(progressInterval);
         console.log("[DX9 Install] ✅ Installation completed");
+        mainWindow.webContents.send(
+          "download-message",
+          "✅ DirectX 9 installation completed"
+        );
       } catch (error) {
+        clearInterval(progressInterval);
         console.error(`[DX9 Install] ❌ Installation error: ${error.message}`);
         // Continue anyway - DX9 install errors are non-fatal
       }
@@ -3547,7 +3841,7 @@ try {
     // Use findGameInstallation() to be consistent with other checks
     const foundGameLocation = await findGameInstallation();
     const gameFilesExist = foundGameLocation !== null;
-    
+
     // Update GAME_INSTALL_DIR if we found a location
     if (foundGameLocation) {
       GAME_INSTALL_DIR = foundGameLocation;
@@ -3569,7 +3863,7 @@ try {
         "📥 Downloading Shadowrun game files... This is the largest download and may take several minutes."
       );
 
-      const gameFilesSuccess = await downloadFile(
+      const gameFilesResult = await downloadFile(
         GAME_FILES_URL,
         gameFilesPath,
         (progress, statusMessage) => {
@@ -3586,15 +3880,18 @@ try {
         return { success: false, cancelled: true };
       }
 
-      if (!gameFilesSuccess) {
+      if (!gameFilesResult.success) {
         downloadInProgress = false;
+        const errorMsg = gameFilesResult.error
+          ? gameFilesResult.error.message
+          : "Unknown error";
         mainWindow.webContents.send(
           "download-message",
-          "❌ Failed to download game files. Please check your internet connection and try again."
+          `❌ Failed to download game files: ${errorMsg}`
         );
         mainWindow.webContents.send(
           "download-error",
-          "Failed to download game files. Check your internet connection."
+          `Failed to download game files: ${errorMsg}. Check your internet connection.`
         );
         return { success: false, error: "Failed to download game files" };
       }
@@ -3853,18 +4150,40 @@ async function downloadFile(url, destination, progressCallback) {
     let isFinished = false;
     let isResolved = false;
     let firstChunkReceived = false;
+    let downloadError = null;
 
     // Helper to safely resolve
-    const safeResolve = (success) => {
+    const safeResolve = (success, error = null) => {
       if (isResolved) return;
       isResolved = true;
-      resolve(success);
+      downloadError = error;
+      resolve({ success, error });
     };
 
     // Choose the correct protocol module based on the URL
     const httpModule = url.startsWith("https:") ? https : http;
 
-    const request = httpModule.get(url, (response) => {
+    // Only disable SSL certificate validation for trusted Microsoft domains
+    // This prevents MITM attacks on other downloads while allowing Microsoft downloads
+    const trustedMicrosoftDomains = [
+      "download.microsoft.com",
+      "www.microsoft.com",
+      "microsoft.com",
+    ];
+    const urlObj = new URL(url);
+    const isTrustedMicrosoftDomain = trustedMicrosoftDomains.some(
+      (domain) =>
+        urlObj.hostname === domain || urlObj.hostname.endsWith(`.${domain}`)
+    );
+
+    // For HTTPS requests to Microsoft, disable SSL certificate validation to avoid certificate errors
+    // For all other HTTPS requests, keep SSL validation enabled for security
+    const requestOptions =
+      url.startsWith("https:") && isTrustedMicrosoftDomain
+        ? { rejectUnauthorized: false }
+        : {};
+
+    const request = httpModule.get(url, requestOptions, (response) => {
       console.log(`Download response status: ${response.statusCode}`);
 
       // Report that connection established
@@ -3906,7 +4225,9 @@ async function downloadFile(url, destination, progressCallback) {
       if (response.statusCode !== 200) {
         console.error(`Failed to download file: ${response.statusCode}`);
         cleanup();
-        safeResolve(false);
+        const error = new Error(`HTTP ${response.statusCode}`);
+        error.code = `HTTP_${response.statusCode}`;
+        safeResolve(false, error);
         return;
       }
 
@@ -3947,7 +4268,9 @@ async function downloadFile(url, destination, progressCallback) {
           console.log("Download cancelled by user");
           request.abort();
           cleanup();
-          safeResolve(false);
+          const error = new Error("Download cancelled by user");
+          error.code = "CANCELLED";
+          safeResolve(false, error);
           return;
         }
 
@@ -3979,7 +4302,7 @@ async function downloadFile(url, destination, progressCallback) {
           if (!isCancelled) {
             console.error("Error writing chunk:", err.message);
             cleanup();
-            safeResolve(false);
+            safeResolve(false, err);
           }
         }
       });
@@ -3997,7 +4320,7 @@ async function downloadFile(url, destination, progressCallback) {
           isFinished = true;
           console.log("Download completed successfully");
           file.close();
-          safeResolve(true);
+          safeResolve(true, null);
         }
       });
 
@@ -4005,7 +4328,7 @@ async function downloadFile(url, destination, progressCallback) {
         if (!isCancelled) {
           console.error("File write error:", err.message);
           cleanup();
-          safeResolve(false);
+          safeResolve(false, err);
         }
       });
 
@@ -4013,7 +4336,7 @@ async function downloadFile(url, destination, progressCallback) {
         if (!isCancelled && !isFinished) {
           console.error("Response error:", err.message);
           cleanup();
-          safeResolve(false);
+          safeResolve(false, err);
         }
       });
     });
@@ -4021,7 +4344,7 @@ async function downloadFile(url, destination, progressCallback) {
     request.on("error", (err) => {
       // Don't log error if it was due to cancellation
       if (!cancelDownloadRequested && !isCancelled) {
-        console.error("Download error:", err.message);
+        console.error("Download error:", err.message, "Code:", err.code);
       }
       if (!isFinished && !isResolved) {
         try {
@@ -4030,7 +4353,24 @@ async function downloadFile(url, destination, progressCallback) {
         try {
           fs.unlink(destination, () => {});
         } catch (e) {}
-        safeResolve(false);
+        safeResolve(false, err);
+      }
+    });
+
+    // Set request timeout for connection issues
+    request.setTimeout(30000, () => {
+      if (!isFinished && !isResolved) {
+        console.error("Download timeout after 30 seconds");
+        request.abort();
+        try {
+          file.destroy();
+        } catch (e) {}
+        try {
+          fs.unlink(destination, () => {});
+        } catch (e) {}
+        const error = new Error("Connection timeout after 30 seconds");
+        error.code = "ETIMEDOUT";
+        safeResolve(false, error);
       }
     });
   });
@@ -4581,9 +4921,9 @@ ipcMain.handle("activate-game", async () => {
             message: ".NET 6.0 Desktop Runtime (x86) Not Found",
             detail:
               "The activation helper requires .NET 6.0 Desktop Runtime (x86) to inject the product key automatically.\n\n" +
-              "Would you like to install it now? (Recommended)\n\n" +
+              "Would you like to install it now? (Required)\n\n" +
               "Installation will take 1-2 minutes and happen in the background.",
-            buttons: ["Install .NET 6.0", "Skip (Use Manual Key)"],
+            buttons: ["Install .NET 6.0", "Cancel"],
             defaultId: 0,
             cancelId: 1,
           });
@@ -4598,15 +4938,82 @@ ipcMain.handle("activate-game", async () => {
               const installResult = await downloadAndInstallDotNet6();
 
               if (installResult.success) {
-                console.log("[Step 6/6] ✅ .NET 6.0 installed successfully!");
-                console.log("[Step 6/6] Continuing with token injection...");
-                // Don't throw error - continue to token injection below
+                console.log("[Step 6/6] ✅ .NET 6.0 installer completed");
+
+                // Wait longer for registry to update (5 seconds)
+                console.log(
+                  "[Step 6/6] Waiting 5 seconds for .NET 6.0 to be registered in Windows registry..."
+                );
+                await new Promise((resolve) => setTimeout(resolve, 5000));
+
+                // Re-check if .NET 6.0 is now installed
+                const dotnet6Recheck = await checkDotNet6x86Runtime();
+                console.log(
+                  `[Step 6/6] .NET 6.0 recheck: ${
+                    dotnet6Recheck.installed
+                      ? `✅ Installed (${dotnet6Recheck.version})`
+                      : "❌ Still not detected"
+                  }`
+                );
+
+                if (dotnet6Recheck.installed) {
+                  console.log("[Step 6/6] ✅ .NET 6.0 verified and ready!");
+                  console.log("[Step 6/6] Continuing with token injection...");
+                  // Don't throw error - continue to token injection below
+                } else {
+                  console.warn(
+                    "[Step 6/6] ⚠️  .NET 6.0 installation completed but not yet detected"
+                  );
+                  console.warn(
+                    "[Step 6/6]    This may require a system restart or the registry needs time to update"
+                  );
+
+                  // Show error dialog
+                  await dialog.showMessageBox(mainWindow, {
+                    type: "error",
+                    title: ".NET 6.0 Installation Issue",
+                    message: ".NET 6.0 Not Detected After Installation",
+                    detail:
+                      "The .NET 6.0 installer completed, but the runtime is not yet detected.\n\n" +
+                      "This may require:\n" +
+                      "• A system restart\n" +
+                      "• Waiting a few more minutes for registry updates\n\n" +
+                      "Please restart your computer and try activation again, or manually install .NET 6.0 Desktop Runtime (x86) from Microsoft's website.",
+                    buttons: ["OK"],
+                  });
+
+                  // Return error instead of showing manual key dialog
+                  return {
+                    success: false,
+                    error: ".NET 6.0 installation verification failed",
+                  };
+                }
               } else {
                 console.warn(
                   "[Step 6/6] ⚠️  .NET 6.0 installation failed or was cancelled"
                 );
                 console.warn(`[Step 6/6]    Error: ${installResult.error}`);
-                throw new Error("DOTNET_INSTALL_FAILED");
+
+                // Show error dialog
+                await dialog.showMessageBox(mainWindow, {
+                  type: "error",
+                  title: ".NET 6.0 Installation Failed",
+                  message: "Failed to Install .NET 6.0 Runtime",
+                  detail:
+                    `The .NET 6.0 installer failed: ${installResult.error}\n\n` +
+                    "Please try:\n" +
+                    "• Checking your internet connection\n" +
+                    "• Running the launcher as Administrator\n" +
+                    "• Manually downloading and installing .NET 6.0 Desktop Runtime (x86) from:\n" +
+                    "https://dotnet.microsoft.com/download/dotnet/6.0",
+                  buttons: ["OK"],
+                });
+
+                // Return error instead of showing manual key dialog
+                return {
+                  success: false,
+                  error: ".NET 6.0 installation failed",
+                };
               }
             } catch (installError) {
               console.error(
@@ -4616,9 +5023,24 @@ ipcMain.handle("activate-game", async () => {
               throw new Error("DOTNET_INSTALL_ERROR");
             }
           } else {
-            console.log("[Step 6/6] User chose to skip .NET 6.0 installation");
-            // Skip token injection, continue to show product key
-            throw new Error("DOTNET_NOT_INSTALLED");
+            console.log("[Step 6/6] User cancelled .NET 6.0 installation");
+
+            // Show info dialog
+            await dialog.showMessageBox(mainWindow, {
+              type: "info",
+              title: "Activation Cancelled",
+              message: "Game Activation Cancelled",
+              detail:
+                ".NET 6.0 Desktop Runtime (x86) is required for automatic activation.\n\n" +
+                "To activate the game, you can:\n" +
+                "1. Install .NET 6.0 Desktop Runtime (x86) from:\n" +
+                "   https://dotnet.microsoft.com/download/dotnet/6.0\n" +
+                "2. Run activation again after installing .NET 6.0",
+              buttons: ["OK"],
+            });
+
+            // Return error instead of showing manual key dialog
+            return { success: false, error: "Activation cancelled by user" };
           }
         }
 
@@ -4890,13 +5312,13 @@ ipcMain.handle("open-external", async (event, url) => {
       console.error("[open-external] Invalid URL provided");
       return { success: false, error: "Invalid URL" };
     }
-    
+
     // Only allow http/https URLs for security
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
       console.error("[open-external] URL must start with http:// or https://");
       return { success: false, error: "Invalid URL protocol" };
     }
-    
+
     console.log("[open-external] Opening URL:", url);
     await shell.openExternal(url);
     return { success: true };
@@ -8833,13 +9255,22 @@ function checkForFailedInstallation() {
   try {
     const currentVersion = app.getVersion();
     const pendingVersion = settings.pendingUpdateVersion;
-    
+
     // Clean up stale update marker file (if it exists)
-    const updateMarkerPath = path.join(app.getPath("userData"), ".update-in-progress");
+    const updateMarkerPath = path.join(
+      app.getPath("userData"),
+      ".update-in-progress"
+    );
     if (fs.existsSync(updateMarkerPath)) {
       try {
-        const markerData = JSON.parse(fs.readFileSync(updateMarkerPath, "utf8"));
-        console.log(`[Updater] Found stale update marker file (version: ${markerData.version}, timestamp: ${new Date(markerData.timestamp).toLocaleString()})`);
+        const markerData = JSON.parse(
+          fs.readFileSync(updateMarkerPath, "utf8")
+        );
+        console.log(
+          `[Updater] Found stale update marker file (version: ${
+            markerData.version
+          }, timestamp: ${new Date(markerData.timestamp).toLocaleString()})`
+        );
         fs.unlinkSync(updateMarkerPath);
         console.log("[Updater] Cleaned up stale update marker file");
       } catch (e) {
@@ -8852,16 +9283,16 @@ function checkForFailedInstallation() {
         }
       }
     }
-    
+
     if (pendingVersion && pendingVersion !== currentVersion) {
       console.error(
         `[Updater] Installation failure detected - Expected v${pendingVersion}, but still on v${currentVersion}`
       );
-      
+
       // Clear pending version
       delete settings.pendingUpdateVersion;
       saveSettingsToDisk();
-      
+
       // Notify user of installation failure
       if (mainWindow && !mainWindow.isDestroyed()) {
         setTimeout(() => {
@@ -8876,11 +9307,11 @@ function checkForFailedInstallation() {
       console.log(
         `[Updater] ✅ Update installed successfully - Now on v${currentVersion}`
       );
-      
+
       // Clear pending version
       delete settings.pendingUpdateVersion;
       saveSettingsToDisk();
-      
+
       // Show success toast
       if (mainWindow && !mainWindow.isDestroyed()) {
         setTimeout(() => {
@@ -8925,7 +9356,7 @@ autoUpdater.on("update-available", (info) => {
   // Track for Discord RPC
   updateAvailable = true;
   latestVersion = info.version;
-  
+
   // Store update info for potential retry
   pendingUpdateInfo = {
     version: info.version,
@@ -8939,13 +9370,19 @@ autoUpdater.on("update-available", (info) => {
   }
 
   if (!mainWindow || mainWindow.isDestroyed()) {
-    console.log("[Updater] Main window not available - update will be shown on next launch");
+    console.log(
+      "[Updater] Main window not available - update will be shown on next launch"
+    );
     return;
   }
 
   // Always show the confirmation dialog (both manual and automatic checks)
   // User must confirm before downloading
-  console.log(`[Updater] ${isManualUpdateCheck ? "Manual" : "Automatic"} check - showing confirmation dialog`);
+  console.log(
+    `[Updater] ${
+      isManualUpdateCheck ? "Manual" : "Automatic"
+    } check - showing confirmation dialog`
+  );
   mainWindow.webContents.send("show-update-dialog", pendingUpdateInfo);
 });
 
@@ -9017,41 +9454,44 @@ autoUpdater.on("download-progress", (progressObj) => {
     progressObj.transferred || 0
   }/${progressObj.total || 0})`;
   console.log(logMessage);
-  
+
   // Track progress for timeout detection
   const now = Date.now();
   const transferred = progressObj.transferred || 0;
-  
+
   // Check if progress has actually increased
   if (transferred > lastUpdateProgress.transferred) {
     // Progress detected - reset timeout
     lastUpdateProgress = { transferred, time: now };
-    
+
     // Clear and restart timeout
     if (updateDownloadTimeout) {
       clearTimeout(updateDownloadTimeout);
     }
-    
+
     updateDownloadTimeout = setTimeout(() => {
       console.error("[Updater] Download timeout - no progress for 3 minutes");
-      
+
       // Send timeout error to renderer
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("update-error", {
-          message: "Download timed out. Your connection may be too slow or unstable. Please try again.",
+          message:
+            "Download timed out. Your connection may be too slow or unstable. Please try again.",
           type: "timeout",
           canRetry: true,
           updateInfo: pendingUpdateInfo,
         });
       }
-      
+
       // Cancel the download (electron-updater doesn't have a native cancel, so we restart the app)
       updateDownloadInProgress = false;
       updateDownloadTimeout = null;
     }, UPDATE_TIMEOUT_MS);
   } else if (now - lastUpdateProgress.time > UPDATE_TIMEOUT_MS) {
     // Already timed out - don't send duplicate error
-    console.log("[Updater] Download already timed out, ignoring progress event");
+    console.log(
+      "[Updater] Download already timed out, ignoring progress event"
+    );
     return;
   }
 
@@ -9069,7 +9509,7 @@ autoUpdater.on("download-progress", (progressObj) => {
 autoUpdater.on("update-downloaded", (info) => {
   console.log("[Updater] Update downloaded, ready to install");
   console.log("[Updater] New version:", info.version);
-  
+
   // Clear download state and timeouts
   updateDownloadInProgress = false;
   if (updateDownloadTimeout) {
@@ -9091,30 +9531,42 @@ autoUpdater.on("update-downloaded", (info) => {
   // Auto-install after brief delay (silent one-click install)
   setTimeout(() => {
     console.log("[Updater] Auto-installing update silently...");
-    
+
     // Store expected version for installation verification
     try {
       settings.pendingUpdateVersion = info.version;
       saveSettingsToDisk();
       console.log(`[Updater] Stored pending update version: ${info.version}`);
-      
+
       // Create a marker file to help installer detect this is an update
       // This is a backup indicator in case other detection methods fail
-      const updateMarkerPath = path.join(app.getPath("userData"), ".update-in-progress");
+      const updateMarkerPath = path.join(
+        app.getPath("userData"),
+        ".update-in-progress"
+      );
       try {
-        fs.writeFileSync(updateMarkerPath, JSON.stringify({
-          version: info.version,
-          timestamp: Date.now(),
-          currentVersion: app.getVersion()
-        }), "utf8");
-        console.log(`[Updater] Created update marker file: ${updateMarkerPath}`);
+        fs.writeFileSync(
+          updateMarkerPath,
+          JSON.stringify({
+            version: info.version,
+            timestamp: Date.now(),
+            currentVersion: app.getVersion(),
+          }),
+          "utf8"
+        );
+        console.log(
+          `[Updater] Created update marker file: ${updateMarkerPath}`
+        );
       } catch (markerError) {
-        console.warn("[Updater] Failed to create update marker file (non-critical):", markerError);
+        console.warn(
+          "[Updater] Failed to create update marker file (non-critical):",
+          markerError
+        );
       }
     } catch (e) {
       console.error("[Updater] Failed to store pending update version:", e);
     }
-    
+
     if (gameProcess) {
       console.log("[Updater] Closing game before update...");
       try {
@@ -9165,23 +9617,28 @@ autoUpdater.on("update-downloaded", (info) => {
 // Error handling
 autoUpdater.on("error", (error) => {
   console.error("[Updater] Error:", error);
-  
+
   // Clear download tracking
   updateDownloadInProgress = false;
   if (updateDownloadTimeout) {
     clearTimeout(updateDownloadTimeout);
     updateDownloadTimeout = null;
   }
-  
+
   // Determine error type and create user-friendly message
   let errorMessage = "Update failed. Please try again.";
   let errorType = "unknown";
-  
+
   if (error.message) {
     const msg = error.message.toLowerCase();
-    
-    if (msg.includes("network") || msg.includes("enotfound") || msg.includes("etimedout")) {
-      errorMessage = "Network error. Please check your internet connection and try again.";
+
+    if (
+      msg.includes("network") ||
+      msg.includes("enotfound") ||
+      msg.includes("etimedout")
+    ) {
+      errorMessage =
+        "Network error. Please check your internet connection and try again.";
       errorType = "network";
     } else if (msg.includes("404") || msg.includes("not found")) {
       errorMessage = "Update file not found on server. Please try again later.";
@@ -9190,19 +9647,21 @@ autoUpdater.on("error", (error) => {
       errorMessage = "Server access denied. Please try again later.";
       errorType = "forbidden";
     } else if (msg.includes("timeout")) {
-      errorMessage = "Download timed out. Please check your connection and try again.";
+      errorMessage =
+        "Download timed out. Please check your connection and try again.";
       errorType = "timeout";
     } else if (msg.includes("corrupted") || msg.includes("checksum")) {
       errorMessage = "Downloaded file is corrupted. Please try again.";
       errorType = "corrupted";
     } else if (msg.includes("permission") || msg.includes("eacces")) {
-      errorMessage = "Permission denied. Try running launcher as Administrator.";
+      errorMessage =
+        "Permission denied. Try running launcher as Administrator.";
       errorType = "permission";
     }
   }
-  
+
   console.error(`[Updater] Error type: ${errorType} - ${errorMessage}`);
-  
+
   // Send error notification to renderer
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("update-error", {
@@ -9441,33 +9900,34 @@ ipcMain.handle("confirm-rollback-download", async (event, downloadUrl) => {
 ipcMain.handle("confirm-update-download", async () => {
   try {
     console.log("[Updater] User confirmed update download");
-    
+
     // Initialize download tracking
     updateDownloadInProgress = true;
     lastUpdateProgress = { transferred: 0, time: Date.now() };
-    
+
     // Clear any existing timeout
     if (updateDownloadTimeout) {
       clearTimeout(updateDownloadTimeout);
     }
-    
+
     // Start initial timeout
     updateDownloadTimeout = setTimeout(() => {
       console.error("[Updater] Download timeout - no progress detected");
-      
+
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("update-error", {
-          message: "Download failed to start. Please check your internet connection and try again.",
+          message:
+            "Download failed to start. Please check your internet connection and try again.",
           type: "timeout",
           canRetry: true,
           updateInfo: pendingUpdateInfo,
         });
       }
-      
+
       updateDownloadInProgress = false;
       updateDownloadTimeout = null;
     }, UPDATE_TIMEOUT_MS);
-    
+
     autoUpdater.downloadUpdate();
 
     // Show download progress notification
@@ -9478,14 +9938,14 @@ ipcMain.handle("confirm-update-download", async () => {
     return { success: true };
   } catch (error) {
     console.error("[Updater] Error starting update download:", error);
-    
+
     // Clear download state on error
     updateDownloadInProgress = false;
     if (updateDownloadTimeout) {
       clearTimeout(updateDownloadTimeout);
       updateDownloadTimeout = null;
     }
-    
+
     return { success: false, error: error.message };
   }
 });
@@ -9494,17 +9954,17 @@ ipcMain.handle("confirm-update-download", async () => {
 ipcMain.handle("retry-update-download", async () => {
   try {
     console.log("[Updater] User requested retry of update download");
-    
+
     if (!pendingUpdateInfo) {
       console.error("[Updater] No pending update info available for retry");
       return { success: false, error: "No update information available" };
     }
-    
+
     // Re-show the update dialog so user can confirm again
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("show-update-dialog", pendingUpdateInfo);
     }
-    
+
     return { success: true };
   } catch (error) {
     console.error("[Updater] Error retrying update:", error);
@@ -9517,7 +9977,7 @@ ipcMain.handle("get-manual-download-url", async () => {
   try {
     const version = pendingUpdateInfo?.version || app.getVersion();
     const downloadUrl = `${UPDATE_SERVER_URL}/Shadowrun%20FPS%20Launcher%20Setup%20${version}.exe`;
-    
+
     return {
       success: true,
       url: downloadUrl,

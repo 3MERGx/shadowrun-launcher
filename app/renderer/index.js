@@ -2294,6 +2294,16 @@ window.api.onDxProgress((progress) => {
   }
 });
 
+// Handle DirectX 9 installation progress with timer
+window.api.onDxInstallProgress((message) => {
+  dxStatus.textContent = message;
+});
+
+// Handle GFWL installation progress with timer
+window.api.onGfwlInstallProgress((message) => {
+  gfwlStatus.textContent = message;
+});
+
 window.api.onDownloadMessage((message) => {
   downloadMessage.textContent = message;
 });
@@ -2454,6 +2464,36 @@ window.api.onLaunchError((data) => {
 
     console.error("[Launch Error] Critical issues:", data.issues);
   }
+});
+
+// Game crash handler - shows crash information and log location
+window.api.onGameCrash((data) => {
+  console.error("[Game Crash] Crash detected:", data);
+
+  let crashMessage = "Game crashed";
+  if (data.exitCode !== undefined && data.exitCode !== 0) {
+    crashMessage += ` (Exit code: ${data.exitCode})`;
+  }
+
+  // Vulkan error detection and guidance
+  if (data.isVulkanError && data.dxvkEnabled) {
+    crashMessage +=
+      "\n\n⚠️ Vulkan Error Detected\n💡 Solution: Disable DXVK Support in Settings → Performance";
+  }
+  // VM-specific guidance for access violations
+  else if (
+    data.exitCode === -1073741819 ||
+    data.error?.includes("0xc0000005")
+  ) {
+    crashMessage +=
+      "\n\n⚠️ Access Violation\n💡 Try enabling 3D acceleration in your VM settings";
+  }
+  // Generic guidance
+  else {
+    crashMessage += "\n\n💡 Check Settings → Diagnostics for troubleshooting";
+  }
+
+  showToast(crashMessage, "error", 10000);
 });
 
 // Update the setGameRunning function to properly disable the button
@@ -3210,18 +3250,28 @@ window.api.onUpdateDownloadStarted(() => {
 // Listen for update download progress
 window.api.onUpdateDownloadProgress((progress) => {
   console.log(`[Renderer] Update download progress: ${progress.percent}%`);
-  
+
   // Update modal progress bar (if modal is visible)
-  if (launcherUpdateProgressScreen && launcherUpdateProgressScreen.style.display === "flex") {
+  if (
+    launcherUpdateProgressScreen &&
+    launcherUpdateProgressScreen.style.display === "flex"
+  ) {
     if (launcherUpdateProgress) {
-      launcherUpdateProgress.style.width = `${Math.max(0, Math.min(100, progress.percent || 0))}%`;
+      launcherUpdateProgress.style.width = `${Math.max(
+        0,
+        Math.min(100, progress.percent || 0)
+      )}%`;
     }
     if (launcherUpdateStatus) {
-      launcherUpdateStatus.textContent = `Downloading... ${Math.round(progress.percent || 0)}%`;
+      launcherUpdateStatus.textContent = `Downloading... ${Math.round(
+        progress.percent || 0
+      )}%`;
     }
     if (launcherUpdateDetails) {
       // Format bytes to MB
-      const transferredMB = ((progress.transferred || 0) / 1024 / 1024).toFixed(2);
+      const transferredMB = ((progress.transferred || 0) / 1024 / 1024).toFixed(
+        2
+      );
       const totalMB = ((progress.total || 0) / 1024 / 1024).toFixed(2);
       if (progress.total && progress.total > 0) {
         launcherUpdateDetails.textContent = `${transferredMB} MB / ${totalMB} MB`;
@@ -3633,39 +3683,43 @@ if (updateDownloadButton) {
 // Listen for update download errors
 window.api.onUpdateError((data) => {
   console.error("[Renderer] Update error received:", data);
-  
+
   // Remove any existing progress toasts
   if (updateToastId && updateToastId.parentNode) {
     updateToastId.remove();
     updateToastId = null;
   }
-  
+
   // Show error dialog with retry option
   if (updateDialog) {
     const dialogHeader = updateDialog.querySelector("h2");
     const dialogContent = updateDialog.querySelector(".update-description");
     const dialogActions = updateDialog.querySelector(".update-dialog-actions");
-    
+
     if (dialogHeader) {
       dialogHeader.textContent = "⚠️ Update Failed";
     }
-    
+
     if (dialogContent) {
       dialogContent.innerHTML = `
         <p style="color: #ef4444; font-size: 16px; margin-bottom: 15px;">
           ${data.message}
         </p>
         <p style="font-size: 14px; color: #9ca3af;">
-          ${data.type === 'network' ? 'Please check your internet connection and try again.' : 
-            data.type === 'timeout' ? 'The download is taking too long. Your connection may be unstable.' :
-            'If this problem persists, you can download the update manually.'}
+          ${
+            data.type === "network"
+              ? "Please check your internet connection and try again."
+              : data.type === "timeout"
+              ? "The download is taking too long. Your connection may be unstable."
+              : "If this problem persists, you can download the update manually."
+          }
         </p>
       `;
     }
-    
+
     if (dialogActions) {
       dialogActions.innerHTML = "";
-      
+
       // Add manual download button
       const manualBtn = document.createElement("button");
       manualBtn.className = "update-button secondary";
@@ -3683,7 +3737,7 @@ window.api.onUpdateError((data) => {
           console.error("[Renderer] Error getting manual download URL:", error);
         }
       };
-      
+
       // Add retry button
       const retryBtn = document.createElement("button");
       retryBtn.className = "update-button primary";
@@ -3699,7 +3753,7 @@ window.api.onUpdateError((data) => {
           console.error("[Renderer] Error retrying update:", error);
         }
       };
-      
+
       // Add close button
       const closeBtn = document.createElement("button");
       closeBtn.className = "update-button secondary";
@@ -3712,13 +3766,13 @@ window.api.onUpdateError((data) => {
           pendingUpdateData = data.updateInfo;
         }
       };
-      
+
       dialogActions.appendChild(closeBtn);
       dialogActions.appendChild(manualBtn);
       dialogActions.appendChild(retryBtn);
       dialogActions.style.display = "flex";
     }
-    
+
     // Show dialog
     updateDialog.classList.add("visible");
   } else {
@@ -3730,17 +3784,19 @@ window.api.onUpdateError((data) => {
 // Listen for installation failure (on app restart)
 window.api.onUpdateInstallationFailed((data) => {
   console.error("[Renderer] Update installation failed:", data);
-  
+
   setTimeout(() => {
     if (updateDialog) {
       const dialogHeader = updateDialog.querySelector("h2");
       const dialogContent = updateDialog.querySelector(".update-description");
-      const dialogActions = updateDialog.querySelector(".update-dialog-actions");
-      
+      const dialogActions = updateDialog.querySelector(
+        ".update-dialog-actions"
+      );
+
       if (dialogHeader) {
         dialogHeader.textContent = "❌ Update Installation Failed";
       }
-      
+
       if (dialogContent) {
         dialogContent.innerHTML = `
           <p style="color: #ef4444; font-size: 16px; margin-bottom: 15px;">
@@ -3759,10 +3815,10 @@ window.api.onUpdateInstallationFailed((data) => {
           </p>
         `;
       }
-      
+
       if (dialogActions) {
         dialogActions.innerHTML = "";
-        
+
         // Add manual download button
         const manualBtn = document.createElement("button");
         manualBtn.className = "update-button secondary";
@@ -3777,10 +3833,13 @@ window.api.onUpdateInstallationFailed((data) => {
               updateDialog.classList.remove("visible");
             }
           } catch (error) {
-            console.error("[Renderer] Error getting manual download URL:", error);
+            console.error(
+              "[Renderer] Error getting manual download URL:",
+              error
+            );
           }
         };
-        
+
         // Add check updates button
         const checkBtn = document.createElement("button");
         checkBtn.className = "update-button primary";
@@ -3793,7 +3852,7 @@ window.api.onUpdateInstallationFailed((data) => {
             console.error("[Renderer] Error checking for updates:", error);
           }
         };
-        
+
         // Add close button
         const closeBtn = document.createElement("button");
         closeBtn.className = "update-button secondary";
@@ -3801,13 +3860,13 @@ window.api.onUpdateInstallationFailed((data) => {
         closeBtn.onclick = () => {
           updateDialog.classList.remove("visible");
         };
-        
+
         dialogActions.appendChild(closeBtn);
         dialogActions.appendChild(manualBtn);
         dialogActions.appendChild(checkBtn);
         dialogActions.style.display = "flex";
       }
-      
+
       // Show dialog
       updateDialog.classList.add("visible");
     } else {
@@ -3820,7 +3879,7 @@ window.api.onUpdateInstallationFailed((data) => {
 // Listen for successful installation (on app restart)
 window.api.onUpdateInstallationSuccess((data) => {
   console.log("[Renderer] Update installed successfully:", data);
-  
+
   setTimeout(() => {
     showToast(`✅ Successfully updated to v${data.version}!`, "success", 5000);
   }, 2500);

@@ -992,6 +992,37 @@ button:focus {
   font-style: italic;
 }
 
+/* Animated loading indicator for installation progress */
+.progress-status {
+  position: relative;
+}
+
+@keyframes loadingDots {
+  0%, 20% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.3;
+  }
+}
+
+/* Add a pulsing effect for installation status text */
+.progress-status:not(:empty) {
+  animation: statusPulse 2s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Add styling for number inputs */
 .input-with-label {
   display: flex;

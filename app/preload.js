@@ -38,6 +38,12 @@ contextBridge.exposeInMainWorld("api", {
   onDxProgress: (callback) => {
     ipcRenderer.on("dx-progress", (_, progress) => callback(progress));
   },
+  onDxInstallProgress: (callback) => {
+    ipcRenderer.on("dx-install-progress", (_, message) => callback(message));
+  },
+  onGfwlInstallProgress: (callback) => {
+    ipcRenderer.on("gfwl-install-progress", (_, message) => callback(message));
+  },
   onDownloadMessage: (callback) => {
     ipcRenderer.on("download-message", (_, message) => callback(message));
   },
@@ -58,7 +64,8 @@ contextBridge.exposeInMainWorld("api", {
 
   // Add this with the other methods
   setMaxFrameRate: (fps) => ipcRenderer.invoke("set-max-frame-rate", fps),
-  getCurrentFpsFromDxvkConf: () => ipcRenderer.invoke("get-current-fps-from-dxvk-conf"),
+  getCurrentFpsFromDxvkConf: () =>
+    ipcRenderer.invoke("get-current-fps-from-dxvk-conf"),
 
   // Add this method
   checkGameInstalled: () => ipcRenderer.invoke("check-game-installed"),
@@ -151,7 +158,8 @@ contextBridge.exposeInMainWorld("api", {
   runDiagnostics: () => ipcRenderer.invoke("run-diagnostics"),
   getGpuInfo: () => ipcRenderer.invoke("get-gpu-info"),
   getAllGpus: () => ipcRenderer.invoke("get-all-gpus"),
-  getSystemInfo: (forceRefresh) => ipcRenderer.invoke("get-system-info", forceRefresh),
+  getSystemInfo: (forceRefresh) =>
+    ipcRenderer.invoke("get-system-info", forceRefresh),
   fixLicenseManager: () => ipcRenderer.invoke("fix-license-manager"),
   restartXboxNetworking: () => ipcRenderer.invoke("restart-xbox-networking"),
   checkDirectX: () => ipcRenderer.invoke("check-directx"),
@@ -210,21 +218,27 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("update-error", (event, data) => callback(data));
   },
   onUpdateInstallationFailed: (callback) => {
-    ipcRenderer.on("update-installation-failed", (event, data) => callback(data));
+    ipcRenderer.on("update-installation-failed", (event, data) =>
+      callback(data)
+    );
   },
   onUpdateInstallationSuccess: (callback) => {
-    ipcRenderer.on("update-installation-success", (event, data) => callback(data));
+    ipcRenderer.on("update-installation-success", (event, data) =>
+      callback(data)
+    );
   },
 
   // Game location management
-  getGameInstallationPath: () => ipcRenderer.invoke("get-game-installation-path"),
+  getGameInstallationPath: () =>
+    ipcRenderer.invoke("get-game-installation-path"),
   changeGameLocation: () => ipcRenderer.invoke("change-game-location"),
-  executeGameMove: (newPath) => ipcRenderer.invoke("execute-game-move", newPath),
+  executeGameMove: (newPath) =>
+    ipcRenderer.invoke("execute-game-move", newPath),
   onGameMoveProgress: (callback) => {
     ipcRenderer.on("game-move-progress", (_, data) => callback(data));
   },
   browseForExistingGame: () => ipcRenderer.invoke("browse-for-existing-game"),
-  
+
   // Listen for settings updates
   onSettingsUpdated: (callback) => {
     ipcRenderer.on("settings-updated", (_, settings) => callback(settings));
@@ -233,6 +247,11 @@ contextBridge.exposeInMainWorld("api", {
   // Launch error handler
   onLaunchError: (callback) => {
     ipcRenderer.on("launch-error", (_, data) => callback(data));
+  },
+
+  // Game crash handler
+  onGameCrash: (callback) => {
+    ipcRenderer.on("game-crash", (_, data) => callback(data));
   },
 
   // Check for persistent issues (services, dependencies)

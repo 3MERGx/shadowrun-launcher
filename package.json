@@ -1,7 +1,7 @@
 {
   "name": "shadowrun-fps-launcher",
   "productName": "Shadowrun FPS Launcher",
-  "version": "0.9.105",
+  "version": "0.9.107",
   "repository": {
     "type": "git",
     "url": "https://github.com/3MERGx/shadowrun-launcher.git"
