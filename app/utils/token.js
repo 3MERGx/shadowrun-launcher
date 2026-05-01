@@ -1,3 +1,4 @@
+const { safeLog } = require("../main/logger");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -30,9 +31,9 @@ const tokenUtils = {
       if (fs.existsSync(filePath)) {
         try {
           fs.unlinkSync(filePath);
-          console.log(`Deleted: ${filePath}`);
+          safeLog.info(`Deleted: ${filePath}`);
         } catch (error) {
-          console.error(`Failed to delete ${filePath}:`, error);
+          safeLog.error(`Failed to delete ${filePath}:`, error);
         }
       }
     });

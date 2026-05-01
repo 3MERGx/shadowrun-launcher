@@ -149,10 +149,14 @@ Update URL is configured in `package.json`:
 {
   "publishConfig": {
     "provider": "generic",
-    "url": "http://157.245.214.234/launcher"
+    "url": "https://downloads.shadowrunfps.com/launcher"
   }
 }
 ```
+
+### Large files on Cloudflare R2 (maintainers)
+
+Release assets larger than the dashboard upload limit (for example **`build.zip`**) should be uploaded with the **S3-compatible API** (e.g. AWS CLI against R2). Step-by-step instructions live in **`docs/r2-large-upload.md`** — no secrets, only placeholders.
 
 ---
 

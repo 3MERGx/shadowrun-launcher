@@ -5,6 +5,13 @@
  * Usage: node app/config/validateConfig.js
  */
 
+// NOTE: This is a standalone CLI utility (run via
+// `node app/config/validateConfig.js`). It intentionally uses console.log
+// directly instead of safeLog because:
+//   1. It runs outside the Electron runtime, where electron-log can't
+//      resolve app.getPath('userData') and would throw at require time.
+//   2. The output is meant for the user's terminal (with ANSI colors),
+//      not the launcher's main.log file.
 const fs = require('fs');
 const path = require('path');
 
@@ -19,6 +26,7 @@ const colors = {
 };
 
 function log(message, color = 'reset') {
+  // eslint-disable-next-line no-console -- standalone CLI; see file header.
   console.log(`${colors[color]}${message}${colors.reset}`);
 }
 

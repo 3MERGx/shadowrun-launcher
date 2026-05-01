@@ -80,7 +80,7 @@ contextBridge.exposeInMainWorld("api", {
 
   // Add player count event listener
   onPlayerCountUpdate: (callback) => {
-    ipcRenderer.on("player-count-update", (_, count) => callback(count));
+    ipcRenderer.on("player-count-update", (_, data) => callback(data));
   },
 
   // Add this with other event listeners
@@ -133,6 +133,13 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("srs-dll-progress", (_, data) => callback(data));
   },
 
+  // AHL / GFWL server toggle methods
+  checkGfwlServer: () => ipcRenderer.invoke("check-gfwl-server"),
+  toggleGfwlServer: (mode) => ipcRenderer.invoke("toggle-gfwl-server", mode),
+  onAhlProgress: (callback) => {
+    ipcRenderer.on("ahl-progress", (_, data) => callback(data));
+  },
+
   // Changelog methods
   getChangelog: () => ipcRenderer.invoke("get-changelog"),
 
@@ -154,18 +161,15 @@ contextBridge.exposeInMainWorld("api", {
   // Add this to your exposed API
   restartAsAdmin: () => ipcRenderer.invoke("restart-as-admin"),
 
+  // Open %APPDATA%/Shadowrun FPS Launcher/logs/main.log in the OS default editor
+  showLogs: () => ipcRenderer.invoke("show-logs"),
+
   // Diagnostics and error handling methods
   runDiagnostics: () => ipcRenderer.invoke("run-diagnostics"),
   getGpuInfo: () => ipcRenderer.invoke("get-gpu-info"),
-  getAllGpus: () => ipcRenderer.invoke("get-all-gpus"),
   getSystemInfo: (forceRefresh) =>
     ipcRenderer.invoke("get-system-info", forceRefresh),
-  fixLicenseManager: () => ipcRenderer.invoke("fix-license-manager"),
-  restartXboxNetworking: () => ipcRenderer.invoke("restart-xbox-networking"),
   checkDirectX: () => ipcRenderer.invoke("check-directx"),
-  checkGpuDrivers: () => ipcRenderer.invoke("check-gpu-drivers"),
-  runSfcScan: () => ipcRenderer.invoke("run-sfc-scan"),
-  openWindowsUpdate: () => ipcRenderer.invoke("open-windows-update"),
 
   // Auto-updater methods
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),

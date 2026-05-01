@@ -1,22 +1,22 @@
 {
   "name": "shadowrun-fps-launcher",
   "productName": "Shadowrun FPS Launcher",
-  "version": "0.9.107",
+  "version": "0.9.112",
   "repository": {
     "type": "git",
     "url": "https://github.com/3MERGx/shadowrun-launcher.git"
   },
   "publishConfig": {
     "provider": "generic",
-    "url": "http://157.245.214.234/launcher"
+    "url": "https://downloads.shadowrunfps.com/launcher"
   },
   "description": "Community game launcher for Shadowrun FPS",
   "main": "app/main.js",
   "scripts": {
     "start": "electron .",
     "start:dev": "electron . --dev",
-    "prebuild": "node scripts/generate-changelog.js",
-    "build:win": "npm run prebuild && npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --minify && electron-builder --win",
+    "prebuild": "node scripts/sync-installer-bitmaps.js && node scripts/generate-changelog.js",
+    "build:win": "npm run prebuild && npx tailwindcss -i ./app/styles/global.css -o ./app/styles/output.css --minify && set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win",
     "build:win:clean": "npm run build:win && npm run cleanup-build",
     "cleanup-build": "node scripts/cleanup-build.js"
   },
@@ -25,7 +25,7 @@
   "devDependencies": {
     "concurrently": "^7.6.0",
     "electron": "^39.2.7",
-    "electron-builder": "^24.4.0",
+    "electron-builder": "^26.6.0",
     "tailwindcss": "^3.3.0"
   },
   "build": {
@@ -89,7 +89,6 @@
         }
       ],
       "icon": "app/assets/icon2.ico",
-      "publisherName": "ShadowrunFPS",
       "verifyUpdateCodeSignature": false
     },
     "nsis": {
@@ -103,8 +102,8 @@
       "license": "LICENSE.txt",
       "artifactName": "${productName} Setup ${version}.exe",
       "installerHeader": "build/installerHeader.bmp",
-      "installerSidebar": "build/launcher.bmp",
-      "uninstallerIcon": "build/uninstallerIcon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerIcon": "app/assets/icon2.ico",
       "installerIcon": "app/assets/icon2.ico",
       "uninstallDisplayName": "${productName}",
       "menuCategory": true,
@@ -117,7 +116,7 @@
     },
     "publish": {
       "provider": "generic",
-      "url": "http://157.245.214.234/launcher"
+      "url": "https://downloads.shadowrunfps.com/launcher"
     },
     "portable": {
       "artifactName": "${productName}.exe"
@@ -128,9 +127,10 @@
   "dependencies": {
     "axios": "^1.9.0",
     "discord-rpc": "^4.0.1",
-    "discord.js": "^14.25.1",
+    "discord.js": "^13.17.1",
     "dotenv": "^16.5.0",
     "electron-dl": "^4.0.0",
+    "electron-log": "^5.4.3",
     "electron-squirrel-startup": "^1.0.1",
     "electron-store": "^10.0.1",
     "electron-updater": "^6.6.2",

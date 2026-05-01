@@ -1,7 +1,11 @@
 ; Shadowrun FPS Launcher - Custom NSIS Installer Script
 ; Simple customization for shortcuts
+;
+; Do NOT !include MUI2.nsh here — electron-builder's generated NSIS script loads
+; Modern UI first and passes MUI_HEADERIMAGE_BITMAP / MUI_WELCOMEFINISHPAGE_BITMAP
+; from package.json installerHeader/installerSidebar. A duplicate MUI include can
+; reorder or clash with those defines (black header / blank sidebar).
 
-!include "MUI2.nsh"
 !include "FileFunc.nsh"
 !include "x64.nsh"
 !include "nsDialogs.nsh"
@@ -22,18 +26,11 @@
 ; Log file for debugging installer issues
 Var LogFile
 
-; Set finish page sidebar image (welcome/install page is set via package.json installerSidebar)
-; electron-builder automatically sets MUI_WELCOMEFINISHPAGE_BITMAP from package.json installerSidebar
-; We only need to set the finish page separately if we want a different image
-; Use build directory version for consistency
-!define MUI_FINISHPAGE_BITMAP "build/launcher.bmp"
+; Do NOT redefine MUI_* bitmap paths here — see package.json nsis.installerHeader /
+; installerSidebar (copied to build/installerHeader.bmp + installerSidebar.bmp by prebuild).
 
-; IMPORTANT: Add custom page directly here (electron-builder includes this file)
-; Since customInstallPage macro is not being called reliably, we add the page directly
-; This will be included when electron-builder processes the installer script
-; The page will appear in the installer flow where electron-builder processes included files
-; NOTE: Silent updates (/S flag) should skip this page automatically
-Page custom CustomSettingsPageCreate CustomSettingsPageLeave
+; Custom options page MUST use MUI_PAGE_CUSTOM inside !macro customInstallPage only.
+; A raw top-level "Page custom" breaks the Modern UI wizard chrome (header/sidebar BMPs).
 
 ; .NET 6.0 Desktop Runtime x86 (32-bit) download URL
 !define DOTNET6_DOWNLOAD_URL "https://download.visualstudio.microsoft.com/download/pr/bf0c50ea-2394-40af-a5a7-6cee0cef5572/31d359c30ff370525e06e43f92ab26aa/windowsdesktop-runtime-6.0.36-win-x86.exe"

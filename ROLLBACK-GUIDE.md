@@ -30,7 +30,7 @@ The system includes **automatic safety checks**:
 Store all versions in your launcher directory:
 
 ```
-http://157.245.214.234/launcher/
+https://downloads.shadowrunfps.com/launcher/
 ├── latest.yml (points to current version)
 ├── Shadowrun FPS Launcher Setup 0.9.0.exe
 ├── Shadowrun FPS Launcher Setup 0.9.1.exe
@@ -40,7 +40,7 @@ http://157.245.214.234/launcher/
 
 ### Step 2: Create `rollback.json`
 
-Create a file at: `http://157.245.214.234/launcher/rollback.json`
+Create a file at: `https://downloads.shadowrunfps.com/launcher/rollback.json`
 
 **Normal State (No Rollback):**
 
@@ -172,7 +172,7 @@ Use the included `rollback-automation.js` script to:
 
 ```bash
 # Copy rollback-automation.js to your server
-scp rollback-automation.js user@157.245.214.234:/path/to/launcher/
+scp rollback-automation.js user@your-server.example:/path/to/launcher/
 
 # Or if running locally, update CONFIG.LOCAL_FILES paths
 ```
@@ -182,7 +182,7 @@ scp rollback-automation.js user@157.245.214.234:/path/to/launcher/
 ```javascript
 const CONFIG = {
   TRACKING_API: "https://playertracker-production.up.railway.app/api/stats",
-  ROLLBACK_CONFIG_URL: "http://157.245.214.234/launcher/rollback.json",
+  ROLLBACK_CONFIG_URL: "https://downloads.shadowrunfps.com/launcher/rollback.json",
   THRESHOLD_PERCENTAGE: 95, // Auto-disable when 95% on safe version
   CHECK_INTERVAL: 300, // Check every 5 minutes
   LOCAL_FILES: {
@@ -370,7 +370,7 @@ Version 0.9.2 (Update Available!)
 
 **Fix:**
 
-- Visit `http://157.245.214.234/launcher/rollback.json` in browser to verify
+- Visit `https://downloads.shadowrunfps.com/launcher/rollback.json` in browser to verify
 - Check JSON syntax (use JSONLint.com)
 - Verify server CORS settings allow launcher to fetch it
 
@@ -451,7 +451,7 @@ Version 0.9.2 (Update Available!)
 **Check Current Status:**
 
 ```bash
-curl http://157.245.214.234/launcher/rollback.json
+curl https://downloads.shadowrunfps.com/launcher/rollback.json
 ```
 
 ---

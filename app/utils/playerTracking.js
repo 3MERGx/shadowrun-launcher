@@ -1,13 +1,13 @@
 // Player tracking heartbeat system
+const EventEmitter = require("events");
+const { safeLog } = require("../main/logger");
+const { TRACKING_API_URL } = require("../main/services/playerTrackerStats");
 const https = require("https");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { app } = require("electron");
-
-// Configuration
-const TRACKING_API_URL = "https://playertracker-production.up.railway.app";
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 
 // Helper function to detect actual OS version (Windows 10, Windows 11, etc.)
@@ -84,8 +84,9 @@ function getOSVersion() {
   return platform; // Fallback to platform name
 }
 
-class PlayerTracker {
+class PlayerTracker extends EventEmitter {
   constructor() {
+    super();
     this.playerId = this.getOrCreatePlayerId();
     this.heartbeatInterval = null;
     this.currentStatus = "menu"; // 'menu', 'in-game', 'downloading', 'installing'
@@ -107,7 +108,7 @@ class PlayerTracker {
         }
       }
     } catch (error) {
-      console.warn("[PlayerTracker] Error reading player ID:", error.message);
+      safeLog.warn("[PlayerTracker] Error reading player ID:", error.message);
     }
 
     // Generate new player ID (first install)
@@ -129,10 +130,10 @@ class PlayerTracker {
           2
         )
       );
-      console.log("[PlayerTracker] Created new player ID:", playerId);
-      console.log("[PlayerTracker] New installation detected");
+      safeLog.info("[PlayerTracker] Created new player ID:", playerId);
+      safeLog.info("[PlayerTracker] New installation detected");
     } catch (error) {
-      console.error("[PlayerTracker] Error saving player ID:", error.message);
+      safeLog.error("[PlayerTracker] Error saving player ID:", error.message);
     }
 
     return playerId;
@@ -146,9 +147,9 @@ class PlayerTracker {
       data.installReported = true;
       fs.writeFileSync(configPath, JSON.stringify(data, null, 2));
       this.installReported = true;
-      console.log("[PlayerTracker] Install reported and marked");
+      safeLog.info("[PlayerTracker] Install reported and marked");
     } catch (error) {
-      console.error(
+      safeLog.error(
         "[PlayerTracker] Error marking install as reported:",
         error.message
       );
@@ -157,11 +158,11 @@ class PlayerTracker {
 
   start() {
     if (!this.enabled) {
-      console.log("[PlayerTracker] Tracking disabled");
+      safeLog.info("[PlayerTracker] Tracking disabled");
       return;
     }
 
-    console.log("[PlayerTracker] Starting player tracking...");
+    safeLog.info("[PlayerTracker] Starting player tracking...");
 
     // Report unique install if not already reported
     if (!this.installReported) {
@@ -178,7 +179,7 @@ class PlayerTracker {
   }
 
   reportInstall() {
-    console.log("[PlayerTracker] Reporting unique installation...");
+    safeLog.info("[PlayerTracker] Reporting unique installation...");
 
     const data = JSON.stringify({
       playerId: this.playerId,
@@ -216,16 +217,16 @@ class PlayerTracker {
         if (res.statusCode === 200) {
           try {
             const response = JSON.parse(responseData);
-            console.log(
+            safeLog.info(
               `[PlayerTracker] Install reported successfully. Total installs: ${response.totalInstalls || "unknown"}`
             );
             this.markInstallReported();
           } catch (e) {
-            console.log("[PlayerTracker] Install reported successfully");
+            safeLog.info("[PlayerTracker] Install reported successfully");
             this.markInstallReported();
           }
         } else {
-          console.warn(
+          safeLog.warn(
             `[PlayerTracker] Install report failed with status ${res.statusCode}`
           );
         }
@@ -233,7 +234,7 @@ class PlayerTracker {
     });
 
     req.on("error", (error) => {
-      console.warn(
+      safeLog.warn(
         "[PlayerTracker] Install report error:",
         error.message
       );
@@ -241,7 +242,7 @@ class PlayerTracker {
 
     req.on("timeout", () => {
       req.destroy();
-      console.warn("[PlayerTracker] Install report timeout");
+      safeLog.warn("[PlayerTracker] Install report timeout");
     });
 
     req.write(data);
@@ -249,7 +250,7 @@ class PlayerTracker {
   }
 
   stop() {
-    console.log("[PlayerTracker] Stopping player tracking...");
+    safeLog.info("[PlayerTracker] Stopping player tracking...");
 
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
@@ -262,7 +263,7 @@ class PlayerTracker {
 
   setStatus(status) {
     if (status !== this.currentStatus) {
-      console.log(
+      safeLog.debug(
         `[PlayerTracker] Status changed: ${this.currentStatus} -> ${status}`
       );
       this.currentStatus = status;
@@ -320,14 +321,23 @@ class PlayerTracker {
         if (res.statusCode === 200) {
           try {
             const response = JSON.parse(responseData);
-            console.log(
-              `[PlayerTracker] Heartbeat sent successfully. Total players: ${response.totalPlayers}`
+            const totalOnline =
+              typeof response.totalOnline === "number"
+                ? response.totalOnline
+                : typeof response.totalPlayers === "number"
+                  ? response.totalPlayers
+                  : undefined;
+            safeLog.debug(
+              `[PlayerTracker] Heartbeat sent successfully. Total players: ${totalOnline ?? "?"}`
             );
+            if (typeof response.inGame === "number" && typeof totalOnline === "number") {
+              this.emit("public-stats", { inGame: response.inGame, totalOnline });
+            }
           } catch (e) {
-            console.log("[PlayerTracker] Heartbeat sent successfully");
+            safeLog.debug("[PlayerTracker] Heartbeat sent successfully");
           }
         } else {
-          console.warn(
+          safeLog.warn(
             `[PlayerTracker] Heartbeat failed with status ${res.statusCode}`
           );
         }
@@ -336,12 +346,12 @@ class PlayerTracker {
 
     req.on("error", (error) => {
       // Silently fail - don't spam console if server is down
-      // console.warn('[PlayerTracker] Heartbeat error:', error.message);
+      // safeLog.warn('[PlayerTracker] Heartbeat error:', error.message);
     });
 
     req.on("timeout", () => {
       req.destroy();
-      console.warn("[PlayerTracker] Heartbeat timeout");
+      safeLog.warn("[PlayerTracker] Heartbeat timeout");
     });
 
     req.write(data);

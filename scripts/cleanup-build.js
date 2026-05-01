@@ -73,7 +73,7 @@ try {
   if (fs.existsSync(changelogSrc)) {
     fs.copyFileSync(changelogSrc, changelogDest);
     console.log(`✅ Copied changelog.json to dist/`);
-    console.log(`   📤 Upload this to: http://157.245.214.234/launcher/changelog.json`);
+    console.log(`   📤 Upload this to: https://downloads.shadowrunfps.com/launcher/changelog.json`);
   } else {
     console.log(`⚠️  changelog.json not found - skipping copy`);
     console.log(`   💡 Make sure CHANGELOG.md exists and is properly formatted`);

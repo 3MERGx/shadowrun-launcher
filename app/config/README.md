@@ -53,6 +53,7 @@ This JSON file stores activation keys where each product key can be paired with 
   - Each PCID must be exactly 16 characters
   - Only hex characters (0-9, a-f, A-F)
   - Stored as QWORD (64-bit) in registry at `HKEY_CURRENT_USER\Software\Classes\SOFTWARE\Microsoft\XLive`
+  - **Byte order**: PCIDs in this JSON are stored in canonical form (as `reg query` returns them). The launcher reverses the byte pairs before writing to the registry (e.g. JSON `b6377a64a9f736a3` → registry writes `a336f7a9647a37b6`). Same 64-bit value, just different byte order for compatibility.
 - **name**: Optional display name for logging/tracking purposes
 - **description**: Optional text describing this key entry
 - **settings.clearClipboardAfterSeconds**: Time in seconds before auto-clearing the product key from clipboard (0 to disable, default: 30)

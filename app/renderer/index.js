@@ -521,29 +521,134 @@ const buttonClickAudio = document.getElementById("buttonClickAudio");
 // Audio state
 let isMuted = false;
 
+// Stored / element volume is linear gain capped at 0.5 (50% of browser max).
+// Diagnostics slider is 0–100% of that cap: 50% UI = 0.25 gain, 100% UI = 0.5 gain.
+const LAUNCHER_AUDIO_GAIN_CAP = 0.5;
+const LAUNCHER_AUDIO_DEFAULT_GAIN = 0.25;
+// Hover/click use at least this gain when ambience > 0 so low slider (quiet loop) does not bury UI SFX.
+const LAUNCHER_UI_SFX_MIN_GAIN = 0.2;
+
+function clampLauncherAudioActualGain(value) {
+  const n = Number(value);
+  if (Number.isNaN(n)) return LAUNCHER_AUDIO_DEFAULT_GAIN;
+  return Math.min(LAUNCHER_AUDIO_GAIN_CAP, Math.max(0, n));
+}
+
+function sliderPercentFromActualGain(actualGain) {
+  const g = clampLauncherAudioActualGain(actualGain);
+  if (LAUNCHER_AUDIO_GAIN_CAP <= 0) return 0;
+  return Math.min(100, Math.round((g / LAUNCHER_AUDIO_GAIN_CAP) * 100));
+}
+
+function actualGainFromSliderPercent(sliderPercent) {
+  const p = Number(sliderPercent);
+  if (Number.isNaN(p)) return LAUNCHER_AUDIO_DEFAULT_GAIN;
+  return clampLauncherAudioActualGain((p / 100) * LAUNCHER_AUDIO_GAIN_CAP);
+}
+
+function gainForLauncherUiSfx(ambienceGain) {
+  const v = clampLauncherAudioActualGain(ambienceGain);
+  if (v <= 0) return 0;
+  return Math.min(1, Math.max(v, LAUNCHER_UI_SFX_MIN_GAIN));
+}
+
+function syncLauncherAudioElementVolumes(actualGain) {
+  const v = clampLauncherAudioActualGain(actualGain);
+  const sfx = gainForLauncherUiSfx(actualGain);
+  if (backgroundAudio) backgroundAudio.volume = v;
+  if (buttonHoverAudio) buttonHoverAudio.volume = sfx;
+  if (buttonClickAudio) buttonClickAudio.volume = sfx;
+  return v;
+}
+
+function syncBackgroundAudioVolumeSliderUI(actualGain) {
+  const slider = document.getElementById("backgroundAudioVolumeSlider");
+  const valueLabel = document.getElementById("backgroundAudioVolumeValue");
+  if (!slider || !valueLabel) return;
+  const pct = sliderPercentFromActualGain(actualGain);
+  slider.value = String(pct);
+  valueLabel.textContent = `${pct}%`;
+}
+
+/**
+ * Apply persisted launcher audio (mute + volume) from a settings payload.
+ * Keeps the top-right mute control and Diagnostics slider in sync.
+ */
+function applyLauncherAudioFromSettingsPayload(savedSettings) {
+  if (!backgroundAudio) return;
+
+  const s = savedSettings || {};
+
+  if (typeof s.audioMuted === "boolean") {
+    isMuted = s.audioMuted;
+    backgroundAudio.muted = isMuted;
+    updateMuteButtonAppearance(isMuted);
+  }
+
+  let gain = LAUNCHER_AUDIO_DEFAULT_GAIN;
+  if (
+    typeof s.backgroundAudioVolume === "number" &&
+    !Number.isNaN(s.backgroundAudioVolume)
+  ) {
+    gain = clampLauncherAudioActualGain(s.backgroundAudioVolume);
+  }
+  syncLauncherAudioElementVolumes(gain);
+  if (settings) {
+    settings.backgroundAudioVolume = gain;
+  }
+  syncBackgroundAudioVolumeSliderUI(gain);
+  updateDiagnosticsLauncherAudioRowMutedClass(
+    backgroundAudio ? backgroundAudio.muted : isMuted
+  );
+}
+
+async function persistBackgroundAudioVolume(actualGain) {
+  const v = clampLauncherAudioActualGain(actualGain);
+  try {
+    const current = await window.api.loadSettings();
+    const patch = { ...current, backgroundAudioVolume: v };
+    // Do not overwrite saved mute preference while game is running (forced launcher mute).
+    if (!gameRunning) {
+      patch.audioMuted = isMuted;
+    }
+    await window.api.saveSettings(patch);
+    if (settings) {
+      settings.backgroundAudioVolume = v;
+      if (!gameRunning) {
+        settings.audioMuted = isMuted;
+      }
+    }
+  } catch (err) {
+    console.log("Could not save background audio volume:", err);
+  }
+}
+
+function updateDiagnosticsLauncherAudioRowMutedClass(muted) {
+  const row = document.getElementById("backgroundAudioVolumeRow");
+  if (!row) return;
+  row.classList.toggle("is-muted", Boolean(muted));
+}
+
+function syncDiagnosticsAudioVolumeSlider() {
+  if (backgroundAudio) {
+    syncBackgroundAudioVolumeSliderUI(backgroundAudio.volume);
+  }
+  updateDiagnosticsLauncherAudioRowMutedClass(
+    backgroundAudio ? backgroundAudio.muted : isMuted
+  );
+}
+
 // Initialize background audio
 async function initBackgroundAudio() {
   if (backgroundAudio) {
-    // Load mute state from settings
     try {
       const savedSettings = await window.api.loadSettings();
-      if (savedSettings && savedSettings.audioMuted !== undefined) {
-        isMuted = savedSettings.audioMuted;
-        backgroundAudio.muted = isMuted;
-
-        // Update button icon to reflect saved state
-        const speakerIcon = document.getElementById("speakerIcon");
-        const mutedIcon = document.getElementById("mutedIcon");
-        if (isMuted) {
-          if (speakerIcon) speakerIcon.style.display = "none";
-          if (mutedIcon) mutedIcon.style.display = "block";
-        }
-      }
+      applyLauncherAudioFromSettingsPayload(savedSettings);
     } catch (error) {
-      console.log("Could not load audio mute state:", error);
+      console.log("Could not load audio settings:", error);
+      syncLauncherAudioElementVolumes(LAUNCHER_AUDIO_DEFAULT_GAIN);
+      syncBackgroundAudioVolumeSliderUI(LAUNCHER_AUDIO_DEFAULT_GAIN);
     }
-
-    backgroundAudio.volume = 0.5; // Set volume to 50%
 
     // Only play if not muted
     if (!isMuted) {
@@ -570,24 +675,27 @@ async function initBackgroundAudio() {
   }
 }
 
-// Mute/Unmute functionality
-function toggleMute() {
-  if (!backgroundAudio) return;
-
-  isMuted = !isMuted;
-  backgroundAudio.muted = isMuted;
-
-  // Update button icon
+// Update mute button icon to reflect current muted state (used by toggle and game-state)
+function updateMuteButtonAppearance(showAsMuted) {
   const speakerIcon = document.getElementById("speakerIcon");
   const mutedIcon = document.getElementById("mutedIcon");
-
-  if (isMuted) {
+  if (showAsMuted) {
     if (speakerIcon) speakerIcon.style.display = "none";
     if (mutedIcon) mutedIcon.style.display = "block";
   } else {
     if (speakerIcon) speakerIcon.style.display = "block";
     if (mutedIcon) mutedIcon.style.display = "none";
   }
+  updateDiagnosticsLauncherAudioRowMutedClass(showAsMuted);
+}
+
+// Mute/Unmute functionality
+function toggleMute() {
+  if (!backgroundAudio) return;
+
+  isMuted = !isMuted;
+  backgroundAudio.muted = isMuted;
+  updateMuteButtonAppearance(isMuted);
 
   // Save mute state to settings
   window.api
@@ -596,6 +704,9 @@ function toggleMute() {
       window.api.saveSettings({
         ...currentSettings,
         audioMuted: isMuted,
+        backgroundAudioVolume: clampLauncherAudioActualGain(
+          backgroundAudio.volume
+        ),
       });
     })
     .catch((error) => {
@@ -682,6 +793,29 @@ const gfwlStatus = document.getElementById("gfwlStatus");
 const dxStatus = document.getElementById("dxStatus");
 const downloadMessage = document.getElementById("downloadMessage");
 const versionInfo = document.querySelector(".version-info");
+const playerCountInfo = document.getElementById("playerCountInfo");
+
+function setPlayerCountDisplay(data) {
+  if (!playerCountInfo) return;
+  if (data && typeof data.inGame === "number") {
+    playerCountInfo.textContent = `In Game: ${data.inGame}`;
+  }
+}
+
+async function initPlayerCountDisplay() {
+  if (!playerCountInfo || !window.api?.getPlayerCount) return;
+  try {
+    const result = await window.api.getPlayerCount();
+    if (result?.success && typeof result.inGame === "number") {
+      setPlayerCountDisplay({ inGame: result.inGame });
+    }
+  } catch (_err) {
+    /* leave placeholder */
+  }
+  if (window.api.onPlayerCountUpdate) {
+    window.api.onPlayerCountUpdate((data) => setPlayerCountDisplay(data));
+  }
+}
 
 // Add this event listener for the Instructions button
 const openInstructionsButton = document.getElementById(
@@ -713,16 +847,26 @@ window.api.onGameStateUpdate((state) => {
   const wasRunning = gameRunning;
   gameRunning = state.running;
 
-  // If game just started running, clear launch in progress flag
+  // If game just started running, clear launch in progress flag and auto-mute launcher audio
   if (!wasRunning && state.running) {
     console.log(
       "[Game State] Game started running, clearing launch in progress flag"
     );
     launchInProgress = false;
+    // Auto-mute launcher background audio so it doesn't play over the game
+    if (backgroundAudio) {
+      backgroundAudio.muted = true;
+      updateMuteButtonAppearance(true);
+    }
     updateUI();
   }
-  // If game just stopped running, add a cooldown before re-enabling button
+  // If game just stopped running, add a cooldown before re-enabling button and restore audio state
   else if (wasRunning && !state.running) {
+    // Restore launcher audio to user's mute preference
+    if (backgroundAudio) {
+      backgroundAudio.muted = isMuted;
+      updateMuteButtonAppearance(isMuted);
+    }
     console.log(
       "[Game State] Game closed, applying cooldown before re-enabling button"
     );
@@ -917,6 +1061,17 @@ function updateUI() {
       changeGameLocationButton.style.opacity = "1";
       changeGameLocationButton.style.cursor = "pointer";
     }
+
+    // Enable Server Configuration toggle (AHL/GFWL)
+    const gfwlServerToggleEl = document.getElementById("gfwlServerToggle");
+    if (gfwlServerToggleEl) {
+      gfwlServerToggleEl.disabled = false;
+      const toggleContainer = gfwlServerToggleEl.closest(".setting-item");
+      if (toggleContainer) {
+        toggleContainer.style.opacity = "1";
+        toggleContainer.style.pointerEvents = "auto";
+      }
+    }
   } else {
     // Disable skip intro button
     if (skipIntroButton) {
@@ -961,6 +1116,23 @@ function updateUI() {
       changeGameLocationButton.style.opacity = "0.5";
       changeGameLocationButton.style.cursor = "not-allowed";
     }
+
+    // Disable Server Configuration toggle (AHL/GFWL) when game isn't installed/located
+    const gfwlServerToggleEl = document.getElementById("gfwlServerToggle");
+    if (gfwlServerToggleEl) {
+      gfwlServerToggleEl.disabled = true;
+      gfwlServerToggleEl.checked = false;
+      const toggleContainer = gfwlServerToggleEl.closest(".setting-item");
+      if (toggleContainer) {
+        toggleContainer.style.opacity = "0.5";
+        toggleContainer.style.pointerEvents = "none";
+      }
+    }
+    const gfwlServerStateTitle = document.getElementById("gfwlServerStateTitle");
+    if (gfwlServerStateTitle) {
+      gfwlServerStateTitle.textContent =
+        "Current: Not available (game location not set)";
+    }
   }
 }
 
@@ -972,6 +1144,31 @@ muteButton.addEventListener("click", () => {
   }
   toggleMute();
 });
+
+const backgroundAudioVolumeSlider = document.getElementById(
+  "backgroundAudioVolumeSlider"
+);
+if (backgroundAudioVolumeSlider) {
+  backgroundAudioVolumeSlider.addEventListener("input", () => {
+    // Typical UX: adjusting level while muted unmutes (game-running forced mute excluded).
+    if (isMuted && !gameRunning && backgroundAudio) {
+      isMuted = false;
+      backgroundAudio.muted = false;
+      updateMuteButtonAppearance(false);
+    }
+    const pct = Number(backgroundAudioVolumeSlider.value);
+    const gain = actualGainFromSliderPercent(pct);
+    syncLauncherAudioElementVolumes(gain);
+    const valueLabel = document.getElementById("backgroundAudioVolumeValue");
+    if (valueLabel) {
+      valueLabel.textContent = `${Math.round(pct)}%`;
+    }
+  });
+  backgroundAudioVolumeSlider.addEventListener("change", () => {
+    const pct = Number(backgroundAudioVolumeSlider.value);
+    persistBackgroundAudioVolume(actualGainFromSliderPercent(pct));
+  });
+}
 
 minimizeButton.addEventListener("click", () => {
   playClickSound();
@@ -1070,9 +1267,13 @@ playButton.addEventListener("click", async () => {
         updateUI();
 
         // Show specific error message (already improved in main process)
-        const errorMsg =
+        let errorMsg =
           launchResult.error ||
-          "Failed to launch game. Check diagnostics for details.";
+          "Launch failed. Open Settings → Diagnostics for details and fixes.";
+        if (launchResult.suggestMoveOrAdmin) {
+          errorMsg +=
+            " If the game is in Program Files, move it via Settings → Game location or run the launcher as Administrator.";
+        }
         showToast(errorMsg, "error", 6000);
         // If game executable not found, update UI
         if (launchResult.error && launchResult.error.includes("not found")) {
@@ -1092,8 +1293,8 @@ playButton.addEventListener("click", async () => {
       updateUI();
       showToast(
         `Failed to launch game: ${
-          error.message || "Unknown error occurred"
-        }. Check diagnostics for details.`,
+          error.message || "Something went wrong"
+        }. Open Settings → Diagnostics for troubleshooting.`,
         "error",
         6000
       );
@@ -1142,8 +1343,8 @@ playButton.addEventListener("click", async () => {
       console.error("[Find Game] Error:", error);
       showToast(
         `Failed to browse for game: ${
-          error.message || "Unknown error"
-        }. Please try selecting the folder manually.`,
+          error.message || "Something went wrong"
+        }. Please try selecting the folder that contains Shadowrun.exe.`,
         "error",
         5000
       );
@@ -1353,11 +1554,6 @@ settingsButton.addEventListener("click", () => {
         );
       });
   }
-
-  // Update driver update button text based on detected GPU
-  if (typeof updateDriverUpdateButton === "function") {
-    updateDriverUpdateButton();
-  }
 });
 
 closeSettingsButton.addEventListener("click", () => {
@@ -1389,8 +1585,10 @@ if (openDiagnosticsButton && diagnosticsScreen) {
     // Auto-detect system info when diagnostics opens (silently, no toast)
     detectAndDisplaySystemInfo(false);
 
-    // Update error badges based on current issues
-    updateErrorBadges();
+    // Refresh GFWL/AHL server toggle state
+    refreshGfwlServerStatus();
+
+    syncDiagnosticsAudioVolumeSlider();
   });
 }
 
@@ -1416,7 +1614,8 @@ async function loadCurrentGamePath() {
       currentGamePathElement.textContent = gamePath;
       currentGamePathDisplay.style.display = "block";
     } else {
-      currentGamePathElement.textContent = "Game not installed";
+      currentGamePathElement.textContent =
+        "Not set (use Find Existing Game / Download first)";
       currentGamePathDisplay.style.display = "block";
     }
   } catch (error) {
@@ -1451,7 +1650,9 @@ if (changeGameLocationButton) {
         }
 
         // Show error with context
-        const errorMsg = result.error || "Failed to change game location";
+        const errorMsg =
+          result.error ||
+          "Could not change game location. Check that the folder exists and you have permission.";
         showToast(`Cannot change game location: ${errorMsg}`, "error", 6000);
         return;
       }
@@ -1462,7 +1663,7 @@ if (changeGameLocationButton) {
       console.error("[Change Location] Error:", error);
       showToast(
         `Failed to change game location: ${
-          error.message || "Unknown error"
+          error.message || "Something went wrong"
         }. Please try again.`,
         "error",
         6000
@@ -1669,9 +1870,9 @@ async function executeGameMove(newPath, progressModal) {
       loadSettings();
     } else {
       // Show error with context
-      const errorMsg = result.error || "Unknown error occurred during move";
+      const errorMsg = result.error || "The move operation failed";
       showToast(
-        `Failed to move game files: ${errorMsg}. Game files remain in original location.`,
+        `Failed to move game files: ${errorMsg}. Your game files are still in the original location.`,
         "error",
         8000
       );
@@ -1686,8 +1887,8 @@ async function executeGameMove(newPath, progressModal) {
 
     showToast(
       `Failed to move game files: ${
-        error.message || "Unknown error"
-      }. Game files remain in original location.`,
+        error.message || "Something went wrong"
+      }. Your game files are still in the original location.`,
       "error",
       8000
     );
@@ -1790,7 +1991,9 @@ if (dxvkToggle) {
         dxvkToggle.checked = !newState;
 
         // Show error toast with context
-        const errorMsg = result.message || "Failed to toggle DXVK support";
+        const errorMsg =
+          result.message ||
+          "Could not change DXVK setting. Try running the launcher as Administrator.";
         showToast(`DXVK toggle failed: ${errorMsg}`, "error", 6000);
       }
     } catch (error) {
@@ -1862,6 +2065,8 @@ async function loadSettings() {
       maxFrameRateInput.value = 85;
     }
   }
+
+  applyLauncherAudioFromSettingsPayload(settings);
 }
 
 // Load version number on startup
@@ -1876,6 +2081,7 @@ async function loadVersion() {
 updateUI();
 loadSettings();
 loadVersion();
+initPlayerCountDisplay();
 
 // Initialize audio
 initBackgroundAudio();
@@ -2130,6 +2336,19 @@ d3d9.maxFrameRate = 85</code></pre>
       `,
     },
     {
+      question: "Nothing Happens When I Press Play (Black Screen or No Response)",
+      answer: `
+        <p><strong>Problem:</strong> You press Play but nothing happens, or you get a black screen with no game window.</p>
+        <p><strong>Solution:</strong> Try disabling DXVK Support and launch again.</p>
+        <ul style="margin-left: 20px; margin-top: 8px;">
+          <li>Open <strong>Settings</strong> in the launcher</li>
+          <li>Find the <strong>DXVK Support</strong> toggle and turn it <strong>OFF</strong></li>
+          <li>Try launching the game again</li>
+        </ul>
+        <p style="margin-top: 12px;">DXVK can cause compatibility issues on some systems. Disabling it uses the game's native DirectX path instead.</p>
+      `,
+    },
+    {
       question: "GFWL Sign-In Issues",
       answer: `
         <p><strong>Solutions:</strong></p>
@@ -2137,8 +2356,8 @@ d3d9.maxFrameRate = 85</code></pre>
           <li>Create a new Xbox Live account if you don't have one</li>
           <li>Use the same account you use for Xbox/Microsoft services</li>
           <li>If sign-in fails, restart the game and try again</li>
-          <li>Check that Windows License Manager Service is running (use Diagnostics screen)</li>
-          <li>Restart Xbox Live Networking Service if connection issues occur</li>
+          <li>Check that Windows License Manager Service is running (open services.msc and start "LicenseManager" if stopped)</li>
+          <li>If Xbox Live Networking Service is stopped, start it via services.msc ("XboxNetApiSvc")</li>
         </ul>
       `,
     },
@@ -2322,7 +2541,12 @@ window.api.onDownloadComplete(() => {
 });
 
 window.api.onDownloadError((error) => {
-  downloadMessage.textContent = `Error: ${error}`;
+  const msg = error && typeof error === "string" ? error : "Download failed";
+  const hint =
+    msg.includes("Check your") || msg.includes("Try running")
+      ? ""
+      : " Check your internet connection or try again later.";
+  downloadMessage.textContent = `Error: ${msg}${hint}`;
 
   // Replace "Cancel Installation" button with "Close" button
   const downloadActions = document.querySelector(".download-actions");
@@ -2439,7 +2663,7 @@ window.api.onLaunchError((data) => {
       const issue = data.issues[0];
       if (issue.type === "directx") {
         errorMessage =
-          "DirectX 9+ isn't detected. Please install DirectX 9 from the launcher's setup options.";
+          "DirectX 9 is not installed. Install it from the launcher's setup options to fix 'Unable to create Direct3D Device' errors.";
       } else {
         // Fallback for any other critical issues
         errorMessage = `${issue.message}${
@@ -2451,7 +2675,7 @@ window.api.onLaunchError((data) => {
       const issueMessages = data.issues
         .map((issue) => {
           if (issue.type === "directx") {
-            return "• DirectX 9+ isn't detected/installed";
+            return "• DirectX 9 is not installed (causes Direct3D errors)";
           }
           return `• ${issue.message}`;
         })
@@ -2470,9 +2694,17 @@ window.api.onLaunchError((data) => {
 window.api.onGameCrash((data) => {
   console.error("[Game Crash] Crash detected:", data);
 
+  // 0xC0000005 = STATUS_ACCESS_VIOLATION (signed: -1073741819, unsigned: 3221225477)
+  const isAccessViolation =
+    data.exitCode === -1073741819 ||
+    data.exitCode === 3221225477 ||
+    data.error?.includes("0xc0000005");
+
   let crashMessage = "Game crashed";
-  if (data.exitCode !== undefined && data.exitCode !== 0) {
+  if (data.exitCode !== undefined && data.exitCode !== 0 && !isAccessViolation) {
     crashMessage += ` (Exit code: ${data.exitCode})`;
+  } else if (isAccessViolation) {
+    crashMessage += " (Access violation)";
   }
 
   // Vulkan error detection and guidance
@@ -2480,13 +2712,15 @@ window.api.onGameCrash((data) => {
     crashMessage +=
       "\n\n⚠️ Vulkan Error Detected\n💡 Solution: Disable DXVK Support in Settings → Performance";
   }
-  // VM-specific guidance for access violations
-  else if (
-    data.exitCode === -1073741819 ||
-    data.error?.includes("0xc0000005")
-  ) {
+  // Access violation: VM vs physical PC guidance
+  else if (isAccessViolation) {
     crashMessage +=
-      "\n\n⚠️ Access Violation\n💡 Try enabling 3D acceleration in your VM settings";
+      "\n\n⚠️ Access Violation (game tried to use invalid memory).\n💡 Try: update graphics drivers, verify game files, or disable DXVK/mods in Settings. If you're in a VM, enable 3D acceleration.";
+  }
+  // Game in protected folder (e.g. Program Files) - Play may only work when launcher runs as Administrator
+  else if (data.suggestMoveOrAdmin) {
+    crashMessage +=
+      "\n\n💡 The game may be in a protected folder (e.g. Program Files). Try moving it via Settings → Game location, or run the launcher as Administrator.";
   }
   // Generic guidance
   else {
@@ -2534,6 +2768,138 @@ window.api.onDxvkProgress((data) => {
   }
 });
 
+// ─── AHL / GFWL Server Toggle ────────────────────────────────────────────────
+const gfwlServerToggle = document.getElementById("gfwlServerToggle");
+
+function syncLauncherLiveLogoFromMode(mode) {
+  const wrap = document.getElementById("launcherLiveLogoWrap");
+  if (!wrap) return;
+  wrap.hidden = mode === "ahl";
+}
+
+function updateGfwlServerDiagnosticsLabel(mode) {
+  const title = document.getElementById("gfwlServerStateTitle");
+  if (!title) return;
+  if (mode === "ahl") {
+    title.textContent = "Current: AntHill LIVE (AHL)";
+  } else if (mode === "gfwl") {
+    title.textContent = "Current: Microsoft GFWL (Xbox Live)";
+  } else {
+    title.textContent =
+      "Current: Not configured (no server profile in game folder yet)";
+  }
+}
+
+function syncActivationUiFromServerMode(mode) {
+  if (!activateButton) return;
+
+  const isAhl = mode === "ahl";
+
+  activateButton.disabled = isAhl;
+  activateButton.style.opacity = isAhl ? "0.5" : "1";
+  activateButton.style.cursor = isAhl ? "not-allowed" : "pointer";
+  activateButton.title = isAhl
+    ? "Activation is disabled while AntHill LIVE (AHL) server mode is enabled."
+    : "";
+}
+
+async function refreshGfwlServerStatus() {
+  try {
+    const status = await window.api.checkGfwlServer();
+    if (gfwlServerToggle) {
+      gfwlServerToggle.checked = status.mode === "ahl";
+    }
+    syncLauncherLiveLogoFromMode(status.mode);
+    updateGfwlServerDiagnosticsLabel(status.mode);
+    syncActivationUiFromServerMode(status.mode);
+  } catch (error) {
+    console.error("Error checking GFWL server status:", error);
+    syncLauncherLiveLogoFromMode("gfwl");
+    updateGfwlServerDiagnosticsLabel("none");
+    syncActivationUiFromServerMode("none");
+  }
+}
+
+if (gfwlServerToggle) {
+  gfwlServerToggle.addEventListener("change", async () => {
+    const newMode = gfwlServerToggle.checked ? "ahl" : "gfwl";
+    syncLauncherLiveLogoFromMode(newMode);
+    updateGfwlServerDiagnosticsLabel(newMode);
+    syncActivationUiFromServerMode(newMode);
+
+    gfwlServerToggle.disabled = true;
+
+    const feedback = document.getElementById("gfwlServerFeedback");
+    const statusEl = document.getElementById("gfwlServerStatus");
+    if (feedback) feedback.style.display = "block";
+    if (statusEl) statusEl.textContent = newMode === "ahl" ? "Enabling AHL…" : "Switching to real GFWL…";
+
+    try {
+      const result = await window.api.toggleGfwlServer(newMode);
+
+      if (result.success) {
+        showToast(result.message, "success");
+        if (newMode === "ahl") {
+          showToast(
+            "Activation is disabled while AntHill LIVE (AHL) is enabled.",
+            "info",
+            5000
+          );
+        }
+      } else {
+        // Revert
+        gfwlServerToggle.checked = !gfwlServerToggle.checked;
+        syncLauncherLiveLogoFromMode(
+          gfwlServerToggle.checked ? "ahl" : "gfwl"
+        );
+        updateGfwlServerDiagnosticsLabel(
+          gfwlServerToggle.checked ? "ahl" : "gfwl"
+        );
+        syncActivationUiFromServerMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
+        showToast(
+          result.message || "Failed to switch server configuration.",
+          "error",
+          6000
+        );
+      }
+    } catch (error) {
+      console.error("Error toggling GFWL server:", error);
+      gfwlServerToggle.checked = !gfwlServerToggle.checked;
+      syncLauncherLiveLogoFromMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
+      updateGfwlServerDiagnosticsLabel(
+        gfwlServerToggle.checked ? "ahl" : "gfwl"
+      );
+      syncActivationUiFromServerMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
+      showToast(
+        `Server toggle failed: ${error.message || "Unknown error"}. Please try again.`,
+        "error",
+        6000
+      );
+    } finally {
+      if (feedback) feedback.style.display = "none";
+      gfwlServerToggle.disabled = false;
+      applyCooldown(gfwlServerToggle);
+      void refreshGfwlServerStatus();
+    }
+  });
+}
+
+// AHL progress push events (download / extract progress from main process)
+window.api.onAhlProgress((data) => {
+  const statusEl = document.getElementById("gfwlServerStatus");
+  const feedback = document.getElementById("gfwlServerFeedback");
+  if (!statusEl) return;
+
+  if (data.step === "download" || data.step === "extract") {
+    if (feedback) feedback.style.display = "block";
+    statusEl.textContent = data.status;
+  } else if (data.step === "complete") {
+    if (feedback) feedback.style.display = "none";
+  } else if (data.step === "error") {
+    statusEl.textContent = `Error: ${data.status}`;
+  }
+});
+
 // ============================================================
 // ============================================================
 // CHANGELOG VIEWER
@@ -2567,7 +2933,7 @@ async function loadChangelog() {
     if (!changelog) {
       try {
         const serverResponse = await fetch(
-          "http://157.245.214.234/launcher/changelog.json"
+          "https://downloads.shadowrunfps.com/launcher/changelog.json"
         );
         if (serverResponse.ok) {
           changelog = await serverResponse.json();
@@ -2873,8 +3239,6 @@ async function checkPersistentIssues() {
         errorAlertBar.style.display = "block";
       }
 
-      // Update error badges in diagnostics
-      updateErrorBadges();
     } else {
       // Hide alert bar if no issues
       currentIssues = [];
@@ -2882,34 +3246,9 @@ async function checkPersistentIssues() {
       if (errorAlertBar) {
         errorAlertBar.style.display = "none";
       }
-      updateErrorBadges();
     }
   } catch (error) {
     console.error("[Persistent Issues] Error checking issues:", error);
-  }
-}
-
-// Update error indicator badges in diagnostics section
-function updateErrorBadges() {
-  const licenseManagerBadge = document.getElementById(
-    "licenseManagerErrorBadge"
-  );
-  const xboxNetworkingBadge = document.getElementById(
-    "xboxNetworkingErrorBadge"
-  );
-
-  if (licenseManagerBadge) {
-    const hasLicenseIssue = currentIssues.some(
-      (issue) => issue.type === "license_manager"
-    );
-    licenseManagerBadge.style.display = hasLicenseIssue ? "inline" : "none";
-  }
-
-  if (xboxNetworkingBadge) {
-    const hasXboxIssue = currentIssues.some(
-      (issue) => issue.type === "xbox_networking"
-    );
-    xboxNetworkingBadge.style.display = hasXboxIssue ? "inline" : "none";
   }
 }
 
@@ -2962,25 +3301,12 @@ function showStackedErrorAlerts() {
     if (fixBtn) {
       fixBtn.addEventListener("click", async () => {
         hideStackedErrorAlerts();
+        openDiagnosticsAndScrollToIssue();
+
         const diagnosticsScreen = document.getElementById("diagnosticsScreen");
         if (diagnosticsScreen) {
-          diagnosticsScreen.classList.add("visible");
-
-          // Reset scroll position to top when opening
-          const settingsContent =
-            diagnosticsScreen.querySelector(".settings-content");
-          if (settingsContent) {
-            settingsContent.scrollTop = 0;
-          }
-
-          // Load and display current game path
           await loadCurrentGamePath();
-
-          // Auto-detect system info when diagnostics opens (silently, no toast)
           detectAndDisplaySystemInfo(false);
-
-          // Update error badges based on current issues
-          updateErrorBadges();
         }
       });
     }
@@ -3018,6 +3344,27 @@ function hideStackedErrorAlerts() {
   }
 }
 
+function openDiagnosticsAndScrollToIssue() {
+  const diagnosticsScreen = document.getElementById("diagnosticsScreen");
+  if (!diagnosticsScreen) return;
+
+  diagnosticsScreen.classList.add("visible");
+  syncDiagnosticsAudioVolumeSlider();
+
+  const settingsContent = diagnosticsScreen.querySelector(".settings-content");
+  if (!settingsContent) return;
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      settingsContent.scrollTop = 0;
+    });
+  });
+}
+
+function runFixForIssueType() {
+  openDiagnosticsAndScrollToIssue();
+}
+
 // Count badge click handler - show stacked alerts
 if (errorAlertCount) {
   errorAlertCount.addEventListener("click", (e) => {
@@ -3031,29 +3378,13 @@ if (errorAlertCount) {
 // Fix button click handler - opens diagnostics
 if (errorAlertFix) {
   errorAlertFix.addEventListener("click", async () => {
-    // Close stacked alerts if open
     hideStackedErrorAlerts();
+    openDiagnosticsAndScrollToIssue();
 
-    // Open diagnostics screen
     const diagnosticsScreen = document.getElementById("diagnosticsScreen");
     if (diagnosticsScreen) {
-      diagnosticsScreen.classList.add("visible");
-
-      // Reset scroll position to top when opening
-      const settingsContent =
-        diagnosticsScreen.querySelector(".settings-content");
-      if (settingsContent) {
-        settingsContent.scrollTop = 0;
-      }
-
-      // Load and display current game path
       await loadCurrentGamePath();
-
-      // Auto-detect system info when diagnostics opens (silently, no toast)
       detectAndDisplaySystemInfo(false);
-
-      // Update error badges based on current issues
-      updateErrorBadges();
     }
   });
 }
@@ -3071,13 +3402,7 @@ if (errorAlertDismiss) {
 document.addEventListener("DOMContentLoaded", function () {
   console.log("[Renderer] DOMContentLoaded fired.");
 
-  // Check for persistent issues on load
-  checkPersistentIssues();
-
-  // Check for persistent issues periodically (every 30 seconds)
-  setInterval(() => {
-    checkPersistentIssues();
-  }, 30000);
+  refreshGfwlServerStatus();
 
   // Check for persistent issues on load
   checkPersistentIssues();
@@ -3249,35 +3574,50 @@ window.api.onUpdateDownloadStarted(() => {
 
 // Listen for update download progress
 window.api.onUpdateDownloadProgress((progress) => {
-  console.log(`[Renderer] Update download progress: ${progress.percent}%`);
+  const percent = Math.max(0, Math.min(100, Number(progress?.percent ?? 0)));
+  console.log(`[Renderer] Update download progress: ${percent}%`);
 
-  // Update modal progress bar (if modal is visible)
+  // Update modal progress bar (if modal exists and isn't explicitly hidden).
+  // Some CSS may control layout; don't rely on style.display === "flex".
   if (
     launcherUpdateProgressScreen &&
-    launcherUpdateProgressScreen.style.display === "flex"
+    launcherUpdateProgressScreen.style.display !== "none"
   ) {
     if (launcherUpdateProgress) {
-      launcherUpdateProgress.style.width = `${Math.max(
-        0,
-        Math.min(100, progress.percent || 0)
-      )}%`;
+      launcherUpdateProgress.style.width = `${percent}%`;
     }
     if (launcherUpdateStatus) {
-      launcherUpdateStatus.textContent = `Downloading... ${Math.round(
-        progress.percent || 0
-      )}%`;
+      launcherUpdateStatus.textContent = `Downloading... ${Math.round(percent)}%`;
     }
     if (launcherUpdateDetails) {
-      // Format bytes to MB
-      const transferredMB = ((progress.transferred || 0) / 1024 / 1024).toFixed(
+      const transferredMB = ((progress?.transferred || 0) / 1024 / 1024).toFixed(
         2
       );
-      const totalMB = ((progress.total || 0) / 1024 / 1024).toFixed(2);
-      if (progress.total && progress.total > 0) {
+      const totalMB = ((progress?.total || 0) / 1024 / 1024).toFixed(2);
+      if (progress?.total && progress.total > 0) {
         launcherUpdateDetails.textContent = `${transferredMB} MB / ${totalMB} MB`;
       } else {
         launcherUpdateDetails.textContent = `${transferredMB} MB`;
       }
+    }
+  }
+
+  // Show or update a progress toast
+  if (!updateToastId) {
+    updateToastId = showUpdateToast(
+      `Downloading update... ${Math.round(percent)}%`,
+      "info",
+      0,
+      true
+    );
+  } else {
+    const messageEl = updateToastId.querySelector(".toast-message");
+    const progressFill = updateToastId.querySelector(".toast-progress-fill");
+    if (messageEl) {
+      messageEl.textContent = `Downloading update... ${Math.round(percent)}%`;
+    }
+    if (progressFill) {
+      progressFill.style.width = `${percent}%`;
     }
   }
 });
@@ -3520,33 +3860,6 @@ window.api.onUpdateCheckDevMode(() => {
 // ========================================
 // UPDATE DOWNLOAD PROGRESS HANDLERS
 // ========================================
-
-// Listen for download progress (after user confirms)
-window.api.onUpdateDownloadProgress((progress) => {
-  console.log(`[Renderer] Update download progress: ${progress.percent}%`);
-
-  // Show or update a progress toast
-  if (!updateToastId) {
-    // Create a new progress toast if it doesn't exist
-    updateToastId = showUpdateToast(
-      `Downloading update... ${progress.percent}%`,
-      "info",
-      0, // 0 = persistent toast
-      true // show progress bar
-    );
-  } else {
-    // Update existing toast
-    const messageEl = updateToastId.querySelector(".toast-message");
-    const progressFill = updateToastId.querySelector(".toast-progress-fill");
-
-    if (messageEl) {
-      messageEl.textContent = `Downloading update... ${progress.percent}%`;
-    }
-    if (progressFill) {
-      progressFill.style.width = `${progress.percent}%`;
-    }
-  }
-});
 
 // Listen for download complete (after user-initiated download)
 window.api.onUpdateDownloadedSilent((data) => {
@@ -4095,9 +4408,9 @@ if (runDiagnosticsButton) {
         // Create custom diagnostics result modal
         showDiagnosticsResults(diag);
       } else {
-        const errorMsg = result.error || "Unknown error occurred";
+        const errorMsg = result.error || "Something went wrong";
         showToast(
-          `Failed to run diagnostics: ${errorMsg}. Please try again or check console for details.`,
+          `Failed to run diagnostics: ${errorMsg}. Please try again, or run the launcher as Administrator.`,
           "error",
           6000
         );
@@ -4113,8 +4426,8 @@ if (runDiagnosticsButton) {
 
       showToast(
         `Failed to run diagnostics: ${
-          error.message || "Unknown error"
-        }. Please try again or check console for details.`,
+          error.message || "Something went wrong"
+        }. Please try again, or run the launcher as Administrator.`,
         "error",
         6000
       );
@@ -4150,6 +4463,15 @@ function showDiagnosticsResults(diag) {
     gpuName.toUpperCase().includes("RADEON")
       ? gpuName
       : `${diag.gpuInfo.vendor.toUpperCase()} - ${gpuName}`;
+
+  const safePcidForHtml =
+    diag.pcid && diag.pcid.value
+      ? String(diag.pcid.value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+      : "";
 
   modal.innerHTML = `
     <div class="modal-content" style="max-width: 550px; max-height: 85vh; display: flex; flex-direction: column;">
@@ -4198,17 +4520,6 @@ function showDiagnosticsResults(diag) {
             </div>
             
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
-              diag.gpuDrivers
-            )};">
-              <span style="font-size: 13px;">GPU Drivers</span>
-              <span style="color: ${statusColor(
-                diag.gpuDrivers
-              )}; font-weight: 600;">${statusIcon(
-    diag.gpuDrivers
-  )} ${statusText(diag.gpuDrivers)}</span>
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
               diag.dotNet.installed
             )};">
               <span style="font-size: 13px;">.NET Framework 3.5</span>
@@ -4218,6 +4529,29 @@ function showDiagnosticsResults(diag) {
     diag.dotNet.installed ? diag.dotNet.version : "Not Installed"
   }</span>
             </div>
+            
+            <!-- PCID Display -->
+            ${
+              diag.pcid
+                ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${
+              diag.pcid.exists ? "#10b981" : "#94a3b8"
+            };">
+              <span style="font-size: 13px; flex-shrink: 0;">Current PCID</span>
+              ${
+                diag.pcid.exists && diag.pcid.value
+                  ? `<div class="diagnostics-pcid-row">
+                <button type="button" class="diagnostics-pcid-copy-btn" title="Copy PCID" aria-label="Copy PCID to clipboard"><svg class="diagnostics-pcid-copy-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><rect x="3" y="3" width="13" height="13" rx="2" ry="2"></rect></svg></button>
+                <span class="diagnostics-pcid-value">
+                  <span class="diagnostics-pcid-reveal">${safePcidForHtml}</span>
+                </span>
+              </div>`
+                  : `<span style="color: #94a3b8; font-size: 12px; text-align: right;">Not generated — launch the game first.</span>`
+              }
+            </div>
+            `
+                : ""
+            }
           </div>
         </div>
         
@@ -4303,6 +4637,38 @@ function showDiagnosticsResults(diag) {
   `;
 
   document.body.appendChild(modal);
+
+  const copyPcidBtn = modal.querySelector(".diagnostics-pcid-copy-btn");
+  if (copyPcidBtn && diag.pcid && diag.pcid.exists && diag.pcid.value) {
+    const pcidToCopy = diag.pcid.value;
+    copyPcidBtn.addEventListener("click", () => {
+      const notifyCopied = () =>
+        showToast("✅ PCID copied to clipboard!", "success", 3000);
+      navigator.clipboard
+        .writeText(pcidToCopy)
+        .then(notifyCopied)
+        .catch((err) => {
+          console.error("[Diagnostics PCID copy]", err);
+          try {
+            const textArea = document.createElement("textarea");
+            textArea.value = pcidToCopy;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textArea);
+            notifyCopied();
+          } catch (e2) {
+            showToast(
+              "Could not copy PCID. Select the text and copy manually.",
+              "error",
+              4000
+            );
+          }
+        });
+    });
+  }
 }
 
 // Detect System Info (GPU + CPU + OS + NAT)
@@ -4404,10 +4770,10 @@ async function detectAndDisplaySystemInfo(
   }
 }
 
-// Detect System button handler (shows toast on manual click)
+// Detect System button handler (show toast + force re-detect, skip cache)
 if (detectSystemButton) {
   detectSystemButton.addEventListener("click", () =>
-    detectAndDisplaySystemInfo(true)
+    detectAndDisplaySystemInfo(true, true)
   );
 }
 
@@ -4465,268 +4831,3 @@ if (copySystemInfoButton) {
   });
 }
 
-// Fix License Manager
-const fixLicenseManagerButton = document.getElementById(
-  "fixLicenseManagerButton"
-);
-if (fixLicenseManagerButton) {
-  fixLicenseManagerButton.addEventListener("click", async () => {
-    console.log("[License Manager] Attempting fix...");
-    const originalText = fixLicenseManagerButton.textContent;
-    fixLicenseManagerButton.disabled = true;
-    fixLicenseManagerButton.textContent = "Requesting UAC...";
-
-    try {
-      const result = await window.api.fixLicenseManager();
-      console.log("[License Manager] Result:", result);
-
-      if (result.success) {
-        if (result.alreadyRunning) {
-          showToast(
-            "✅ Windows License Manager service is already running. No action needed.",
-            "success",
-            4000
-          );
-        } else {
-          showToast(
-            "✅ Successfully started Windows License Manager service. Error 0x80072746 should be resolved.",
-            "success",
-            5000
-          );
-        }
-      } else if (result.cancelled) {
-        // User cancelled UAC prompt
-        showToast(
-          "⚠️ UAC prompt was cancelled. Service was not started. Please run launcher as Administrator or start the service manually.",
-          "warning",
-          6000
-        );
-      } else if (result.isDisabled) {
-        // Service is disabled
-        alert(
-          `⚠️ Service is Disabled\n\n${result.message}\n\nHow to enable:\n1. Press Win + R and type: services.msc\n2. Find "Windows License Manager Service"\n3. Right-click → Properties\n4. Set "Startup type" to "Manual" or "Automatic"\n5. Click "Apply", then "Start"\n6. Click "OK"`
-        );
-      } else {
-        // Other error
-        alert(`❌ Error\n\n${result.message || result.error}`);
-      }
-    } catch (error) {
-      console.error("[License Manager] Error:", error);
-      alert(`Failed to fix License Manager: ${error.message}`);
-    } finally {
-      fixLicenseManagerButton.disabled = false;
-      fixLicenseManagerButton.textContent = originalText;
-    }
-  });
-}
-
-// Restart Xbox Live Networking Service
-const restartXboxNetworkingButton = document.getElementById(
-  "restartXboxNetworkingButton"
-);
-if (restartXboxNetworkingButton) {
-  restartXboxNetworkingButton.addEventListener("click", async () => {
-    console.log("[Xbox Networking] Attempting restart...");
-    const originalText = restartXboxNetworkingButton.textContent;
-    restartXboxNetworkingButton.disabled = true;
-    restartXboxNetworkingButton.textContent = "Requesting UAC...";
-
-    try {
-      const result = await window.api.restartXboxNetworking();
-      console.log("[Xbox Networking] Result:", result);
-
-      if (result.success) {
-        // Show detailed success message with status transition
-        const message =
-          result.message ||
-          "Successfully restarted Xbox Live Networking service!";
-        showToast(
-          `✅ ${message} P2P connection issues should be resolved.`,
-          "success",
-          5000
-        );
-      } else if (result.cancelled) {
-        // User cancelled UAC prompt
-        showToast(
-          "⚠️ UAC prompt was cancelled. Service was not restarted. Please run launcher as Administrator or restart the service manually.",
-          "warning",
-          6000
-        );
-      } else if (result.isDisabled) {
-        // Service is disabled
-        alert(
-          `⚠️ Service is Disabled\n\n${result.message}\n\nHow to enable:\n1. Press Win + R and type: services.msc\n2. Find "Xbox Live Networking Service"\n3. Right-click → Properties\n4. Set "Startup type" to "Manual" or "Automatic"\n5. Click "Apply", then "Start"\n6. Click "OK"`
-        );
-      } else {
-        // Other error
-        alert(`❌ Error\n\n${result.message || result.error}`);
-      }
-    } catch (error) {
-      console.error("[Xbox Networking] Error:", error);
-      alert(`Failed to restart Xbox Live Networking service: ${error.message}`);
-    } finally {
-      restartXboxNetworkingButton.disabled = false;
-      restartXboxNetworkingButton.textContent = originalText;
-    }
-  });
-}
-
-// Run SFC Scan
-const runSfcScanButton = document.getElementById("runSfcScanButton");
-if (runSfcScanButton) {
-  runSfcScanButton.addEventListener("click", async () => {
-    console.log("[SFC] Running System File Checker...");
-
-    const confirm = window.confirm(
-      "This will open a Command Prompt window and run the System File Checker.\n\n" +
-        "🔒 A UAC prompt will appear - click 'Yes' to grant Administrator privileges.\n\n" +
-        "⚠️ This may take 10-15 minutes to complete.\n\n" +
-        "The scan will check for corrupted Windows system files and repair them.\n\n" +
-        "Continue?"
-    );
-
-    if (!confirm) return;
-
-    try {
-      const result = await window.api.runSfcScan();
-      console.log("[SFC] Result:", result);
-
-      if (result.success) {
-        // No toast needed - the command prompt window opening is sufficient feedback
-      } else {
-        alert(`Error: ${result.error}`);
-      }
-    } catch (error) {
-      console.error("[SFC] Error:", error);
-      alert(`Failed to run SFC scan: ${error.message}`);
-    }
-  });
-}
-
-// Open Windows Update
-const openWindowsUpdateButton = document.getElementById(
-  "openWindowsUpdateButton"
-);
-const driverUpdateDescription = document.getElementById(
-  "driverUpdateDescription"
-);
-
-// Update button text and description based on detected GPU(s)
-async function updateDriverUpdateButton() {
-  if (!openWindowsUpdateButton || !driverUpdateDescription) return;
-
-  try {
-    // Get all GPUs
-    const gpuResult = await window.api.getAllGpus();
-    if (gpuResult.success && gpuResult.gpus && gpuResult.gpus.length > 0) {
-      const allGpus = gpuResult.gpus;
-      // Prioritize dedicated GPUs over integrated (Intel) GPUs
-      const discreteGpus = allGpus.filter(
-        (gpu) => gpu.vendor !== "intel" && gpu.vendor !== "unknown"
-      );
-
-      if (discreteGpus.length === 0) {
-        // Only integrated GPU
-        openWindowsUpdateButton.textContent = "Open Windows Update";
-        driverUpdateDescription.textContent = `Opens Windows Update to install optional driver updates`;
-      } else if (discreteGpus.length === 1) {
-        // Single discrete GPU
-        const gpu = discreteGpus[0];
-        const vendor = gpu.vendor.toLowerCase();
-        if (vendor === "nvidia") {
-          openWindowsUpdateButton.textContent = "Open NVIDIA App";
-          driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${gpu.name}`;
-        } else if (vendor === "amd") {
-          openWindowsUpdateButton.textContent = "Open AMD Software";
-          driverUpdateDescription.textContent = `Opens AMD Software: Adrenalin Edition to update drivers for ${gpu.name}`;
-        } else {
-          openWindowsUpdateButton.textContent = "Open Windows Update";
-          driverUpdateDescription.textContent = `Opens Windows Update to install optional driver updates for ${gpu.name}`;
-        }
-      } else {
-        // Multiple discrete GPUs
-        const vendors = [...new Set(discreteGpus.map((gpu) => gpu.vendor))];
-        const gpuNames = discreteGpus.map((gpu) => gpu.name).join(", ");
-
-        if (vendors.length > 1) {
-          // Mixed vendors (NVIDIA + AMD)
-          openWindowsUpdateButton.textContent = "Open Windows Update";
-          driverUpdateDescription.textContent = `Opens Windows Update to update drivers for multiple GPUs: ${gpuNames}`;
-        } else {
-          // Same vendor, multiple GPUs (SLI/CrossFire)
-          const vendor = discreteGpus[0].vendor.toLowerCase();
-          if (vendor === "nvidia") {
-            openWindowsUpdateButton.textContent = "Open NVIDIA App";
-            driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${discreteGpus.length} GPU(s): ${gpuNames}`;
-          } else if (vendor === "amd") {
-            openWindowsUpdateButton.textContent = "Open AMD Software";
-            driverUpdateDescription.textContent = `Opens AMD Software to update drivers for ${discreteGpus.length} GPU(s): ${gpuNames}`;
-          } else {
-            openWindowsUpdateButton.textContent = "Open Windows Update";
-            driverUpdateDescription.textContent = `Opens Windows Update to update drivers for ${discreteGpus.length} GPU(s): ${gpuNames}`;
-          }
-        }
-      }
-    } else {
-      // Fallback to single GPU detection
-      const singleGpuResult = await window.api.getGpuInfo();
-      if (singleGpuResult.success && singleGpuResult.gpu) {
-        const vendor = singleGpuResult.gpu.vendor.toLowerCase();
-        const gpuName = singleGpuResult.gpu.name;
-        if (vendor === "nvidia") {
-          openWindowsUpdateButton.textContent = "Open NVIDIA App";
-          driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${gpuName}`;
-        } else if (vendor === "amd") {
-          openWindowsUpdateButton.textContent = "Open AMD Software";
-          driverUpdateDescription.textContent = `Opens AMD Software: Adrenalin Edition to update drivers for ${gpuName}`;
-        } else {
-          openWindowsUpdateButton.textContent = "Open Windows Update";
-          driverUpdateDescription.textContent = `Opens Windows Update to install optional driver updates for ${gpuName}`;
-        }
-      }
-    }
-  } catch (error) {
-    console.error("[Driver Updates] Error detecting GPU:", error);
-    // Keep default text if detection fails
-  }
-}
-
-// Update button text when settings screen opens
-if (openWindowsUpdateButton) {
-  // Update on initial load
-  updateDriverUpdateButton();
-
-  openWindowsUpdateButton.addEventListener("click", async () => {
-    console.log("[Driver Updates] Opening driver update software...");
-
-    try {
-      const result = await window.api.openWindowsUpdate();
-      if (result.success) {
-        // Update button text/description if multiple GPUs detected
-        if (result.gpus && result.gpus.length > 1) {
-          const gpuNames = result.gpus.map((gpu) => gpu.name).join(", ");
-          if (result.multipleVendors) {
-            openWindowsUpdateButton.textContent = "Open Windows Update";
-            driverUpdateDescription.textContent = `Opens Windows Update to update drivers for multiple GPUs: ${gpuNames}`;
-          } else {
-            // Same vendor, multiple GPUs (SLI/CrossFire)
-            const vendor = result.gpus[0].vendor.toLowerCase();
-            if (vendor === "nvidia") {
-              openWindowsUpdateButton.textContent = "Open NVIDIA App";
-              driverUpdateDescription.textContent = `Opens NVIDIA App to update drivers for ${result.gpus.length} GPU(s): ${gpuNames}`;
-            } else if (vendor === "amd") {
-              openWindowsUpdateButton.textContent = "Open AMD Software";
-              driverUpdateDescription.textContent = `Opens AMD Software to update drivers for ${result.gpus.length} GPU(s): ${gpuNames}`;
-            }
-          }
-        }
-        // No toast needed - the application opening is sufficient feedback
-      } else {
-        alert(`Error: ${result.error}`);
-      }
-    } catch (error) {
-      console.error("[Driver Updates] Error:", error);
-      alert(`Failed to open driver update software: ${error.message}`);
-    }
-  });
-}

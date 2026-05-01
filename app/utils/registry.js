@@ -1,3 +1,4 @@
+const { safeLog } = require("../main/logger");
 const { exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -39,6 +40,18 @@ const TOKEN_FILE_BASE_PATH = path.join(
 const TOKEN_FILE_PATH = path.join(TOKEN_FILE_BASE_PATH, "Token.bin");
 const CONFIG_FILE_PATH = path.join(TOKEN_FILE_BASE_PATH, "config.bin");
 
+/**
+ * QWORD PCIDs from `reg query` are often shown without leading zeros (e.g. 0x1).
+ * Backup / formatQwordRegValue require exactly 16 hex digits.
+ */
+function normalizePcidHexString(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  const strip = raw.replace(/^0x/i, "").replace(/,/g, "").replace(/\s/g, "");
+  if (!strip || !/^[0-9A-Fa-f]+$/.test(strip)) return null;
+  if (strip.length > 16) return null;
+  return strip.padStart(16, "0").toUpperCase();
+}
+
 // Registry utility functions
 const registryUtils = {
   // Check if PCID exists in registry
@@ -64,8 +77,8 @@ const registryUtils = {
         `reg query "${REGISTRY_PATH_XLIVE}" /v "${PCID_VALUE_NAME}"`,
         (error, stdout, stderr) => {
           if (error) {
-            console.error(`Error querying PCID: ${error.message}`);
-            if (stderr) console.error(`stderr: ${stderr}`);
+            safeLog.error(`Error querying PCID: ${error.message}`);
+            if (stderr) safeLog.error(`stderr: ${stderr}`);
             resolve(null);
             return;
           }
@@ -77,7 +90,15 @@ const registryUtils = {
             )
           );
           if (match && match[1]) {
-            resolve(match[1]);
+            const normalized = normalizePcidHexString(match[1]);
+            if (!normalized) {
+              safeLog.warn(
+                `[RegistryUtils] Could not normalize PCID from registry: ${match[1]}`
+              );
+              resolve(null);
+              return;
+            }
+            resolve(normalized);
           } else {
             resolve(null);
           }
@@ -116,7 +137,7 @@ const registryUtils = {
       // Ensure the file is written as UTF-16LE, as regContent should now include BOM
       fs.writeFile(regFilePath, regContent, "utf16le", (err) => {
         if (err) {
-          console.error(
+          safeLog.error(
             "[RegistryUtils] Error writing .reg file for importRegFile:",
             err
           );
@@ -129,28 +150,28 @@ const registryUtils = {
           try {
             if (fs.existsSync(regFilePath)) {
               fs.unlinkSync(regFilePath);
-              console.log(
+              safeLog.info(
                 `[RegistryUtils] Deleted temp activation .reg file: ${regFilePath}`
               );
             }
           } catch (unlinkErr) {
-            console.warn(
+            safeLog.warn(
               `[RegistryUtils] Could not delete temp activation .reg file ${regFilePath}:`,
               unlinkErr
             );
           }
 
           if (error) {
-            console.error(
+            safeLog.error(
               "[RegistryUtils] Error importing .reg file via 'reg import':",
               error
             );
             if (stderr)
-              console.error(`[RegistryUtils] 'reg import' stderr: ${stderr}`);
+              safeLog.error(`[RegistryUtils] 'reg import' stderr: ${stderr}`);
             reject(error);
             return;
           }
-          console.log(
+          safeLog.info(
             "[RegistryUtils] 'reg import' command executed successfully."
           );
           resolve(true);
@@ -189,7 +210,7 @@ const registryUtils = {
       const result = pairs.join(",");
       return result;
     } catch (error) {
-      console.error("Error in decimalToHexFormat:", error);
+      safeLog.error("Error in decimalToHexFormat:", error);
       // If conversion fails, return a safe string representation
       return String(value);
     }
@@ -244,7 +265,7 @@ const registryUtils = {
     return new Promise((resolve) => {
       exec(`reg query "${REGISTRY_PATH_XLIVE}"`, (error, stdout, stderr) => {
         if (error) {
-          console.error("Registry path access error:", error.message);
+          safeLog.error("Registry path access error:", error.message);
           resolve(false);
           return;
         }
@@ -258,7 +279,7 @@ const registryUtils = {
   dumpRegistryKey: () => {
     return new Promise((resolve) => {
       // Use both possible registry paths
-      console.log("Attempting to dump registry key...");
+      safeLog.info("Attempting to dump registry key...");
 
       const paths = [
         REGISTRY_PATH_XLIVE,
@@ -284,7 +305,7 @@ const registryUtils = {
   // Add this new function to properly format REG_QWORD values
   formatQwordRegValue: (hexQwordValue) => {
     if (!hexQwordValue || hexQwordValue.length !== 16) {
-      console.error(
+      safeLog.error(
         "[RegistryUtils] Invalid hexQwordValue for formatting:",
         hexQwordValue
       );
@@ -297,10 +318,23 @@ const registryUtils = {
     return cleanHex.match(/../g).reverse().join(",");
   },
 
+  // Reverse byte pairs in a hex string (e.g., "b6377a64a9f736a3" -> "a336f7a9647a37b6")
+  reversePcidByteOrder: (pcidHex) => {
+    if (!pcidHex || pcidHex.length !== 16) {
+      safeLog.error(
+        "[RegistryUtils] Invalid PCID for byte reversal:",
+        pcidHex
+      );
+      return pcidHex;
+    }
+    const cleanHex = pcidHex.replace(/^0x/, "").padStart(16, "0").toUpperCase();
+    return cleanHex.match(/../g).reverse().join("");
+  },
+
   // Fix the direct registry add command function
   addSrPcidBackupDirect: (pcidValue) => {
     return new Promise((resolve, reject) => {
-      console.log(
+      safeLog.info(
         "[RegistryUtils] Creating SRPCIDBACKUP registry value from PCID (direct attempt):",
         pcidValue
       );
@@ -326,11 +360,11 @@ const registryUtils = {
       try {
         // Write the .reg file
         fs.writeFileSync(tempRegPath, regContent);
-        console.log(".reg file created at:", tempRegPath);
+        safeLog.info(".reg file created at:", tempRegPath);
 
         // Execute the reg file - this might work without admin rights in some cases
         const command = `regedit /s "${tempRegPath}"`;
-        console.log("Executing command:", command);
+        safeLog.info("Executing command:", command);
 
         exec(command, (error, stdout, stderr) => {
           // Clean up the temp file
@@ -341,19 +375,19 @@ const registryUtils = {
           }
 
           if (error) {
-            console.error("Error importing registry file:", error);
-            console.error("STDERR:", stderr);
+            safeLog.error("Error importing registry file:", error);
+            safeLog.error("STDERR:", stderr);
             reject(
               new Error("Registry access denied. Try running as administrator.")
             );
             return;
           }
 
-          console.log("Registry import completed");
+          safeLog.info("Registry import completed");
           resolve(true);
         });
       } catch (error) {
-        console.error("Error creating or importing registry file:", error);
+        safeLog.error("Error creating or importing registry file:", error);
         reject(error);
       }
     });
@@ -364,10 +398,10 @@ const registryUtils = {
     return new Promise((resolve, reject) => {
       exec(`reg query "${registryPath}"`, (error, stdout) => {
         if (error) {
-          console.error(`Error querying registry path ${registryPath}:`, error);
+          safeLog.error(`Error querying registry path ${registryPath}:`, error);
           resolve({ success: false, error: error.message });
         } else {
-          console.log(`Registry path ${registryPath} contents:`, stdout);
+          safeLog.info(`Registry path ${registryPath} contents:`, stdout);
           resolve({ success: true, content: stdout });
         }
       });
@@ -382,23 +416,19 @@ const registryUtils = {
    */
   backupPcidToRegistryViaRegFile: (pcidValueToBackup) => {
     return new Promise((resolve) => {
-      if (
-        !pcidValueToBackup ||
-        pcidValueToBackup.length !== 16 ||
-        !/^[0-9A-Fa-f]+$/.test(pcidValueToBackup)
-      ) {
-        const errorMsg = `Invalid PCID format for backup: ${pcidValueToBackup}. Must be 16 hex characters.`;
-        console.error(`[RegistryUtils] ${errorMsg}`);
+      const cleanPcidValue = normalizePcidHexString(String(pcidValueToBackup));
+      if (!cleanPcidValue) {
+        const errorMsg = `Invalid PCID format for backup: ${pcidValueToBackup}. Expected up to 16 hex digits (reg.exe may omit leading zeros).`;
+        safeLog.error(`[RegistryUtils] ${errorMsg}`);
         resolve({ success: false, error: errorMsg });
         return;
       }
-      const cleanPcidValue = pcidValueToBackup.toUpperCase(); // Already clean, but good practice
 
       const formattedQwordValue =
         registryUtils.formatQwordRegValue(cleanPcidValue);
       if (!formattedQwordValue) {
         const errorMsg = `Failed to format PCID for .reg file: ${cleanPcidValue}`;
-        console.error(`[RegistryUtils] ${errorMsg}`);
+        safeLog.error(`[RegistryUtils] ${errorMsg}`);
         resolve({ success: false, error: errorMsg });
         return;
       }
@@ -418,7 +448,7 @@ const registryUtils = {
           fs.mkdirSync(tempDir, { recursive: true });
         }
       } catch (dirError) {
-        console.error(
+        safeLog.error(
           `[RegistryUtils] Error creating temp directory ${tempDir}:`,
           dirError
         );
@@ -431,26 +461,26 @@ const registryUtils = {
 
       const tempFileName = `sr_pcid_backup_${Date.now()}.reg`;
       const regFilePath = path.join(tempDir, tempFileName);
-      console.log(`[RegistryUtils] Creating .reg file at: ${regFilePath}`);
+      safeLog.info(`[RegistryUtils] Creating .reg file at: ${regFilePath}`);
 
       try {
         // Write the .reg file with UTF-16 LE encoding.
         // The BOM character in the string will be written as FF FE bytes.
         fs.writeFileSync(regFilePath, regContent, "utf16le");
-        console.log("[RegistryUtils] .reg file content written (with BOM).");
+        safeLog.info("[RegistryUtils] .reg file content written (with BOM).");
 
         const command = `regedit.exe /s "${regFilePath}"`; // RESTORED /s for silent operation
-        console.log(`[RegistryUtils] Executing command: ${command}`);
+        safeLog.info(`[RegistryUtils] Executing command: ${command}`);
 
         exec(command, (error, stdout, stderr) => {
           // Log content again and path for inspection - CAN BE REMOVED IF CONFIDENT
           // try {
           //   const tempFileContent = fs.readFileSync(regFilePath, "utf16le");
-          //   console.log(
+          //   safeLog.info(
           //     `[RegistryUtils] Content of temp file ${regFilePath} (as read by Node):\n${tempFileContent}`
           //   );
           // } catch (readError) {
-          //   console.error(
+          //   safeLog.error(
           //     `[RegistryUtils] Error reading temp file for inspection:`,
           //     readError
           //   );
@@ -460,27 +490,27 @@ const registryUtils = {
           try {
             if (fs.existsSync(regFilePath)) {
               fs.unlinkSync(regFilePath);
-              console.log(
+              safeLog.info(
                 `[RegistryUtils] Temporary .reg file DELETED: ${regFilePath}`
               );
             }
           } catch (cleanupError) {
-            console.warn(
+            safeLog.warn(
               `[RegistryUtils] Warning: Failed to delete temp .reg file ${regFilePath}:`,
               cleanupError
             );
           }
-          // console.log( // No longer needed as file is deleted
+          // safeLog.info( // No longer needed as file is deleted
           //   `[RegistryUtils] Temporary .reg file RETAINED for inspection: ${regFilePath}`
           // );
 
           if (error) {
-            console.error(
+            safeLog.error(
               `[RegistryUtils] Error importing .reg file with regedit.exe:`,
               error
             );
             if (stderr)
-              console.error(`[RegistryUtils] regedit.exe stderr: ${stderr}`);
+              safeLog.error(`[RegistryUtils] regedit.exe stderr: ${stderr}`);
             resolve({
               success: false,
               error: `Failed to import .reg file. Error: ${error.message}. Ensure regedit.exe has permissions.`,
@@ -489,13 +519,13 @@ const registryUtils = {
             return;
           }
 
-          console.log(
+          safeLog.info(
             `[RegistryUtils] .reg file import command executed. stdout: ${stdout}`
           );
 
           // ADD A DELAY HERE before verification
           setTimeout(() => {
-            console.log(
+            safeLog.info(
               "[RegistryUtils] Performing verification query after delay..."
             );
             // Verification step
@@ -503,7 +533,7 @@ const registryUtils = {
               `reg query "${REGISTRY_PATH_XLIVE}" /v "${PCID_BACKUP_VALUE_NAME}"`,
               (verifyError, verifyStdout) => {
                 if (verifyError) {
-                  console.error(
+                  safeLog.error(
                     `[RegistryUtils] Verification query failed for ${PCID_BACKUP_VALUE_NAME}:`,
                     verifyError
                   );
@@ -518,12 +548,11 @@ const registryUtils = {
                       "i"
                     )
                   );
-                  if (
-                    match &&
-                    match[1] &&
-                    match[1].toUpperCase() === cleanPcidValue
-                  ) {
-                    console.log(
+                  const verifiedNorm = match?.[1]
+                    ? normalizePcidHexString(match[1])
+                    : null;
+                  if (verifiedNorm && verifiedNorm === cleanPcidValue) {
+                    safeLog.info(
                       `[RegistryUtils] Successfully verified backup of ${PCID_BACKUP_VALUE_NAME} with value 0x${match[1]}`
                     );
                     resolve({
@@ -532,7 +561,7 @@ const registryUtils = {
                       backupPcid: cleanPcidValue,
                     });
                   } else {
-                    console.warn(
+                    safeLog.warn(
                       `[RegistryUtils] Backup command executed, but verification shows incorrect or missing value. Found: ${verifyStdout}`
                     );
                     resolve({
@@ -547,7 +576,7 @@ const registryUtils = {
           }, 500); // Delay for 500 milliseconds (half a second)
         });
       } catch (fileError) {
-        console.error(
+        safeLog.error(
           "[RegistryUtils] Error writing or executing .reg file:",
           fileError
         );
@@ -561,7 +590,7 @@ const registryUtils = {
 
   activateGameInRegistry: (installPath, productKey) => {
     return new Promise(async (resolve, reject) => {
-      console.log("[RegistryUtils] Attempting to activate game in registry...");
+      safeLog.info("[RegistryUtils] Attempting to activate game in registry...");
       const BOM = "\uFEFF";
 
       let regContent =
@@ -587,16 +616,16 @@ const registryUtils = {
       }
 
       try {
-        console.log(
+        safeLog.info(
           "[RegistryUtils] Importing game activation registry settings..."
         );
         await registryUtils.importRegFile(regContent);
-        console.log(
+        safeLog.info(
           "[RegistryUtils] Game activation registry settings imported successfully."
         );
         resolve({ success: true });
       } catch (error) {
-        console.error(
+        safeLog.error(
           "[RegistryUtils] Failed to import game activation settings:",
           error
         );
@@ -616,12 +645,12 @@ const registryUtils = {
         !/^[0-9A-Fa-f]+$/.test(pcidValueToSet)
       ) {
         const errorMsg = `Invalid PCID format for setting PCID: ${pcidValueToSet}. Must be 16 hex characters.`;
-        console.error(`[RegistryUtils] ${errorMsg}`);
+        safeLog.error(`[RegistryUtils] ${errorMsg}`);
         resolve({ success: false, error: errorMsg });
         return;
       }
       const cleanPcidValue = pcidValueToSet.toUpperCase();
-      console.log(
+      safeLog.info(
         `[RegistryUtils] Attempting to set PCID to: ${cleanPcidValue} in path ${REGISTRY_PATH_XLIVE} as ${PCID_VALUE_NAME}`
       );
 
@@ -629,7 +658,7 @@ const registryUtils = {
         registryUtils.formatQwordRegValue(cleanPcidValue);
       if (!formattedQwordValue) {
         const errorMsg = `Failed to format PCID for .reg file: ${cleanPcidValue}`;
-        console.error(`[RegistryUtils] ${errorMsg}`);
+        safeLog.error(`[RegistryUtils] ${errorMsg}`);
         resolve({ success: false, error: errorMsg });
         return;
       }
@@ -651,35 +680,35 @@ const registryUtils = {
 
       try {
         fs.writeFileSync(regFilePath, regContent, "utf16le");
-        console.log(
+        safeLog.info(
           "[RegistryUtils] .reg file for setting PCID written (with BOM)."
         );
 
         const command = `regedit.exe /s "${regFilePath}"`;
-        console.log(`[RegistryUtils] Executing command: ${command}`);
+        safeLog.info(`[RegistryUtils] Executing command: ${command}`);
 
         exec(command, (error, stdout, stderr) => {
           try {
             if (fs.existsSync(regFilePath)) {
               fs.unlinkSync(regFilePath);
-              console.log(
+              safeLog.info(
                 `[RegistryUtils] Temporary .reg file for setting PCID DELETED: ${regFilePath}`
               );
             }
           } catch (cleanupError) {
-            console.warn(
+            safeLog.warn(
               `[RegistryUtils] Warning: Failed to delete temp .reg file ${regFilePath}:`,
               cleanupError
             );
           }
 
           if (error) {
-            console.error(
+            safeLog.error(
               `[RegistryUtils] Error setting PCID with regedit.exe:`,
               error
             );
             if (stderr)
-              console.error(`[RegistryUtils] regedit.exe stderr: ${stderr}`);
+              safeLog.error(`[RegistryUtils] regedit.exe stderr: ${stderr}`);
             resolve({
               success: false,
               error: `Failed to set PCID. Error: ${error.message}`,
@@ -687,7 +716,7 @@ const registryUtils = {
             return;
           }
 
-          console.log(
+          safeLog.info(
             `[RegistryUtils] Set PCID command executed. stdout: ${stdout}`
           );
           // Verification step
@@ -715,10 +744,10 @@ const registryUtils = {
                       .padStart(16, "0");
 
                     if (registryValue === cleanPcidValue) {
-                      console.log(
+                      safeLog.info(
                         `[RegistryUtils] ✅ PCID set and verified successfully: ${cleanPcidValue}`
                       );
-                      console.log(
+                      safeLog.info(
                         `[RegistryUtils]    Registry returned: 0x${match[1]} (normalized to: ${registryValue})`
                       );
                       resolve({
@@ -728,26 +757,26 @@ const registryUtils = {
                       });
                     } else {
                       const actualValue = match[1].toUpperCase();
-                      console.error(
+                      safeLog.error(
                         `[RegistryUtils] ❌ PCID verification failed!`
                       );
-                      console.error(
+                      safeLog.error(
                         `[RegistryUtils]    Expected: ${cleanPcidValue}`
                       );
-                      console.error(
+                      safeLog.error(
                         `[RegistryUtils]    Found (raw): ${actualValue}`
                       );
-                      console.error(
+                      safeLog.error(
                         `[RegistryUtils]    Found (padded): ${registryValue}`
                       );
-                      console.error(`[RegistryUtils]    Match object:`, match);
+                      safeLog.error(`[RegistryUtils]    Match object:`, match);
                       resolve({
                         success: false,
                         error: `Set PCID command executed, but verification failed. Expected: ${cleanPcidValue}, Found: ${registryValue}`,
                       });
                     }
                   } else {
-                    console.error(
+                    safeLog.error(
                       `[RegistryUtils] ❌ PCID verification failed - no match found!`
                     );
                     resolve({
@@ -762,7 +791,7 @@ const registryUtils = {
           }, 500);
         });
       } catch (fileError) {
-        console.error(
+        safeLog.error(
           "[RegistryUtils] Error writing or executing .reg file for setting PCID:",
           fileError
         );
@@ -780,7 +809,7 @@ const registryUtils = {
         `reg query "${REGISTRY_PATH_XLIVE}" /v "${PCID_BACKUP_VALUE_NAME}"`,
         (error, stdout, stderr) => {
           if (error) {
-            console.warn(
+            safeLog.warn(
               `[RegistryUtils] SRPCIDBACKUP not found or error querying: ${error.message}`
             );
             resolve(null); // Not found or error
@@ -793,12 +822,12 @@ const registryUtils = {
             )
           );
           if (match && match[1]) {
-            console.log(
+            safeLog.info(
               `[RegistryUtils] Found SRPCIDBACKUP value: 0x${match[1]}`
             );
             resolve(match[1].toUpperCase());
           } else {
-            console.warn(
+            safeLog.warn(
               `[RegistryUtils] SRPCIDBACKUP found but value format unexpected: ${stdout}`
             );
             resolve(null);
@@ -812,25 +841,25 @@ const registryUtils = {
     return new Promise((resolve) => {
       let deletedCount = 0;
       let errors = [];
-      const filesToDelete = [TOKEN_FILE_PATH, CONFIG_FILE_PATH];
+      // Only delete config.bin; do NOT delete Token.bin (required for activation)
+      const filesToDelete = [CONFIG_FILE_PATH];
 
-      console.log("[RegistryUtils] Attempting to delete token files...");
-      console.log(`[RegistryUtils] Token file path: ${TOKEN_FILE_PATH}`);
-      console.log(`[RegistryUtils] Config file path: ${CONFIG_FILE_PATH}`);
+      safeLog.info("[RegistryUtils] Attempting to delete config.bin (token cache)...");
+      safeLog.info(`[RegistryUtils] Config file path: ${CONFIG_FILE_PATH}`);
 
       filesToDelete.forEach((filePath) => {
         try {
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
-            console.log(`[RegistryUtils] Deleted file: ${filePath}`);
+            safeLog.info(`[RegistryUtils] Deleted file: ${filePath}`);
             deletedCount++;
           } else {
-            console.log(
+            safeLog.info(
               `[RegistryUtils] File not found, skipping deletion: ${filePath}`
             );
           }
         } catch (err) {
-          console.error(
+          safeLog.error(
             `[RegistryUtils] Error deleting file ${filePath}:`,
             err
           );

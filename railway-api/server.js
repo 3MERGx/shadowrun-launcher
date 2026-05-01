@@ -98,6 +98,16 @@ setInterval(() => {
   }
 }, 30000);
 
+function countPlayersWithStatus(status) {
+  let n = 0;
+  for (const data of activePlayers.values()) {
+    if (data.status === status) {
+      n++;
+    }
+  }
+  return n;
+}
+
 // Heartbeat endpoint - launcher calls this every 30 seconds
 app.post("/api/heartbeat", (req, res) => {
   const {
@@ -148,10 +158,15 @@ app.post("/api/heartbeat", (req, res) => {
     firstSeen: existingPlayer?.firstSeen || now,
   });
 
+  const totalOnline = activePlayers.size;
+  const inGame = countPlayersWithStatus("in-game");
+
   res.json({
     success: true,
     message: "Heartbeat received",
-    totalPlayers: activePlayers.size,
+    totalPlayers: totalOnline,
+    totalOnline,
+    inGame,
   });
 });
 

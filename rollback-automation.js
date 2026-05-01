@@ -30,7 +30,7 @@ const CONFIG = {
   TRACKING_API: 'https://playertracker-production.up.railway.app/api/stats',
   
   // Your rollback config URL
-  ROLLBACK_CONFIG_URL: 'http://157.245.214.234/launcher/rollback.json',
+  ROLLBACK_CONFIG_URL: 'https://downloads.shadowrunfps.com/launcher/rollback.json',
   
   // Threshold: disable rollback when this % of users are on safe version
   THRESHOLD_PERCENTAGE: 95,

@@ -27,7 +27,7 @@
       <button
         id="muteButton"
         class="control-button mute-button"
-        title="Mute/Unmute"
+        title="Mute / unmute launcher audio (volume: Settings → Diagnostics → Launcher Audio)"
       >
         <svg
           id="speakerIcon"
@@ -69,6 +69,23 @@
     </div>
 
     <div class="content">
+      <!-- Top-left brand: LIVE badge only (title bmp not shown). Right-aligned with title slot. -->
+      <div class="launcher-brand-header" aria-hidden="true">
+        <div class="launcher-brand-inner">
+          <div class="launcher-title-slot"></div>
+          <div id="launcherLiveLogoWrap" class="launcher-live-logo-wrap">
+            <img
+              src="../assets/livelogo.png"
+              alt=""
+              class="launcher-live-logo"
+              width="160"
+              height="40"
+              loading="lazy"
+            />
+          </div>
+        </div>
+      </div>
+
       <!-- Main content area -->
       <div class="buttons-container">
         <!-- Main button (Download/Play) -->
@@ -93,7 +110,17 @@
 
       <!-- Version info -->
       <div class="version-info-container">
-        <div class="version-info">Version 1.0.0</div>
+        <div class="version-info-stack">
+          <div
+            class="player-count-info"
+            id="playerCountInfo"
+            title="Launchers reporting in-game (community tracker; updates about every 30s)"
+            role="status"
+          >
+            In Game: --
+          </div>
+          <div class="version-info">Version 1.0.0</div>
+        </div>
         <button
           id="updateAvailableIndicator"
           class="update-indicator"
@@ -152,31 +179,6 @@
         </div>
         <div id="errorListContent" class="error-list-content"></div>
       </div>
-
-      <!-- Add this just before the version-info div
-      <div class="player-count-container">
-        <div class="player-count">
-          <span id="playerCountIcon">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-              <circle cx="9" cy="7" r="4"></circle>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-            </svg>
-          </span>
-          <span id="playerCount">--</span> online
-        </div>
-      </div> -->
 
       <!-- Add this before the closing div.content -->
       <div class="social-icons">
@@ -371,6 +373,37 @@
           </div>
         </div>
 
+        <!-- Server Configuration Section -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Server Configuration</h3>
+
+          <div class="setting-item">
+            <div class="setting-label-group">
+              <label for="gfwlServerToggle"
+                ><span id="gfwlServerStateTitle">Current: —</span></label
+              >
+              <span class="setting-description"
+                >When off, the launcher uses Microsoft's GFWL endpoints. Turn
+                on only if you play on AntHill LIVE.</span
+              >
+              <div
+                id="gfwlServerFeedback"
+                class="setting-progress-indicator"
+                style="display: none"
+              >
+                <div class="progress-spinner-row">
+                  <div class="progress-spinner"></div>
+                  <span id="gfwlServerStatus"></span>
+                </div>
+              </div>
+            </div>
+            <div class="toggle-switch">
+              <input type="checkbox" id="gfwlServerToggle" />
+              <span class="toggle-slider"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- Run All Diagnostics Section -->
         <div class="settings-section">
           <h3 class="settings-section-title">Quick Diagnostics</h3>
@@ -502,6 +535,42 @@
           </div>
         </div>
 
+        <!-- Launcher background audio (same source as top-right mute) -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Launcher Audio</h3>
+          <div class="setting-item">
+            <div class="setting-label-group" style="width: 100%">
+              <label for="backgroundAudioVolumeSlider">Background volume</label>
+              <span class="setting-description">
+                Ambience loop and button sounds. The speaker icon (top-right)
+                mutes instantly; this slider sets the level for when audio is
+                unmuted. While muted, this row is dimmed; dragging the slider
+                unmutes (not while the game is running — launcher stays quiet
+                then).
+              </span>
+              <div
+                class="background-audio-volume-row"
+                id="backgroundAudioVolumeRow"
+              >
+                <input
+                  type="range"
+                  id="backgroundAudioVolumeSlider"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="50"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                />
+                <span
+                  id="backgroundAudioVolumeValue"
+                  class="background-audio-volume-value"
+                >50%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Game Location Management Section -->
         <div class="settings-section">
           <h3 class="settings-section-title">Game Location</h3>
@@ -592,89 +661,6 @@
           </div>
         </div>
 
-        <!-- Error Fixes Section -->
-        <div class="settings-section">
-          <h3 class="settings-section-title">Common Error Fixes</h3>
-
-          <div class="setting-item">
-            <div class="setting-label-group">
-              <label>
-                Fix License Manager Error
-                <span
-                  id="licenseManagerErrorBadge"
-                  class="error-indicator-badge"
-                  style="display: none"
-                  title="Issue detected"
-                  >*</span
-                >
-              </label>
-              <span class="setting-description"
-                >Fixes error 0x80072746 by starting Windows License Manager
-                Service</span
-              >
-            </div>
-            <button id="fixLicenseManagerButton" class="settings-action-button">
-              Fix License Manager
-            </button>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-label-group">
-              <label>
-                Restart Xbox Live Networking
-                <span
-                  id="xboxNetworkingErrorBadge"
-                  class="error-indicator-badge"
-                  style="display: none"
-                  title="Issue detected"
-                  >*</span
-                >
-              </label>
-              <span class="setting-description"
-                >Restarts Xbox Live Networking Service to fix connection
-                issues</span
-              >
-            </div>
-            <button
-              id="restartXboxNetworkingButton"
-              class="settings-action-button"
-            >
-              Restart Service
-            </button>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-label-group">
-              <label
-                >System File Checker
-                <span style="color: #60a5fa; font-size: 12px">🔒</span></label
-              >
-              <span class="setting-description"
-                >Runs Windows SFC scan to fix corrupted system files</span
-              >
-            </div>
-            <button id="runSfcScanButton" class="settings-action-button">
-              Run SFC Scan
-            </button>
-          </div>
-        </div>
-
-        <!-- Driver Updates Section -->
-        <div class="settings-section">
-          <h3 class="settings-section-title">Driver Updates</h3>
-
-          <div class="setting-item">
-            <div class="setting-label-group">
-              <label>Update GPU Drivers</label>
-              <span id="driverUpdateDescription" class="setting-description"
-                >Opens driver update software for your GPU</span
-              >
-            </div>
-            <button id="openWindowsUpdateButton" class="settings-action-button">
-              Open Driver Software
-            </button>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -686,6 +672,9 @@
           <button id="closeInstructionsButton" class="close-button">×</button>
         </div>
         <div class="modal-body">
+          <p style="margin: 0 0 14px 0; padding: 6px 10px; font-size: 12px; line-height: 1.4; background: rgba(59, 130, 246, 0.15); border-left: 3px solid #3b82f6; border-radius: 4px;">
+            <strong>Already have the game installed?</strong> Click <strong>Download</strong> → <strong>Select Existing Game</strong>, browse to your game folder, then continue from step 2 (Launch Game First).
+          </p>
           <div class="instructions-intro">
             <p>
               Follow these steps to install and activate Shadowrun (10-15 min).
@@ -719,6 +708,12 @@
                   Close the game, then click "Activate Game" in the launcher.
                   Allow administrator permissions when Windows prompts you (UAC
                   dialog).
+                </p>
+                <p class="instruction-step-note">
+                  <strong>Note:</strong> This step is only for
+                  <strong>GFWL-enabled</strong> installs (retail / Games for
+                  Windows Live). If your build does not use GFWL, you can skip
+                  launcher activation.
                 </p>
               </div>
             </li>

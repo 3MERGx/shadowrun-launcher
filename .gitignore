@@ -103,13 +103,8 @@ secure-config.json
 # Electron Builder output
 dist/
 
-# Compiled helper binaries (but keep RegistryWriter.exe)
-audio-volume-helper.exe
-audio-volume-helper.obj
-xlive-helper.exe
-xlive-helper.obj
+# Local activation keys (never commit real keys)
+app/config/activationKeys.json
 
-# Temporary files
-.commit-msg.txt
-
-activationKeys.json
+# Native compile intermediates
+*.obj
