@@ -44,6 +44,12 @@ contextBridge.exposeInMainWorld("api", {
   onGfwlInstallProgress: (callback) => {
     ipcRenderer.on("gfwl-install-progress", (_, message) => callback(message));
   },
+  onVcProgress: (callback) => {
+    ipcRenderer.on("vc-progress", (_, progress) => callback(progress));
+  },
+  onVcInstallProgress: (callback) => {
+    ipcRenderer.on("vc-install-progress", (_, message) => callback(message));
+  },
   onDownloadMessage: (callback) => {
     ipcRenderer.on("download-message", (_, message) => callback(message));
   },
@@ -170,6 +176,7 @@ contextBridge.exposeInMainWorld("api", {
   getSystemInfo: (forceRefresh) =>
     ipcRenderer.invoke("get-system-info", forceRefresh),
   checkDirectX: () => ipcRenderer.invoke("check-directx"),
+  installVcRedistX86: () => ipcRenderer.invoke("install-vc-redist-x86"),
 
   // Auto-updater methods
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
@@ -231,6 +238,17 @@ contextBridge.exposeInMainWorld("api", {
       callback(data)
     );
   },
+
+  // Portable-build update notification (informational only — no installer)
+  onPortableUpdateAvailable: (callback) => {
+    ipcRenderer.on("portable-update-available", (event, data) =>
+      callback(data)
+    );
+  },
+
+  // Returns { isPortable, portableDownloadUrl } so the renderer can adapt UI
+  getLauncherRuntimeInfo: () =>
+    ipcRenderer.invoke("get-launcher-runtime-info"),
 
   // Game location management
   getGameInstallationPath: () =>

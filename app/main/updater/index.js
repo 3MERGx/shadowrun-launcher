@@ -35,7 +35,17 @@ const { exec } = require("child_process");
 const { app } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { safeLog } = require("../logger");
-const { UPDATE_SERVER_URL, UPDATE_TIMEOUT_MS } = require("../config/constants");
+const {
+  UPDATE_SERVER_URL,
+  PORTABLE_EXE_DOWNLOAD_URL,
+  UPDATE_TIMEOUT_MS,
+} = require("../config/constants");
+
+/** Same artifact naming as `get-manual-download-url` for installed (NSIS) builds. */
+function getNsisSetupInstallerUrl(version) {
+  if (!version) return null;
+  return `${UPDATE_SERVER_URL}/Shadowrun%20FPS%20Launcher%20Setup%20${version}.exe`;
+}
 
 // Compare semantic versions (returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2)
 function compareVersions(v1, v2) {
@@ -51,6 +61,45 @@ function compareVersions(v1, v2) {
   }
 
   return 0;
+}
+
+// Fetches latest.yml from the update server and returns the latest version
+// string. Used in dev mode so manual update checks still hit the live CDN
+// even though electron-updater refuses to run when app.isPackaged is false.
+async function fetchLatestVersionFromServer() {
+  return new Promise((resolve, reject) => {
+    const url = `${UPDATE_SERVER_URL}/latest.yml`;
+    const protocol = url.startsWith("https") ? https : http;
+    protocol
+      .get(url, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          const match = data.match(/^version:\s*(.+)/m);
+          if (match) {
+            resolve(match[1].trim());
+          } else {
+            reject(new Error("Could not parse version from latest.yml"));
+          }
+        });
+      })
+      .on("error", reject);
+  });
+}
+
+// Returns true when the app is running as a portable .exe built by
+// electron-builder. The portable launcher sets PORTABLE_EXECUTABLE_DIR (and
+// usually PORTABLE_EXECUTABLE_FILE) at launch time; the NSIS-installed copy
+// never sets these, so they're a reliable signal. We also require
+// app.isPackaged so dev runs are never misidentified.
+function isPortableLauncher() {
+  return (
+    app.isPackaged &&
+    Boolean(
+      process.env.PORTABLE_EXECUTABLE_DIR ||
+        process.env.PORTABLE_EXECUTABLE_FILE
+    )
+  );
 }
 
 // Check for rollback configuration. Pulled out as a free function because
@@ -315,8 +364,26 @@ function setupUpdater(deps) {
       return;
     }
 
-    // Always show the confirmation dialog (both manual and automatic checks)
-    // User must confirm before downloading
+    // Portable builds cannot run the NSIS installer flow. Send a separate
+    // event so the renderer shows an informational notice with a manual
+    // download link instead of the install-and-restart dialog.
+    if (isPortableLauncher()) {
+      safeLog.info(
+        `[Updater] Portable build detected - sending portable-update-available instead of install dialog`
+      );
+      mainWindow.webContents.send("portable-update-available", {
+        version: info.version,
+        releaseNotes: info.releaseNotes,
+        currentVersion: app.getVersion(),
+        manualDownloadUrl: PORTABLE_EXE_DOWNLOAD_URL,
+        nsisInstallerUrl: getNsisSetupInstallerUrl(info.version),
+        isManual: isManualUpdateCheck,
+      });
+      return;
+    }
+
+    // Installed (NSIS) build — show the confirmation dialog so the user
+    // can confirm before downloading.
     safeLog.info(
       `[Updater] ${
         isManualUpdateCheck ? "Manual" : "Automatic"
@@ -605,24 +672,52 @@ function setupUpdater(deps) {
 
       if (isDev) {
         safeLog.info("[Updater] ==========================================");
-        safeLog.info("[Updater] 🔧 DEVELOPMENT MODE - CHECK FOR UPDATES");
+        safeLog.info("[Updater] 🔧 DEVELOPMENT MODE - LIVE VERSION CHECK");
         safeLog.info("[Updater] ==========================================");
         safeLog.info(
-          "[Updater] Development mode detected - auto-updater disabled"
+          "[Updater] Dev mode: electron-updater is disabled, doing manual fetch"
         );
-        safeLog.info(
-          `[Updater] In production, this would check: ${UPDATE_SERVER_URL}/latest.yml`
-        );
+        safeLog.info(`[Updater] Fetching: ${UPDATE_SERVER_URL}/latest.yml`);
 
-        // Add a small delay so user can see the "Checking..." button state
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const devWindow = getMainWindow();
 
-        safeLog.info("[Updater] Sending dev mode message to renderer...");
+        try {
+          const latestVersion = await fetchLatestVersionFromServer();
+          const currentVersion = app.getVersion();
+          safeLog.info(
+            `[Updater] Dev check — current: ${currentVersion}, latest: ${latestVersion}`
+          );
 
-        const mainWindow = getMainWindow();
-        // Send dev mode message to renderer
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("update-check-dev-mode");
+          if (compareVersions(currentVersion, latestVersion) < 0) {
+            safeLog.info(
+              "[Updater] Dev mode: update found — simulating portable-update-available"
+            );
+            if (devWindow && !devWindow.isDestroyed()) {
+              devWindow.webContents.send("portable-update-available", {
+                version: latestVersion,
+                releaseNotes: null,
+                currentVersion,
+                manualDownloadUrl: PORTABLE_EXE_DOWNLOAD_URL,
+                nsisInstallerUrl: getNsisSetupInstallerUrl(latestVersion),
+                isManual: true,
+              });
+            }
+          } else {
+            safeLog.info("[Updater] Dev mode: already on latest version");
+            if (devWindow && !devWindow.isDestroyed()) {
+              devWindow.webContents.send("update-not-available", {
+                version: currentVersion,
+              });
+            }
+          }
+        } catch (fetchErr) {
+          safeLog.warn(
+            "[Updater] Dev mode version fetch failed:",
+            fetchErr.message
+          );
+          if (devWindow && !devWindow.isDestroyed()) {
+            devWindow.webContents.send("update-check-dev-mode");
+          }
         }
 
         safeLog.info("[Updater] ==========================================");
@@ -630,25 +725,31 @@ function setupUpdater(deps) {
         return { success: true, devMode: true };
       }
 
-      // First check for rollback config
-      const rollbackConfig = await checkRollbackConfig();
-      if (rollbackConfig.enabled) {
-        safeLog.info(
-          "[Rollback] Rollback mode enabled - checking if rollback needed"
-        );
-        const rollbackTriggered = await forceVersionDownload(
-          rollbackConfig.targetVersion,
-          rollbackConfig.reason
-        );
+      // Rollback uses NSIS installers — skip entirely for portable builds.
+      if (!isPortableLauncher()) {
+        const rollbackConfig = await checkRollbackConfig();
+        if (rollbackConfig.enabled) {
+          safeLog.info(
+            "[Rollback] Rollback mode enabled - checking if rollback needed"
+          );
+          const rollbackTriggered = await forceVersionDownload(
+            rollbackConfig.targetVersion,
+            rollbackConfig.reason
+          );
 
-        // If rollback was shown to user, stop here
-        if (rollbackTriggered) {
-          return { success: true, devMode: false, rollback: true };
+          // If rollback was shown to user, stop here
+          if (rollbackTriggered) {
+            return { success: true, devMode: false, rollback: true };
+          }
+
+          // If user is already on target version or older, continue to normal update check
+          safeLog.info(
+            "[Rollback] User already on safe version - checking for normal updates"
+          );
         }
-
-        // If user is already on target version or older, continue to normal update check
+      } else {
         safeLog.info(
-          "[Rollback] User already on safe version - checking for normal updates"
+          "[Updater] Portable build - skipping rollback check (NSIS-only path)"
         );
       }
 
@@ -740,6 +841,18 @@ function setupUpdater(deps) {
 
   // Handle user confirming update download from custom dialog
   ipcMain.handle("confirm-update-download", async () => {
+    // Portable builds can't run the NSIS installer — bail early.
+    if (isPortableLauncher()) {
+      safeLog.warn(
+        "[Updater] confirm-update-download called on portable build - ignoring"
+      );
+      return {
+        success: false,
+        error:
+          "Automatic installation is not supported for the portable launcher. Please download the new portable .exe manually.",
+      };
+    }
+
     try {
       safeLog.info("[Updater] User confirmed update download");
 
@@ -817,16 +930,27 @@ function setupUpdater(deps) {
     }
   });
 
-  // Provide manual download URL
+  // Provide manual download URL. For portable builds the artifact is a
+  // single fixed-name .exe ("Shadowrun FPS Launcher.exe") rather than the
+  // versioned NSIS Setup installer.
   ipcMain.handle("get-manual-download-url", async () => {
     try {
       const version = pendingUpdateInfo?.version || app.getVersion();
-      const downloadUrl = `${UPDATE_SERVER_URL}/Shadowrun%20FPS%20Launcher%20Setup%20${version}.exe`;
+
+      if (isPortableLauncher()) {
+        return {
+          success: true,
+          url: PORTABLE_EXE_DOWNLOAD_URL,
+          version,
+          isPortable: true,
+        };
+      }
 
       return {
         success: true,
-        url: downloadUrl,
-        version: version,
+        url: `${UPDATE_SERVER_URL}/Shadowrun%20FPS%20Launcher%20Setup%20${version}.exe`,
+        version,
+        isPortable: false,
       };
     } catch (error) {
       return { success: false, error: error.message };
@@ -838,11 +962,21 @@ function setupUpdater(deps) {
     return app.getVersion();
   });
 
+  // Expose portable-vs-installed info to the renderer so it can adapt its UI
+  // without needing to know about process.env directly.
+  ipcMain.handle("get-launcher-runtime-info", () => {
+    return {
+      isPortable: isPortableLauncher(),
+      portableDownloadUrl: PORTABLE_EXE_DOWNLOAD_URL,
+    };
+  });
+
   // ---- Public API ----
 
   return {
     checkForUpdates,
     checkForFailedInstallation,
+    isPortable: isPortableLauncher,
     getUpdateInfo: () => ({ updateAvailable, latestVersion }),
     bumpUpdateFromFallback: (version) => {
       // Used by the Discord RPC fallback path: peers report a higher

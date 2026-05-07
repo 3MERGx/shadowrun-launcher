@@ -30,11 +30,22 @@ const fs = require("fs");
 const http = require("http");
 const https = require("https");
 
+const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 15;
+
 // Replace the current downloadFile function with this one that handles both HTTP and HTTPS
 async function downloadFile(url, destination, progressCallback, opts = {}) {
   const isCancelled = typeof opts.isCancelled === "function"
     ? opts.isCancelled
     : () => false;
+
+  const redirectCount =
+    typeof opts.redirectCount === "number" ? opts.redirectCount : 0;
+  if (redirectCount > MAX_REDIRECTS) {
+    const err = new Error(`Too many HTTP redirects (max ${MAX_REDIRECTS})`);
+    err.code = "HTTP_TOO_MANY_REDIRECTS";
+    return { success: false, error: err };
+  }
 
   return new Promise((resolve) => {
     safeLog.info(`Downloading file from ${url} to ${destination}`);
@@ -50,6 +61,8 @@ async function downloadFile(url, destination, progressCallback, opts = {}) {
     let isResolved = false;
     let firstChunkReceived = false;
     let downloadError = null;
+    /** When following an HTTP redirect we abort the outer request; ignore its error/timeout. */
+    let abandonedForRedirect = false;
 
     // Helper to safely resolve
     const safeResolve = (success, error = null) => {
@@ -84,6 +97,53 @@ async function downloadFile(url, destination, progressCallback, opts = {}) {
 
     const request = httpModule.get(url, requestOptions, (response) => {
       safeLog.info(`Download response status: ${response.statusCode}`);
+
+      // aka.ms and Microsoft CDNs often respond with 301/302 + Location — follow like a browser
+      if (REDIRECT_STATUS_CODES.has(response.statusCode)) {
+        abandonedForRedirect = true;
+        try {
+          request.setTimeout(0);
+        } catch (_e) {}
+        const location = response.headers.location;
+        try {
+          response.resume();
+        } catch (_e) {}
+        try {
+          request.abort();
+        } catch (_e) {}
+        try {
+          file.destroy();
+        } catch (_e) {}
+        try {
+          fs.unlinkSync(destination);
+        } catch (_e) {}
+
+        if (!location) {
+          const error = new Error(
+            `HTTP ${response.statusCode} redirect without Location header`
+          );
+          error.code = `HTTP_${response.statusCode}`;
+          safeResolve(false, error);
+          return;
+        }
+
+        const nextUrl = new URL(location, url).href;
+        safeLog.info(
+          `Following HTTP ${response.statusCode} redirect to ${nextUrl}`
+        );
+
+        downloadFile(nextUrl, destination, progressCallback, {
+          ...opts,
+          isCancelled,
+          redirectCount: redirectCount + 1,
+        }).then((result) => {
+          if (!isResolved) {
+            isResolved = true;
+            resolve(result);
+          }
+        });
+        return;
+      }
 
       // Report that connection established
       if (progressCallback && response.statusCode === 200) {
@@ -241,6 +301,9 @@ async function downloadFile(url, destination, progressCallback, opts = {}) {
     });
 
     request.on("error", (err) => {
+      if (abandonedForRedirect) {
+        return;
+      }
       // Don't log error if it was due to cancellation
       if (!isCancelled() && !isCancelledInternal) {
         safeLog.error(`Download error: ${err.message} Code: ${err.code}`);
@@ -258,6 +321,9 @@ async function downloadFile(url, destination, progressCallback, opts = {}) {
 
     // Set request timeout for connection issues
     request.setTimeout(30000, () => {
+      if (abandonedForRedirect) {
+        return;
+      }
       if (!isFinished && !isResolved) {
         safeLog.error("Download timeout after 30 seconds");
         request.abort();

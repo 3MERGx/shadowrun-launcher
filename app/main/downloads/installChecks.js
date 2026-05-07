@@ -14,10 +14,17 @@
 //   - isGFWLInstalled: requires the GFWL Live Client folder AND at least one
 //     of the two known executable names (gfwlclient.exe / GFWLClient.exe -
 //     casing varies between installer versions).
+//   - isVcRedistX86Installed: matches Control Panel — enumerates Uninstall registry
+//     keys for "Microsoft Visual C++ … (x86)" entries in the VS2015–2022 / v14
+//     family (DisplayName contains v14, 2015-2022, or standalone 2015/17/19/22).
+//     We do NOT rely on VisualStudio\14.0\VC\Runtimes\x86 "Installed" alone; it
+//     can stay set after an uninstall. We do NOT use vcruntime140.dll (often left
+//     on disk after uninstall).
 
 const { safeLog } = require("../logger");
 const fs = require("fs");
 const path = require("path");
+const { execFile } = require("child_process");
 
 // Helper function to check if DirectX 9 is installed
 // Checks for d3dx9_43.dll which indicates DirectX 9 runtime components are installed
@@ -87,4 +94,64 @@ function isGFWLInstalled() {
   });
 }
 
-module.exports = { isDX9Installed, isGFWLInstalled };
+// Check if Microsoft Visual C++ v14 Redistributable (x86) is installed.
+//
+// Uses the same source as Control Panel (Uninstall registry DisplayName), not
+// VisualStudio\...\Runtimes\x86 — that key can lag or remain non-zero after uninstall.
+function isVcRedistX86Installed() {
+  return new Promise((resolve) => {
+    safeLog.debug(
+      "[VC++ Check] Scanning Uninstall keys for Microsoft Visual C++ v14 (x86) redistributable..."
+    );
+
+    const psScript = `
+$ok = $false
+$roots = @(
+  'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
+)
+foreach ($root in $roots) {
+  if (-not (Test-Path $root)) { continue }
+  $keys = Get-ChildItem $root -ErrorAction SilentlyContinue
+  foreach ($key in $keys) {
+    $dn = (Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue).DisplayName
+    if ([string]::IsNullOrEmpty($dn)) { continue }
+    if ($dn -notlike '*Visual C++*') { continue }
+    if ($dn -notlike '*(x86)*') { continue }
+    if ($dn -like '*v14*') { $ok = $true; break }
+    if ($dn -like '*2015-2022*') { $ok = $true; break }
+    if ($dn -like '*Visual C++ 2015*') { $ok = $true; break }
+    if ($dn -like '*Visual C++ 2017*') { $ok = $true; break }
+    if ($dn -like '*Visual C++ 2019*') { $ok = $true; break }
+    if ($dn -like '*Visual C++ 2022*') { $ok = $true; break }
+  }
+  if ($ok) { break }
+}
+if ($ok) { exit 0 } else { exit 1 }
+`.trim();
+
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psScript],
+      { windowsHide: true, timeout: 30000 },
+      (error) => {
+        const installed = !error;
+        if (installed) {
+          safeLog.debug(
+            "[VC++ Check] ✅ Found matching Uninstall entry (Microsoft Visual C++ v14 x86)"
+          );
+        } else {
+          if (error && error.code !== 1) {
+            safeLog.warn("[VC++ Check] PowerShell probe failed:", error.message);
+          }
+          safeLog.debug(
+            "[VC++ Check] ❌ No Microsoft Visual C++ v14 Redistributable (x86) entry in Uninstall registry"
+          );
+        }
+        resolve(installed);
+      }
+    );
+  });
+}
+
+module.exports = { isDX9Installed, isGFWLInstalled, isVcRedistX86Installed };

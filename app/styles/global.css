@@ -411,6 +411,22 @@ input:checked + .toggle-slider:before {
   background-color: #475569;
 }
 
+/* Primary / muted variants (pre-install consent modal, inline with Settings actions) */
+.settings-action-button.accent-primary {
+  background-color: #3b82f6;
+  border: 1px solid #60a5fa;
+}
+.settings-action-button.accent-primary:hover {
+  background-color: #2563eb;
+}
+.settings-action-button.accent-muted {
+  background-color: rgba(51, 65, 85, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+.settings-action-button.accent-muted:hover {
+  background-color: rgba(71, 85, 105, 0.95);
+}
+
 /* Custom focus styles */
 button:focus {
   outline: 2px solid #38bdf8;

@@ -310,10 +310,10 @@
           <h3 class="settings-section-title">Advanced</h3>
 
           <!-- Check for Updates Button -->
-          <div class="setting-item">
+          <div class="setting-item" id="checkUpdatesSettingItem">
             <div class="setting-label-group">
               <label>Check for Updates</label>
-              <span class="setting-description"
+              <span id="checkUpdatesDescription" class="setting-description"
                 >Check if a new version of the launcher is available<br />
                 <a
                   id="viewChangelogLink"
@@ -965,6 +965,13 @@
               <div id="dxProgress" class="progress-bar"></div>
             </div>
             <p id="dxStatus" class="progress-status">Waiting...</p>
+          </div>
+          <div class="progress-item" data-component="vcredist">
+            <p><strong>Microsoft Visual C++ v14 Redistributable (x86)</strong></p>
+            <div class="progress-container">
+              <div id="vcProgress" class="progress-bar"></div>
+            </div>
+            <p id="vcStatus" class="progress-status">Waiting...</p>
           </div>
           <div class="download-message">
             <p id="downloadMessage">

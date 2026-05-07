@@ -771,6 +771,20 @@ const changelogContent = document.getElementById("changelogContent");
 
 // Game state (this would normally be managed by the main process)
 let gameInstalled = false;
+/** True when Shadowrun.exe is resolved at the configured path — even if GFWL/DX/VC deps are still missing */
+let gameFilesLocated = false;
+
+function applyInstallationCheckResult(result) {
+  if (!result) return;
+  gameInstalled = !!result.installed;
+  const gf = result.dependencies?.gameFiles;
+  if (typeof gf === "boolean") {
+    gameFilesLocated = gf || gameInstalled;
+  } else {
+    gameFilesLocated = gameInstalled;
+  }
+}
+
 let settings = {
   skipIntro: false,
   dxvk: false,
@@ -787,9 +801,11 @@ const downloadProgressScreen = document.getElementById(
 );
 const gameFilesProgress = document.getElementById("gameFilesProgress");
 const gfwlProgress = document.getElementById("gfwlProgress");
+const vcProgress = document.getElementById("vcProgress");
 const dxProgress = document.getElementById("dxProgress");
 const gameFilesStatus = document.getElementById("gameFilesStatus");
 const gfwlStatus = document.getElementById("gfwlStatus");
+const vcStatus = document.getElementById("vcStatus");
 const dxStatus = document.getElementById("dxStatus");
 const downloadMessage = document.getElementById("downloadMessage");
 const versionInfo = document.querySelector(".version-info");
@@ -893,17 +909,20 @@ window.api.onGameStateUpdate((state) => {
 
 // Add this early in the script to check installation on load
 window.api.checkGameInstalled().then((result) => {
-  gameInstalled = result.installed;
+  applyInstallationCheckResult(result);
   updateUI();
 });
 
 // Add event listener for installation status updates
 window.api.onGameInstallationStatus((status) => {
   console.log("Received game installation status:", status);
-  gameInstalled = status.installed;
+  applyInstallationCheckResult({
+    installed: status.installed,
+    dependencies: status.dependencies,
+  });
   updateUI();
 
-  if (gameInstalled) {
+  if (gameInstalled || gameFilesLocated) {
     console.log("Game found at:", status.path);
   }
 });
@@ -1002,7 +1021,7 @@ function updateUI() {
   );
 
   if (openGameDirButton) {
-    if (gameInstalled) {
+    if (gameFilesLocated) {
       openGameDirButton.textContent = "Open Game Folder";
       if (gameFolderLabel)
         gameFolderLabel.textContent = "Game Installation Folder";
@@ -1133,6 +1152,18 @@ function updateUI() {
       gfwlServerStateTitle.textContent =
         "Current: Not available (game location not set)";
     }
+
+    // Game files exist but runtime deps (e.g. VC++) missing — still allow changing location
+    if (gameFilesLocated) {
+      const changeGameLocationButtonPartial = document.getElementById(
+        "changeGameLocationButton"
+      );
+      if (changeGameLocationButtonPartial) {
+        changeGameLocationButtonPartial.disabled = false;
+        changeGameLocationButtonPartial.style.opacity = "1";
+        changeGameLocationButtonPartial.style.cursor = "pointer";
+      }
+    }
   }
 }
 
@@ -1245,18 +1276,19 @@ playButton.addEventListener("click", async () => {
     console.log("Verifying game still exists before launch...");
     // Re-check game installation status to catch renamed/moved folders
     const checkResult = await window.api.checkGameInstalled();
-    if (!checkResult.installed || !checkResult.dependencies?.gameFiles) {
+    if (!checkResult.dependencies?.gameFiles) {
       console.warn("Game files no longer found at cached location");
       showToast(
         "Game files not found. Please browse for your game folder in Settings.",
         "error",
         5000
       );
-      // Update UI to show Download button
       gameInstalled = false;
+      gameFilesLocated = false;
       updateUI();
       return;
     }
+    applyInstallationCheckResult(checkResult);
     console.log("Launching game...");
     try {
       const launchResult = await window.api.launchGame(settings);
@@ -1278,6 +1310,7 @@ playButton.addEventListener("click", async () => {
         // If game executable not found, update UI
         if (launchResult.error && launchResult.error.includes("not found")) {
           gameInstalled = false;
+          gameFilesLocated = false;
           updateUI();
         }
       } else {
@@ -1356,8 +1389,45 @@ playButton.addEventListener("click", async () => {
     return;
   }
 
-  // User chose to download - proceed with download
+  // User chose to download - check which system components need installing
+  // so we can show a single pre-elevation consent modal before any UAC prompts appear.
   console.log("Downloading game...");
+
+  const componentCheck = await window.api.checkGameInstalled();
+  const deps = componentCheck.dependencies || {};
+  const needsInstall = [];
+
+  if (!deps.gfwl) {
+    needsInstall.push({
+      name: "Games for Windows Live",
+      reason: "required for online multiplayer and login",
+    });
+  }
+  if (!deps.dx9) {
+    needsInstall.push({
+      name: "DirectX 9 components",
+      reason: "required for the game's graphics to initialize",
+    });
+  }
+  if (!deps.vcRedistX86) {
+    needsInstall.push({
+      name: "Microsoft Visual C++ v14 Redistributable (x86)",
+      reason: "required so the game's server hooks and DLLs load correctly",
+    });
+  }
+
+  // If any of these need installing, show a pre-elevation consent dialog.
+  // Windows UAC cannot show custom text, so this is the only way to explain
+  // why one or more permission prompts are about to appear.
+  if (needsInstall.length > 0) {
+    const userConsented = await showPreInstallConsentModal(needsInstall);
+    if (!userConsented) {
+      launchInProgress = false;
+      playButton.disabled = false;
+      updateUI();
+      return;
+    }
+  }
 
   // Re-enable button since download is handled separately
   // The download screen will manage its own UI state
@@ -1372,9 +1442,11 @@ playButton.addEventListener("click", async () => {
   gameFilesProgress.style.width = "0%";
   gfwlProgress.style.width = "0%";
   dxProgress.style.width = "0%";
+  if (vcProgress) vcProgress.style.width = "0%";
   gameFilesStatus.textContent = "Waiting...";
   gfwlStatus.textContent = "Waiting...";
   dxStatus.textContent = "Waiting...";
+  if (vcStatus) vcStatus.textContent = "Waiting...";
   downloadMessage.textContent =
     "Preparing installation... This may take a few minutes.";
 
@@ -1674,6 +1746,121 @@ if (changeGameLocationButton) {
   });
 }
 
+// Show a pre-elevation consent modal before running system installers.
+//
+// needsInstall: Array<{ name: string, reason: string }>
+//   Each entry describes one component that will be installed.
+//
+// Returns a Promise<boolean>:
+//   true  = user clicked "Continue" (proceed with download + installers)
+//   false = user clicked "Cancel" (abort, do not start download)
+//
+// Design: one modal listing all components so users understand upfront why
+// Windows may show one or more UAC prompts during the install sequence.
+function showPreInstallConsentModal(needsInstall) {
+  return new Promise((resolve) => {
+    const modal = document.createElement("div");
+    modal.className = "visible modal-screen";
+    modal.style.zIndex = "3000";
+
+    const isSingle = needsInstall.length === 1;
+    const componentList = needsInstall
+      .map(
+        (c) =>
+          `<li style="margin-bottom:8px;">
+            <strong>${c.name}</strong>
+            <span style="color:#9ca3af;"> — ${c.reason}</span>
+          </li>`
+      )
+      .join("");
+
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width:500px;">
+        <div class="modal-header" style="background:rgba(15,23,42,0.95);">
+          <h2>🔧 System Components Required</h2>
+        </div>
+        <div class="modal-body" style="padding:20px;">
+          <p style="color:#e5e7eb;margin-bottom:14px;">
+            The following ${isSingle ? "component needs" : "components need"} to be installed before the game can run:
+          </p>
+          <ul style="color:#e5e7eb;padding-left:18px;margin-bottom:16px;list-style:disc;">
+            ${componentList}
+          </ul>
+          <div style="background:rgba(59,130,246,0.1);border-left:3px solid rgba(59,130,246,0.6);padding:12px;border-radius:4px;margin-bottom:20px;">
+            <div style="font-size:11px;color:#60a5fa;line-height:1.6;">
+              🔒 <strong>Windows permission prompt${needsInstall.length > 1 ? "s" : ""}:</strong>
+              Windows may show ${needsInstall.length > 1 ? "one or more permission prompts" : "a permission prompt"} so
+              Microsoft's installer${needsInstall.length > 1 ? "s" : ""} can register these system libraries.
+              This is expected — click <strong>Yes</strong> to proceed when prompted.
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button type="button" id="preInstallCancel" class="settings-action-button accent-muted" style="min-width:96px;">Cancel</button>
+            <button type="button" id="preInstallContinue" class="settings-action-button accent-primary" style="min-width:120px;">Continue</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    modal.querySelector("#preInstallContinue").addEventListener("click", () => {
+      modal.remove();
+      resolve(true);
+    });
+
+    modal.querySelector("#preInstallCancel").addEventListener("click", () => {
+      modal.remove();
+      resolve(false);
+    });
+  });
+}
+
+// Persistent-issue "fix" for missing VC++ x86: consent modal + download/install via main process.
+async function installVcRedistFromAlert() {
+  const agreed = await showPreInstallConsentModal([
+    {
+      name: "Microsoft Visual C++ v14 Redistributable (x86)",
+      reason:
+        "Microsoft runtime required so game hooks and DLLs load; the installer may show a Windows permission prompt",
+    },
+  ]);
+  if (!agreed) return;
+
+  showToast(
+    "Downloading Microsoft Visual C++ v14 Redistributable (x86) from Microsoft...",
+    "info",
+    5000
+  );
+  try {
+    const result = await window.api.installVcRedistX86();
+    if (result.skipped) {
+      showToast(
+        "Microsoft Visual C++ v14 Redistributable (x86) is already installed.",
+        "success",
+        5000
+      );
+    } else if (result.success && result.installed) {
+      showToast(
+        "Microsoft Visual C++ v14 Redistributable (x86) installed successfully.",
+        "success",
+        6000
+      );
+    } else {
+      showToast(
+        result.error ||
+          "Could not complete Microsoft Visual C++ v14 Redistributable (x86) installation. Open Diagnostics or install manually from aka.ms/vc14/vc_redist.x86.exe",
+        "error",
+        10000
+      );
+    }
+  } catch (e) {
+    console.error("[installVcRedistFromAlert]", e);
+    showToast(e.message || "Installation failed", "error", 8000);
+  }
+  await checkPersistentIssues();
+}
+
 // Function to show game move confirmation dialog
 function showGameMoveConfirmation(moveData) {
   console.log("[Move Confirmation] Data received:", {
@@ -1856,7 +2043,7 @@ async function executeGameMove(newPath, progressModal) {
 
       // Refresh installation status
       const installStatus = await window.api.checkGameInstalled();
-      gameInstalled = installStatus.installed;
+      applyInstallationCheckResult(installStatus);
       updateUI();
 
       // Reload settings from main process (includes updated mod statuses)
@@ -2523,6 +2710,24 @@ window.api.onGfwlInstallProgress((message) => {
   gfwlStatus.textContent = message;
 });
 
+window.api.onVcProgress((progress) => {
+  if (!vcProgress) return;
+  vcProgress.style.width = `${progress}%`;
+  if (vcStatus) {
+    if (progress === 100) {
+      vcStatus.textContent = "Complete";
+    } else if (progress > 0) {
+      vcStatus.textContent = `${progress}%`;
+    } else {
+      vcStatus.textContent = "Waiting...";
+    }
+  }
+});
+
+window.api.onVcInstallProgress((message) => {
+  if (vcStatus) vcStatus.textContent = message;
+});
+
 window.api.onDownloadMessage((message) => {
   downloadMessage.textContent = message;
 });
@@ -2535,6 +2740,7 @@ window.api.onDownloadComplete(() => {
   // which will update gameInstalled and call updateUI()
   // But we can also set it optimistically since download completed successfully
   gameInstalled = true;
+  gameFilesLocated = true;
   updateUI();
 
   console.log("Download complete - game is now installed");
@@ -2690,44 +2896,197 @@ window.api.onLaunchError((data) => {
   }
 });
 
+/** True when the child process never started or Node reported a spawn failure. */
+function isSpawnFailurePayload(data) {
+  const err = data.error || "";
+  if (!err) return false;
+  if (/^spawn\s/i.test(err) || /\bENOENT\b|\bEACCES\b|\bEPERM\b|\bENOTDIR\b/i.test(err)) {
+    return true;
+  }
+  if (data.exitCode === -1 && err.length > 0) return true;
+  return false;
+}
+
+function describeSpawnFailure(errorMessage) {
+  const m = errorMessage || "";
+  if (/\bENOENT\b/i.test(m)) {
+    return {
+      title: "Could not start the game — file or folder not found",
+      detail:
+        "Windows could not find Shadowrun.exe or part of the path. In Settings → Game location, choose the folder that directly contains Shadowrun.exe.",
+    };
+  }
+  if (/\bEACCES\b/i.test(m) || /\bEPERM\b/i.test(m)) {
+    return {
+      title: "Could not start the game — permission denied",
+      detail:
+        "Another program or Windows blocked running the game (antivirus, folder permissions, or a protected install path).",
+    };
+  }
+  if (/\bENOTDIR\b/i.test(m)) {
+    return {
+      title: "Could not start the game — invalid path",
+      detail:
+        "The game path is not valid. Open Settings → Game location and select the folder that contains Shadowrun.exe.",
+    };
+  }
+  return {
+    title: "Could not start the game",
+    detail:
+      m ||
+      "The launcher failed to start the game process. See Settings → Diagnostics and game-crash.log if available.",
+  };
+}
+
+/**
+ * Maps Windows NTSTATUS-style process exit codes (32-bit, signed or unsigned) to copy.
+ * Reference: common game crash codes on Windows x64.
+ */
+function describeWindowsGameExit(exitCode) {
+  if (exitCode === undefined || exitCode === null) {
+    return {
+      title: "Game closed unexpectedly",
+      detail: "No exit code was reported (the process may have been terminated unusually).",
+      tip: "Check Settings → Diagnostics. Details may be in game-crash.log.",
+    };
+  }
+
+  const u = exitCode >>> 0;
+  const hex = `0x${u.toString(16).toUpperCase()}`;
+
+  const table = {
+    0xc0000005: {
+      title: "Access violation — invalid memory (STATUS_ACCESS_VIOLATION)",
+      detail:
+        "Windows stopped the game because it used memory incorrectly. Common causes: GPU drivers, DXVK/Vulkan, mods, or damaged or mismatched game files.",
+      tip: "Try: update GPU drivers, verify game files, turn off DXVK or mods in Settings. In a VM, enable 3D acceleration.",
+    },
+    0xc0000135: {
+      title: "Missing DLL — dependency not found (STATUS_DLL_NOT_FOUND)",
+      detail:
+        "A DLL the game needs was not loaded (removed file, wrong folder, or missing Visual C++ / DirectX runtimes).",
+      tip: "Verify game files, reinstall into the folder from Settings, and install DirectX 9 / VC++ runtimes from the launcher setup if prompted.",
+    },
+    0xc000007b: {
+      title: "Bad executable image (STATUS_INVALID_IMAGE_FORMAT)",
+      detail:
+        "Windows rejected the program image—often a 32-bit/64-bit mismatch, corrupted Shadowrun.exe, or incompatible DLLs next to the game.",
+      tip: "Re-download or verify files; remove conflicting DLLs from the game folder; try disabling DXVK.",
+    },
+    0xc0000142: {
+      title: "DLL failed to initialize (STATUS_DLL_INIT_FAILED)",
+      detail:
+        "A DLL loaded but failed during startup (graphics hook, mod, or system DLL conflict).",
+      tip: "Disable mods and DXVK temporarily; update GPU drivers; try a clean game folder.",
+    },
+    0xc0000409: {
+      title: "Security check failed — stack buffer overrun (STATUS_STACK_BUFFER_OVERRUN)",
+      detail:
+        "Windows terminated the process due to a stack protection violation—can indicate a bug, mod, or exploit mitigation.",
+      tip: "Remove mods; update the game files; update Windows and drivers.",
+    },
+    0xc00000fd: {
+      title: "Stack overflow (STATUS_STACK_OVERFLOW)",
+      detail: "The game exhausted the stack—sometimes mods or infinite recursion in injected code.",
+      tip: "Disable mods and DXVK; verify vanilla install.",
+    },
+    0xc0000094: {
+      title: "Integer divide by zero (STATUS_INTEGER_DIVIDE_BY_ZERO)",
+      detail: "The game hit a divide-by-zero fault inside the process.",
+      tip: "Try without mods; verify game files.",
+    },
+    0xc000001d: {
+      title: "Illegal instruction (STATUS_ILLEGAL_INSTRUCTION)",
+      detail: "The CPU executed an instruction it could not run—CPU/driver mismatch or corrupted code.",
+      tip: "Update CPU chipset/GPU drivers; verify game files; avoid incompatible mods.",
+    },
+    0x80000003: {
+      title: "Breakpoint hit (STATUS_BREAKPOINT)",
+      detail:
+        "The process hit a debug breakpoint—sometimes a debugger, hook, or anti-tamper tool.",
+      tip: "Close debugging/overlays/tools that attach to games and try again.",
+    },
+  };
+
+  const row = table[u];
+  if (row) {
+    return row;
+  }
+
+  // Typical small app-defined codes (1, 2, …)
+  if (exitCode >= 1 && exitCode <= 255 && exitCode === u) {
+    return {
+      title: `Game exited with code ${exitCode}`,
+      detail:
+        "The game process ended and returned a non-zero exit code (often a generic failure).",
+      tip: "Check Settings → Diagnostics. More detail may be in game-crash.log.",
+    };
+  }
+
+  return {
+    title: `Game exited abnormally (${hex})`,
+    detail: `Windows reported status ${hex} (numeric code ${exitCode}).`,
+    tip: "Check Settings → Diagnostics and game-crash.log for captured output.",
+  };
+}
+
+function buildGameCrashToast(data) {
+  // 1) Process never started
+  if (isSpawnFailurePayload(data)) {
+    const { title, detail } = describeSpawnFailure(data.error);
+    let msg = `${title}\n\n${detail}`;
+    if (data.suggestMoveOrAdmin) {
+      msg +=
+        "\n\nIf the install is under Program Files, move it in Settings → Game location or run the launcher as Administrator.";
+    }
+    return msg;
+  }
+
+  // 2) Vulkan / DXVK loader issue (stderr matched in main)
+  if (data.isVulkanError && data.dxvkEnabled) {
+    return (
+      "Vulkan could not load — DXVK needs working Vulkan drivers\n\n" +
+      "The game uses DXVK (Direct3D 9 → Vulkan). Your system did not expose the Vulkan entry points DXVK needs (missing loader, bad GPU driver, or no Vulkan support).\n\n" +
+      "Try: Settings → Performance → disable DXVK, then Play. Install/update GPU drivers from the chip vendor (NVIDIA / AMD / Intel)."
+    );
+  }
+
+  if (data.isVulkanError && !data.dxvkEnabled) {
+    return (
+      "Vulkan loader issue detected\n\n" +
+      "Output mentioned Vulkan failures even though DXVK is off—update GPU drivers and check Settings → Diagnostics."
+    );
+  }
+
+  // 3) Signal (unusual on Windows; common on Unix-like environments)
+  if (data.signal) {
+    let msg = `Game ended by signal (${data.signal})\n\nThe process received signal ${data.signal} instead of exiting normally.`;
+    if (data.suggestMoveOrAdmin) {
+      msg +=
+        "\n\nIf the install is under Program Files, move it in Settings → Game location or run the launcher as Administrator.";
+    }
+    return msg;
+  }
+
+  // 4) NT status / exit code
+  const info = describeWindowsGameExit(data.exitCode);
+  let msg = `${info.title}\n\n${info.detail}`;
+  if (info.tip) {
+    msg += `\n\n${info.tip}`;
+  }
+  if (data.suggestMoveOrAdmin) {
+    msg +=
+      "\n\nInstall folder may be protected (e.g. Program Files). Move the game via Settings → Game location, or run the launcher as Administrator.";
+  }
+  return msg;
+}
+
 // Game crash handler - shows crash information and log location
 window.api.onGameCrash((data) => {
   console.error("[Game Crash] Crash detected:", data);
 
-  // 0xC0000005 = STATUS_ACCESS_VIOLATION (signed: -1073741819, unsigned: 3221225477)
-  const isAccessViolation =
-    data.exitCode === -1073741819 ||
-    data.exitCode === 3221225477 ||
-    data.error?.includes("0xc0000005");
-
-  let crashMessage = "Game crashed";
-  if (data.exitCode !== undefined && data.exitCode !== 0 && !isAccessViolation) {
-    crashMessage += ` (Exit code: ${data.exitCode})`;
-  } else if (isAccessViolation) {
-    crashMessage += " (Access violation)";
-  }
-
-  // Vulkan error detection and guidance
-  if (data.isVulkanError && data.dxvkEnabled) {
-    crashMessage +=
-      "\n\n⚠️ Vulkan Error Detected\n💡 Solution: Disable DXVK Support in Settings → Performance";
-  }
-  // Access violation: VM vs physical PC guidance
-  else if (isAccessViolation) {
-    crashMessage +=
-      "\n\n⚠️ Access Violation (game tried to use invalid memory).\n💡 Try: update graphics drivers, verify game files, or disable DXVK/mods in Settings. If you're in a VM, enable 3D acceleration.";
-  }
-  // Game in protected folder (e.g. Program Files) - Play may only work when launcher runs as Administrator
-  else if (data.suggestMoveOrAdmin) {
-    crashMessage +=
-      "\n\n💡 The game may be in a protected folder (e.g. Program Files). Try moving it via Settings → Game location, or run the launcher as Administrator.";
-  }
-  // Generic guidance
-  else {
-    crashMessage += "\n\n💡 Check Settings → Diagnostics for troubleshooting";
-  }
-
-  showToast(crashMessage, "error", 10000);
+  const crashMessage = buildGameCrashToast(data);
+  showToast(crashMessage, "error", 12000);
 });
 
 // Update the setGameRunning function to properly disable the button
@@ -3170,32 +3529,25 @@ ipcRenderer.on("skip-intro-final-state", (event, state) => {
 
 // Re-check game installation when window regains focus (catches renamed/moved folders)
 window.addEventListener("focus", async () => {
-  // Only check if we think the game is installed (to avoid unnecessary checks)
-  if (gameInstalled) {
+  if (gameInstalled || gameFilesLocated) {
     console.log("[Window Focus] Re-checking game installation status...");
     const checkResult = await window.api.checkGameInstalled();
-    // Check if game files exist (not all dependencies - user might have game files but missing GFWL/DirectX)
     if (!checkResult.dependencies?.gameFiles) {
       console.warn("[Window Focus] Game files no longer found, updating UI");
       gameInstalled = false;
+      gameFilesLocated = false;
       updateUI();
       showToast(
         "Game files not found. Please browse for your game folder in Settings.",
         "error",
         5000
       );
-    } else if (checkResult.path) {
-      // Game files found - update gameInstalled flag to true if it was false
-      // This handles the case where user selected a custom path and window regains focus
-      if (!gameInstalled) {
-        console.log("[Window Focus] Game files found, updating UI");
-        gameInstalled = true;
-        updateUI();
-      }
+    } else {
+      applyInstallationCheckResult(checkResult);
+      updateUI();
     }
   }
 
-  // Check for persistent issues on window focus
   checkPersistentIssues();
 });
 
@@ -3237,6 +3589,13 @@ async function checkPersistentIssues() {
         errorAlertMessage.textContent = message;
         errorAlertBar.className = `error-alert-bar ${severity}`;
         errorAlertBar.style.display = "block";
+      }
+
+      if (errorAlertFix) {
+        errorAlertFix.title =
+          result.issues[0]?.type === "vcredist"
+            ? "Download and install Microsoft Visual C++ v14 Redistributable (x86)"
+            : "Open Diagnostics";
       }
 
     } else {
@@ -3287,7 +3646,11 @@ function showStackedErrorAlerts() {
       <div class="error-alert-content">
         <span class="error-alert-icon">⚠️</span>
         <span class="error-alert-message">${issue.message}</span>
-        <button class="error-alert-fix" title="Open Diagnostics">
+        <button class="error-alert-fix" title="${
+          issue.type === "vcredist"
+            ? "Download & install Microsoft Visual C++ v14 (x86)"
+            : "Open Diagnostics"
+        }">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
           </svg>
@@ -3301,6 +3664,10 @@ function showStackedErrorAlerts() {
     if (fixBtn) {
       fixBtn.addEventListener("click", async () => {
         hideStackedErrorAlerts();
+        if (issue.type === "vcredist") {
+          await installVcRedistFromAlert();
+          return;
+        }
         openDiagnosticsAndScrollToIssue();
 
         const diagnosticsScreen = document.getElementById("diagnosticsScreen");
@@ -3375,10 +3742,16 @@ if (errorAlertCount) {
   });
 }
 
-// Fix button click handler - opens diagnostics
+// Fix button click handler — VC++ missing runs install flow; otherwise opens diagnostics
 if (errorAlertFix) {
   errorAlertFix.addEventListener("click", async () => {
     hideStackedErrorAlerts();
+    const primary = currentIssues && currentIssues[0];
+    if (primary && primary.type === "vcredist") {
+      await installVcRedistFromAlert();
+      return;
+    }
+
     openDiagnosticsAndScrollToIssue();
 
     const diagnosticsScreen = document.getElementById("diagnosticsScreen");
@@ -3419,8 +3792,8 @@ document.addEventListener("DOMContentLoaded", function () {
     openGameDirButton.addEventListener("click", async function () {
       console.log("Button clicked!");
 
-      // If game is not installed, browse for existing game instead
-      if (!gameInstalled) {
+      // If no game files at configured path, browse for existing game instead
+      if (!gameFilesLocated) {
         try {
           openGameDirButton.disabled = true;
           openGameDirButton.textContent = "Searching...";
@@ -3675,6 +4048,10 @@ const updateAvailableIndicator = document.getElementById(
 let pendingUpdateData = null;
 let updateToastId = null; // Track the update progress toast
 
+// Populated on startup from main via getLauncherRuntimeInfo()
+let isPortableBuild = false;
+let portableDownloadUrl = null;
+
 // Silent update handler removed - all updates now require user confirmation
 // (This handler is no longer used as automatic downloading is disabled)
 
@@ -3719,6 +4096,101 @@ window.api.onShowUpdateDialog((data) => {
     updateDialog.classList.add("visible");
   }
 });
+
+// Portable build: server found a newer version — show informational notice only.
+// No NSIS installer download will be started regardless of what the user clicks.
+window.api.onPortableUpdateAvailable((data) => {
+  pendingUpdateData = data;
+
+  // Always show the header badge so users can find the notice later
+  if (updateAvailableIndicator) {
+    updateAvailableIndicator.style.display = "block";
+  }
+
+  if (data.isManual) {
+    // Manual check — show the informational dialog right away
+    showPortableUpdateDialog(data);
+  } else {
+    // Automatic startup check — just a non-blocking toast
+    showToast(
+      `v${data.version} is available! Click "Update Available" to download the new portable launcher.`,
+      "info",
+      8000
+    );
+  }
+});
+
+// Informational-only update dialog for portable builds.
+// Replaces the NSIS install flow with a direct browser download link.
+function showPortableUpdateDialog(data) {
+  if (!updateDialog) return;
+
+  const dialogHeader = updateDialog.querySelector(
+    ".update-dialog-header h2, h2"
+  );
+  const descEl = updateDialog.querySelector(".update-description");
+  const actionsEl = updateDialog.querySelector(".update-dialog-actions");
+
+  if (dialogHeader) dialogHeader.textContent = "Update Available";
+  if (updateCurrentVersion)
+    updateCurrentVersion.textContent = data.currentVersion;
+  if (updateNewVersion) updateNewVersion.textContent = data.version;
+
+  if (descEl) {
+    descEl.innerHTML = `
+      <p style="margin-bottom:12px;">
+        <strong>v${data.version}</strong> is available for download.
+      </p>
+      <p style="font-size:13px; color:#9ca3af; margin-bottom:8px;">
+        You're running the <strong>portable</strong> launcher. To update, download
+        the new <code>.exe</code> and replace your current file.
+      </p>
+      <p style="font-size:12px; color:#6b7280; margin-bottom:8px; line-height:1.45;">
+        Want updates installed automatically inside the app next time? Grab the
+        <strong>Setup</strong> installer from
+        <a href="#" id="portableUpdateWebsiteLink" style="color:#93c5fd;">shadowrunfps.com</a>
+        instead of the portable download.
+      </p>
+      ${
+        data.releaseNotes
+          ? `<p style="font-size:13px; color:#9ca3af;">${data.releaseNotes}</p>`
+          : ""
+      }
+    `;
+    const portableSiteLink = descEl.querySelector("#portableUpdateWebsiteLink");
+    if (portableSiteLink) {
+      portableSiteLink.addEventListener("click", (e) => {
+        e.preventDefault();
+        window.api.openExternal("https://www.shadowrunfps.com/download");
+      });
+    }
+  }
+
+  if (actionsEl) {
+    actionsEl.innerHTML = "";
+
+    const downloadBtn = document.createElement("button");
+    downloadBtn.className = "update-button primary";
+    downloadBtn.textContent = "Download Latest Portable .exe";
+    downloadBtn.onclick = () => {
+      const url = data.manualDownloadUrl || portableDownloadUrl;
+      if (url) window.api.openExternal(url);
+      showToast("Opening download in your browser...", "info", 3000);
+      updateDialog.classList.remove("visible");
+    };
+
+    const laterBtn = document.createElement("button");
+    laterBtn.className = "update-button secondary";
+    laterBtn.textContent = "Later";
+    laterBtn.onclick = () => updateDialog.classList.remove("visible");
+
+    actionsEl.appendChild(laterBtn);
+    actionsEl.appendChild(downloadBtn);
+    actionsEl.style.display = "flex";
+  }
+
+  updateDialog.classList.add("visible");
+}
 
 // Listen for no update available
 window.api.onUpdateNotAvailable((data) => {
@@ -3842,19 +4314,14 @@ window.api.onRollbackDownloadProgress((progress) => {
   }
 });
 
-// Listen for dev mode (update checker disabled in development)
+// Fallback: dev mode live version fetch failed (network issue, etc.)
 window.api.onUpdateCheckDevMode(() => {
-  console.log("");
-  console.log("=================================================");
-  console.log("🔧 DEV MODE RESPONSE RECEIVED");
-  console.log("=================================================");
-  console.log("[Renderer] Auto-updater is disabled in development mode");
-  console.log("[Renderer] Time:", new Date().toLocaleTimeString());
-
-  // Show toast notification
-  showToast("Auto-updater is disabled in development mode", "info", 5000);
-
-  console.log("=================================================");
+  console.log("[Renderer] Dev mode update check could not reach the server");
+  showToast(
+    "Could not reach update server. Check your internet connection.",
+    "error",
+    5000
+  );
 });
 
 // ========================================
@@ -3939,9 +4406,16 @@ if (updateAvailableIndicator) {
   updateAvailableIndicator.addEventListener("click", () => {
     console.log("[Renderer] Update indicator clicked");
 
-    // Re-show the update dialog with stored data
-    if (pendingUpdateData && updateDialog) {
-      // Update dialog content
+    if (!pendingUpdateData) return;
+
+    if (isPortableBuild) {
+      // Portable: show informational dialog with direct download link
+      showPortableUpdateDialog(pendingUpdateData);
+      return;
+    }
+
+    // Installed build: re-show the NSIS update dialog
+    if (updateDialog) {
       if (updateCurrentVersion) {
         updateCurrentVersion.textContent = pendingUpdateData.currentVersion;
       }
@@ -3954,8 +4428,6 @@ if (updateAvailableIndicator) {
       } else if (updateReleaseNotes) {
         updateReleaseNotes.style.display = "none";
       }
-
-      // Show the dialog
       updateDialog.classList.add("visible");
     }
   });
@@ -4377,6 +4849,40 @@ function showUpdateToast(
 })();
 
 // ============================================================================
+// PORTABLE BUILD UI INIT
+// ============================================================================
+
+// Fetch launcher type once on startup and adapt any portable-specific UI.
+(async function initPortableAwareUI() {
+  try {
+    const info = await window.api.getLauncherRuntimeInfo();
+    isPortableBuild = info.isPortable;
+    portableDownloadUrl = info.portableDownloadUrl;
+
+    if (!isPortableBuild) return;
+
+    // Update the "Check for Updates" description in Settings to reflect
+    // that portable builds update by replacing the .exe manually.
+    const descSpan = document.getElementById("checkUpdatesDescription");
+    if (descSpan) {
+      const changelogLink = descSpan.querySelector("#viewChangelogLink");
+      descSpan.innerHTML = "";
+      descSpan.appendChild(
+        Object.assign(document.createTextNode(""), {
+          textContent:
+            "Check if a new version of the portable launcher is available. Updates are applied by downloading and replacing the .exe.\u00a0",
+        })
+      );
+      if (changelogLink) {
+        descSpan.appendChild(changelogLink);
+      }
+    }
+  } catch (err) {
+    console.error("[Renderer] Failed to fetch launcher runtime info:", err);
+  }
+})();
+
+// ============================================================================
 // DIAGNOSTICS AND ERROR FIXING BUTTONS
 // ============================================================================
 
@@ -4494,6 +5000,17 @@ function showDiagnosticsResults(diag) {
                 diag.directX
               )}; font-weight: 600;">${statusIcon(diag.directX)} ${statusText(
     diag.directX
+  )}</span>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
+              diag.vcRedistX86
+            )};">
+              <span style="font-size: 13px;">Microsoft Visual C++ v14 Redistributable (x86)</span>
+              <span style="color: ${statusColor(
+                diag.vcRedistX86
+              )}; font-weight: 600;">${statusIcon(diag.vcRedistX86)} ${statusText(
+    diag.vcRedistX86
   )}</span>
             </div>
             

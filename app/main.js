@@ -95,6 +95,7 @@ const {
   extractZip,
   isDX9Installed,
   isGFWLInstalled,
+  isVcRedistX86Installed,
   registerDownloadsIpc,
 } = require("./main/downloads");
 
@@ -184,6 +185,7 @@ const {
 function getDiagnosticsDeps() {
   return {
     isDX9Installed,
+    isVcRedistX86Installed,
     checkLicenseManager: checkWindowsLicenseManagerService,
     checkXboxNetworking: checkXboxLiveNetworkingService,
   };
@@ -613,6 +615,7 @@ app.whenReady().then(async () => {
       findGameInstallation,
       isGFWLInstalled,
       isDX9Installed,
+      isVcRedistX86Installed,
       checkWindowsLicenseManagerService,
       checkXboxLiveNetworkingService,
       setGameInstallDir: (dir) => {
@@ -856,14 +859,17 @@ async function checkExistingInstallation() {
 
     const dx9Installed = await isDX9Installed();
 
-    const allDependenciesMet = gameFilesExist && gfwlInstalled && dx9Installed;
+    const vcRedistInstalled = await isVcRedistX86Installed();
+
+    const allDependenciesMet =
+      gameFilesExist && gfwlInstalled && dx9Installed && vcRedistInstalled;
 
     safeLog.info(
       `[Install Check] Game: ${gameFilesExist ? "OK" : "MISSING"} | GFWL: ${
         gfwlInstalled ? "OK" : "MISSING"
-      } | DirectX: ${dx9Installed ? "OK" : "MISSING"} | Status: ${
-        allDependenciesMet ? "READY" : "MISSING"
-      }`
+      } | DirectX: ${dx9Installed ? "OK" : "MISSING"} | VC++ x86: ${
+        vcRedistInstalled ? "OK" : "MISSING"
+      } | Status: ${allDependenciesMet ? "READY" : "MISSING"}`
     );
 
     if (foundLocation) {
@@ -894,6 +900,7 @@ async function checkExistingInstallation() {
           gameFiles: gameFilesExist,
           gfwl: gfwlInstalled,
           dx9: dx9Installed,
+          vcRedistX86: vcRedistInstalled,
         },
       });
     }
@@ -909,6 +916,7 @@ async function checkExistingInstallation() {
           gameFiles: false,
           gfwl: false,
           dx9: false,
+          vcRedistX86: false,
         },
       });
     }

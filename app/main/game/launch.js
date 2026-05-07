@@ -263,28 +263,32 @@ function makeLaunchGameLogic(deps) {
         const timestamp = new Date().toISOString();
         const hasError = exitCode !== 0 || signal || errorMessage;
 
-        try {
-          const crashLog = [
-            `=== Game Crash Report - ${timestamp} ===`,
-            `Exit Code: ${exitCode ?? "0 (normal exit)"}`,
-            signal ? `Signal: ${signal}` : "",
-            `Game Path: ${gameExePath}`,
-            `Working Directory: ${gameInstallDir}`,
-            errorMessage ? `Error: ${errorMessage}` : "",
-            stdoutStr ? `\n--- STDOUT ---\n${stdoutStr}` : "",
-            stderrStr ? `\n--- STDERR ---\n${stderrStr}` : "",
-            `=== End of Report ===\n\n`,
-          ]
-            .filter((line) => line !== "")
-            .join("\n");
+        // Only persist game-crash.log for failed launches / abnormal exits — successful
+        // sessions produced noisy duplicate DXVK warnings and inflated the log file.
+        if (hasError) {
+          try {
+            const crashLog = [
+              `=== Game Crash Report - ${timestamp} ===`,
+              `Exit Code: ${exitCode ?? "0 (normal exit)"}`,
+              signal ? `Signal: ${signal}` : "",
+              `Game Path: ${gameExePath}`,
+              `Working Directory: ${gameInstallDir}`,
+              errorMessage ? `Error: ${errorMessage}` : "",
+              stdoutStr ? `\n--- STDOUT ---\n${stdoutStr}` : "",
+              stderrStr ? `\n--- STDERR ---\n${stderrStr}` : "",
+              `=== End of Report ===\n\n`,
+            ]
+              .filter((line) => line !== "")
+              .join("\n");
 
-          fs.appendFileSync(crashLogPath, crashLog, "utf8");
-          safeLog.info(`[Game Crash] Log written to: ${crashLogPath}`);
-        } catch (logError) {
-          safeLog.error(
-            "[Game Crash] Failed to write crash log:",
-            logError.message
-          );
+            fs.appendFileSync(crashLogPath, crashLog, "utf8");
+            safeLog.info(`[Game Crash] Log written to: ${crashLogPath}`);
+          } catch (logError) {
+            safeLog.error(
+              "[Game Crash] Failed to write crash log:",
+              logError.message
+            );
+          }
         }
 
         if (hasError) {
@@ -408,28 +412,12 @@ function makeLaunchGameLogic(deps) {
 
       if (gameProcess.stdout) {
         gameProcess.stdout.on("data", (data) => {
-          const s = data.toString();
-          stdoutBuf += s;
-          try {
-            fs.appendFileSync(
-              crashLogPath,
-              `[${new Date().toISOString()}] STDOUT: ${s}\n`,
-              "utf8"
-            );
-          } catch (_) {}
+          stdoutBuf += data.toString();
         });
       }
       if (gameProcess.stderr) {
         gameProcess.stderr.on("data", (data) => {
-          const s = data.toString();
-          stderrBuf += s;
-          try {
-            fs.appendFileSync(
-              crashLogPath,
-              `[${new Date().toISOString()}] STDERR: ${s}\n`,
-              "utf8"
-            );
-          } catch (_) {}
+          stderrBuf += data.toString();
         });
       }
 
@@ -439,13 +427,6 @@ function makeLaunchGameLogic(deps) {
 
       gameProcess.on("error", (processError) => {
         safeLog.error("[Launch] Failed to start game process:", processError);
-        try {
-          fs.appendFileSync(
-            crashLogPath,
-            `[${new Date().toISOString()}] Spawn error: ${processError.message}\n`,
-            "utf8"
-          );
-        } catch (_) {}
         setGameProcess(null);
         onGameExit(
           processError.code ?? -1,

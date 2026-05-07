@@ -34,6 +34,7 @@ const {
   GAME_FILES_URL,
   GFWL_URL,
   DX9_URL,
+  VC_REDIST_X86_URL,
   GAME_FILES_TEMP,
   AUTO_LAUNCH_AFTER_DOWNLOAD,
 } = require("../config/constants");
@@ -41,7 +42,7 @@ const {
 const { downloadFile } = require("./http");
 const { extractZip, extractZipFallback } = require("./archive");
 const { runSilentInstaller } = require("./installers");
-const { isDX9Installed, isGFWLInstalled } = require("./installChecks");
+const { isDX9Installed, isGFWLInstalled, isVcRedistX86Installed } = require("./installChecks");
 
 function registerDownloadsIpc(deps) {
   const {
@@ -63,6 +64,8 @@ function registerDownloadsIpc(deps) {
   // `let downloadInProgress` at module scope in main.js previously.
   let downloadInProgress = false;
   let cancelDownloadRequested = false;
+  /** True while standalone install-vc-redist-x86 IPC is running (download + silent installer). */
+  let vcStandaloneInstallInProgress = false;
 
   ipcMain.handle("cancel-download", () => {
     cancelDownloadRequested = true;
@@ -101,6 +104,7 @@ function registerDownloadsIpc(deps) {
       safeLog.info("========================================");
       const dx9Installed = await isDX9Installed();
       const gfwlInstalled = await isGFWLInstalled();
+      const vcRedistInstalled = await isVcRedistX86Installed();
       // Use findGameInstallation() to be consistent with play button and other checks
       // This respects custom paths and autoScanEnabled setting
       const foundLocation = await findGameInstallation();
@@ -121,6 +125,13 @@ function registerDownloadsIpc(deps) {
         }`
       );
       safeLog.info(
+        `[Component Check] VC++ v14 x86 redistributable: ${
+          vcRedistInstalled
+            ? "✅ INSTALLED (will skip)"
+            : "⬇️  MISSING (will download)"
+        }`
+      );
+      safeLog.info(
         `[Component Check] Game Files: ${
           gameFilesAlreadyPresent
             ? "✅ PRESENT (will skip)"
@@ -129,7 +140,7 @@ function registerDownloadsIpc(deps) {
       );
       safeLog.info("========================================\n");
 
-      // Update UI immediately for GFWL and DirectX status
+      // Update UI immediately for GFWL, DirectX, and VC++ status
       if (gfwlInstalled) {
         mainWindow.webContents.send("gfwl-progress", 100);
         mainWindow.webContents.send(
@@ -148,6 +159,16 @@ function registerDownloadsIpc(deps) {
         );
       } else {
         mainWindow.webContents.send("dx-progress", 0);
+      }
+
+      if (vcRedistInstalled) {
+        mainWindow.webContents.send("vc-progress", 100);
+        mainWindow.webContents.send(
+          "download-message",
+          "✅ Microsoft Visual C++ v14 Redistributable (x86) already installed — skipping"
+        );
+      } else {
+        mainWindow.webContents.send("vc-progress", 0);
       }
 
       if (gameFilesAlreadyPresent) {
@@ -402,6 +423,87 @@ function registerDownloadsIpc(deps) {
         }
         safeLog.info("========================================\n");
         mainWindow.webContents.send("dx-progress", 100);
+      }
+
+      // STEP 3.5: Download and install Microsoft Visual C++ v14 x86 redistributable (if needed)
+      if (!vcRedistInstalled) {
+        const vcPath = path.join(GAME_FILES_TEMP, "vc_redist.x86.exe");
+        mainWindow.webContents.send(
+          "download-message",
+          "📥 Downloading Microsoft Visual C++ v14 Redistributable (x86) (required for game hooks)..."
+        );
+
+        const vcResult = await downloadFile(
+          VC_REDIST_X86_URL,
+          vcPath,
+          (progress, statusMessage) => {
+            mainWindow.webContents.send("vc-progress", progress);
+            if (statusMessage) {
+              mainWindow.webContents.send("download-message", statusMessage);
+            }
+          },
+          { isCancelled: () => cancelDownloadRequested }
+        );
+
+        if (cancelDownloadRequested) {
+          downloadInProgress = false;
+          mainWindow.webContents.send("download-message", "Download cancelled");
+          return { success: false, cancelled: true };
+        }
+
+        if (!vcResult.success) {
+          downloadInProgress = false;
+          const errorMsg = vcResult.error
+            ? vcResult.error.message
+            : "Unknown error";
+          mainWindow.webContents.send(
+            "download-message",
+            `❌ Failed to download Microsoft Visual C++ v14 Redistributable (x86): ${errorMsg}`
+          );
+          mainWindow.webContents.send(
+            "download-error",
+            `Failed to download Microsoft Visual C++ v14 Redistributable (x86): ${errorMsg}. Check your internet connection.`
+          );
+          return { success: false, error: "Failed to download VC++ redist" };
+        }
+
+        // Install VC++ redistributable
+        safeLog.info("\n========================================");
+        safeLog.info("🎮 INSTALLING MICROSOFT VISUAL C++ v14 x86 REDISTRIBUTABLE");
+        safeLog.info("========================================");
+
+        mainWindow.webContents.send(
+          "download-message",
+          "⚙️ Installing Microsoft Visual C++ v14 Redistributable (x86)... Windows may ask for permission."
+        );
+
+        let vcInstallStartTime = Date.now();
+        let vcProgressInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - vcInstallStartTime) / 1000);
+          const minutes = Math.floor(elapsed / 60);
+          const seconds = elapsed % 60;
+          const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+          mainWindow.webContents.send(
+            "vc-install-progress",
+            `⚙️ Installing Microsoft Visual C++ v14 (x86)... (${timeStr})`
+          );
+        }, 1000);
+
+        try {
+          await runSilentInstaller(vcPath);
+          clearInterval(vcProgressInterval);
+          safeLog.info("[VC++ Install] ✅ Installation completed");
+          mainWindow.webContents.send(
+            "download-message",
+            "✅ Microsoft Visual C++ v14 Redistributable (x86) installation completed"
+          );
+        } catch (error) {
+          clearInterval(vcProgressInterval);
+          safeLog.error(`[VC++ Install] ❌ Installation error: ${error.message}`);
+          // Continue anyway - VC redist install errors are often non-fatal (already installed)
+        }
+        safeLog.info("========================================\n");
+        mainWindow.webContents.send("vc-progress", 100);
       }
 
       // STEP 4: Determine installation directory (request admin if needed)
@@ -937,6 +1039,103 @@ d3d9.maxFrameRate = 85
       return { success: false, error: error.message };
     }
   });
+
+  // Download + silently install Microsoft Visual C++ v14 x86 (aka.ms/vc14/vc_redist.x86.exe).
+  // Used from persistent-issue alert "fix" when VC runtime is missing — mirrors STEP 3.5 of download-game.
+  ipcMain.handle("install-vc-redist-x86", async () => {
+    const mainWindow = getMainWindow();
+    if (downloadInProgress) {
+      return {
+        success: false,
+        error: "Another download/installation is already running. Finish or cancel it first.",
+      };
+    }
+    if (vcStandaloneInstallInProgress) {
+      return {
+        success: false,
+        error:
+          "Microsoft Visual C++ v14 Redistributable (x86) installation is already in progress.",
+      };
+    }
+
+    vcStandaloneInstallInProgress = true;
+    try {
+      const alreadyInstalled = await isVcRedistX86Installed();
+      if (alreadyInstalled) {
+        return { success: true, skipped: true, installed: true };
+      }
+
+      if (!fs.existsSync(GAME_FILES_TEMP)) {
+        fs.mkdirSync(GAME_FILES_TEMP, { recursive: true });
+      }
+
+      const vcPath = path.join(GAME_FILES_TEMP, "vc_redist.x86.exe");
+
+      safeLog.info("[install-vc-redist-x86] Downloading from Microsoft...");
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(
+          "download-message",
+          "Downloading Microsoft Visual C++ v14 Redistributable (x86)..."
+        );
+      }
+
+      const vcResult = await downloadFile(
+        VC_REDIST_X86_URL,
+        vcPath,
+        (progress, statusMessage) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("vc-progress", progress);
+            if (statusMessage) {
+              mainWindow.webContents.send("download-message", statusMessage);
+            }
+          }
+        },
+        { isCancelled: () => false }
+      );
+
+      if (!vcResult.success) {
+        const msg = vcResult.error ? vcResult.error.message : "Download failed";
+        safeLog.error("[install-vc-redist-x86] Download failed:", msg);
+        return { success: false, installed: false, error: msg };
+      }
+
+      safeLog.info("[install-vc-redist-x86] Running silent installer...");
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("vc-progress", 100);
+        mainWindow.webContents.send(
+          "download-message",
+          "Installing Microsoft Visual C++ v14 Redistributable (x86)... Windows may ask for permission."
+        );
+      }
+
+      await runSilentInstaller(vcPath);
+
+      const installedAfter = await isVcRedistX86Installed();
+      if (!installedAfter) {
+        safeLog.warn(
+          "[install-vc-redist-x86] Installer exited but redistributable still not detected."
+        );
+        return {
+          success: false,
+          installed: false,
+          error:
+            "Installer finished, but Microsoft Visual C++ v14 Redistributable (x86) was not detected. Restart the launcher or install manually: https://aka.ms/vc14/vc_redist.x86.exe",
+        };
+      }
+
+      safeLog.info("[install-vc-redist-x86] Success");
+      return { success: true, installed: true };
+    } catch (error) {
+      safeLog.error("[install-vc-redist-x86]", error);
+      return {
+        success: false,
+        installed: false,
+        error: error.message || String(error),
+      };
+    } finally {
+      vcStandaloneInstallInProgress = false;
+    }
+  });
 }
 
 module.exports = {
@@ -947,6 +1146,7 @@ module.exports = {
   extractZipFallback,
   isDX9Installed,
   isGFWLInstalled,
+  isVcRedistX86Installed,
   runSilentInstaller,
   // IPC registrar - call once at app startup with the deps bag.
   registerDownloadsIpc,

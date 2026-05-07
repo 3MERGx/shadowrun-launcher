@@ -35,6 +35,8 @@ const {
  * @typedef {Object} DiagnosticsDeps
  * @property {() => Promise<boolean>} isDX9Installed
  *   Returns true if DirectX 9 is installed.
+ * @property {() => Promise<boolean>} isVcRedistX86Installed
+ *   Returns true if Microsoft Visual C++ v14 Redistributable (x86) is installed.
  * @property {() => Promise<{ running: boolean, exists: boolean }>} checkLicenseManager
  *   Probes the Windows License Manager Service.
  * @property {() => Promise<{ running: boolean, exists: boolean }>} checkXboxNetworking
@@ -49,6 +51,7 @@ const {
  * @param {DiagnosticsDeps} deps
  * @returns {Promise<{
  *   directX: boolean,
+ *   vcRedistX86: boolean,
  *   licenseManager: boolean,
  *   xboxNetworking: boolean,
  *   gpuInfo: { vendor: string, name: string },
@@ -64,6 +67,7 @@ const {
 async function runPreLaunchDiagnostics(deps) {
   const {
     isDX9Installed,
+    isVcRedistX86Installed,
     checkLicenseManager,
     checkXboxNetworking,
   } = deps;
@@ -74,6 +78,7 @@ async function runPreLaunchDiagnostics(deps) {
 
   const diagnostics = {
     directX: false,
+    vcRedistX86: false,
     licenseManager: false,
     xboxNetworking: false,
     gpuInfo: { vendor: "unknown", name: "Unknown" },
@@ -104,6 +109,28 @@ async function runPreLaunchDiagnostics(deps) {
     }
   } catch (error) {
     safeLog.error("[Diagnostics] Error checking DirectX:", error.message);
+  }
+
+  // --------------------------------------------------------------------------
+  // Microsoft Visual C++ v14 (MSVC 14.x) x86 redistributable
+  // Without this the game's ASI and DLL hooks cannot be loaded by the OS,
+  // which means the AHL / server-redirect patches never take effect.
+  // --------------------------------------------------------------------------
+  try {
+    diagnostics.vcRedistX86 = await isVcRedistX86Installed();
+    if (!diagnostics.vcRedistX86) {
+      diagnostics.issues.push({
+        type: "vcredist",
+        severity: "critical",
+        message:
+          "Microsoft Visual C++ v14 Redistributable (x86) is not installed. Game hooks and server DLLs will not load.",
+        fix: "Install Microsoft Visual C++ v14 Redistributable (x86) from the launcher's setup options.",
+      });
+    } else {
+      safeLog.info("[Diagnostics] VC++ v14 x86 redistributable: OK");
+    }
+  } catch (error) {
+    safeLog.error("[Diagnostics] Error checking VC++ redistributable:", error.message);
   }
 
   // --------------------------------------------------------------------------

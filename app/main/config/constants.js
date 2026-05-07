@@ -21,6 +21,8 @@ const GFWL_URL = "https://downloads.shadowrunfps.com/releases/gfwlivesetup.zip";
 // DirectX 9 Web Installer - direct download from Microsoft.
 const DX9_URL =
   "https://download.microsoft.com/download/1/7/1/1718ccc4-6315-4d8e-9543-8e28a4e18c4c/dxwebsetup.exe";
+// Microsoft Visual C++ v14 x86 redistributable (VC_redist.x86.exe) — direct from Microsoft.
+const VC_REDIST_X86_URL = "https://aka.ms/vc14/vc_redist.x86.exe";
 const NO_INTRO_FIX_URL = "https://downloads.shadowrunfps.com/releases/NoIntroFix.zip";
 // const NO_INTRO_FIX_URL = "http://157.245.214.234/releases/NoIntroFix.zip";
 // DXVK d3d9 wrapper archive used by the "Enable DXVK" toggle.
@@ -41,6 +43,10 @@ const AHL_ZIP_URL = "https://downloads.shadowrunfps.com/releases/AHLfiles.zip";
 
 // Update feed URL. Change this when migrating between hosting providers.
 const UPDATE_SERVER_URL = "https://downloads.shadowrunfps.com/launcher";
+
+// Portable launcher artifact (hosted at CDN root, not under /launcher/).
+const PORTABLE_EXE_DOWNLOAD_URL =
+  "https://downloads.shadowrunfps.com/Shadowrun%20FPS%20Launcher.exe";
 
 // Maximum time without progress before we consider an update download stalled
 // and offer the user a manual download fallback.
@@ -80,11 +86,13 @@ module.exports = {
   GAME_FILES_URL,
   GFWL_URL,
   DX9_URL,
+  VC_REDIST_X86_URL,
   NO_INTRO_FIX_URL,
   DXVK_ZIP_URL,
   SRS_DLL_ZIP_URL,
   AHL_ZIP_URL,
   UPDATE_SERVER_URL,
+  PORTABLE_EXE_DOWNLOAD_URL,
   UPDATE_TIMEOUT_MS,
   GAME_FILES_TEMP,
   /** Resolved at access time so `app.getPath` runs after Electron is ready (avoids load-order crashes). */

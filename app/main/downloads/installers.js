@@ -1,5 +1,5 @@
 // Silent installer runner used by the download-game pipeline for GFWL +
-// DirectX 9 web installer.
+// DirectX 9 web installer + Microsoft Visual C++ v14 x86 redistributable.
 //
 // Behavior preserved verbatim from app/main.js (Phase 6 extraction):
 //
@@ -8,13 +8,16 @@
 //   - gfwlivesetup.exe runs with `/quiet /norestart` - the bootstrapper
 //     unfortunately may flash a tiny progress window even with /quiet (no
 //     fully-hidden mode is supported by gfwlivesetup.exe).
+//   - vc_redist.x86.exe / "vc_redist" / "VC_redist" markers run with
+//     `/install /quiet /norestart`. Even in quiet mode Windows UAC may
+//     prompt because the installer writes machine-wide DLLs. The renderer
+//     shows a pre-elevation consent dialog before this installer runs.
 //   - Anything else falls back to the generic /silent /quiet /qn /norestart
 //     trio, which covers MSI + InstallShield + InnoSetup variants.
 //   - We never reject - installer non-zero exit codes are common and almost
 //     always non-fatal (e.g. component already installed). The download-game
-//     handler relies on this and re-checks isDX9Installed / isGFWLInstalled
-//     after the call.
-//   - 5-minute hard timeout: if the installer hasn't returned by then we
+//     handler relies on this and re-checks installed state after the call.
+//   - 15-minute hard timeout: if the installer hasn't returned by then we
 //     `process.kill(child.pid)` and resolve so the launcher doesn't hang.
 
 const { safeLog } = require("../logger");
@@ -43,6 +46,18 @@ function runSilentInstaller(installerPath) {
       // Note: GFWL installer may briefly show a progress window - this is unavoidable
       // The gfwlivesetup.exe installer doesn't support fully hidden installation
       installCommand = `"${installerPath}" /quiet /norestart`;
+    } else if (
+      installerPath.toLowerCase().includes("vc_redist") ||
+      installerPath.toLowerCase().includes("vcredist")
+    ) {
+      // Microsoft Visual C++ v14 x86 redistributable
+      // /install = run install mode (not repair), /quiet = no UI, /norestart = don't reboot
+      // Note: UAC may still appear because this writes machine-wide DLLs to SysWOW64.
+      // The renderer shows a pre-elevation consent dialog before calling this.
+      safeLog.info(
+        "[Silent Installer] Detected Microsoft Visual C++ v14 x86 redistributable installer"
+      );
+      installCommand = `"${installerPath}" /install /quiet /norestart`;
     } else {
       safeLog.info("[Silent Installer] Using default silent flags");
       installCommand = `"${installerPath}" /silent /quiet /qn /norestart`;
