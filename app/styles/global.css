@@ -344,6 +344,30 @@ body::after {
   margin-top: 2px;
 }
 
+/* Server configuration (diagnostics): label column width + current value */
+.setting-item.server-config-item {
+  align-items: center;
+}
+
+.server-config-item .setting-label-group {
+  max-width: min(26rem, calc(100% - 4.5rem));
+}
+
+.server-config-current-label {
+  font-weight: 600;
+  margin-right: 0.35em;
+}
+
+.server-config-item #gfwlServerStateValue {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.98);
+}
+
+.server-config-control {
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+
 /* Toggle switch */
 .toggle-switch {
   position: relative;
@@ -397,34 +421,71 @@ input:checked + .toggle-slider:before {
 }
 
 .settings-action-button {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  font-weight: 500;
   background-color: #334155;
-  color: white;
-  border: none;
+  color: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 8px 16px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
-  transition: background-color 0.2s;
+  line-height: 1.25;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+a.settings-action-button {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 .settings-action-button:hover {
   background-color: #475569;
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+.settings-action-button:active {
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.45) inset,
+    0 1px 1px rgba(0, 0, 0, 0.25);
 }
 
 /* Primary / muted variants (pre-install consent modal, inline with Settings actions) */
 .settings-action-button.accent-primary {
   background-color: #3b82f6;
   border: 1px solid #60a5fa;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 1px 3px rgba(0, 0, 0, 0.35);
 }
 .settings-action-button.accent-primary:hover {
   background-color: #2563eb;
+  border-color: #93c5fd;
 }
 .settings-action-button.accent-muted {
   background-color: rgba(51, 65, 85, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 1px 2px rgba(0, 0, 0, 0.35);
 }
 .settings-action-button.accent-muted:hover {
   background-color: rgba(71, 85, 105, 0.95);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 /* Custom focus styles */
@@ -790,6 +851,148 @@ button:focus {
   flex-direction: column;
 }
 
+/* Installation Instructions modal — wider + website-style content */
+.modal-content.instructions-modal-wide {
+  width: min(640px, 94vw);
+  max-width: 94%;
+}
+
+.instructions-modal-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.instructions-heading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.35);
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  color: #93c5fd;
+  font-size: 13px;
+  font-weight: 700;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.instructions-prerequisites {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.instructions-existing-game-note {
+  margin: 0 0 14px 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  background: rgba(59, 130, 246, 0.12);
+  border-left: 3px solid #3b82f6;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.instructions-sub-step {
+  margin: 6px 0 0 0;
+  padding-left: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.instructions-account-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.instructions-account-box ul {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+
+.instructions-account-box li {
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.instructions-account-box li:last-child {
+  margin-bottom: 0;
+}
+
+.instructions-footer-extra {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.instructions-footer-extra p {
+  margin: 0 0 12px 0;
+}
+
+.instructions-footer-extra p:last-of-type {
+  margin-bottom: 0;
+}
+
+.instructions-before-play {
+  margin-top: 16px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: rgba(251, 191, 36, 0.08);
+  border-left: 3px solid #fbbf24;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.instructions-before-play-title {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+.instructions-before-play p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.instruction-step a,
+.instructions-inline-link,
+.instructions-prerequisites a,
+.instructions-footer-extra a,
+.instructions-existing-game-note a,
+.instructions-before-play a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.instruction-step a:hover,
+.instructions-inline-link:hover,
+.instructions-prerequisites a:hover,
+.instructions-footer-extra a:hover,
+.instructions-before-play a:hover {
+  text-decoration: underline;
+}
+
 /* Diagnostic results modal: PCID row — copy first, blurred value reveals on row hover (no tooltip) */
 .diagnostics-pcid-row {
   display: flex;
@@ -909,6 +1112,12 @@ button:focus {
   line-height: 1.45;
 }
 
+/* Between step title and main instructions (e.g. “skip if AHL”) */
+.instruction-step-skip-note {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
 .instructions-list li strong {
   color: #3b82f6;
   font-weight: 600;
@@ -1004,55 +1213,6 @@ button:focus {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-}
-
-.instructions-faq-button {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  min-width: 120px;
-  flex: 0 1 auto;
-}
-
-.instructions-faq-button:hover {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-}
-
-.instructions-faq-button:active {
-  transform: translateY(0);
-}
-
-.instructions-got-it-button {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  transition: all 0.2s;
-  min-width: 140px;
-  flex: 1;
-  max-width: 200px;
-}
-
-.instructions-got-it-button:hover {
-  background: linear-gradient(135deg, #059669 0%, #047857 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-}
-
-.instructions-got-it-button:active {
-  transform: translateY(0);
 }
 
 /* Progress bars */
@@ -1860,6 +2020,19 @@ button:focus {
   border-color: rgba(220, 38, 38, 0.7) !important;
 }
 
+#skipIntroButton.installed:hover:not(:disabled) {
+  background-color: rgba(220, 38, 38, 0.68) !important;
+  border-color: rgba(248, 113, 113, 0.9) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    0 2px 8px rgba(220, 38, 38, 0.4) !important;
+}
+
+#skipIntroButton.installed:active:not(:disabled) {
+  background-color: rgba(220, 38, 38, 0.55) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45) inset !important;
+}
+
 #skipIntroButton:not(.installed) {
   background-color: rgba(
     16,
@@ -1868,6 +2041,19 @@ button:focus {
     0.5
   ) !important; /* Green background for install */
   border-color: rgba(16, 185, 129, 0.7) !important;
+}
+
+#skipIntroButton:not(.installed):hover:not(:disabled) {
+  background-color: rgba(16, 185, 129, 0.68) !important;
+  border-color: rgba(52, 211, 153, 0.95) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    0 2px 8px rgba(16, 185, 129, 0.35) !important;
+}
+
+#skipIntroButton:not(.installed):active:not(:disabled) {
+  background-color: rgba(16, 185, 129, 0.55) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45) inset !important;
 }
 
 #skipIntroButton.processing::after {
@@ -2388,30 +2574,6 @@ button:focus {
   box-shadow: 0 0 10px rgba(255, 107, 0, 0.5);
 }
 
-/* FAQ Button Styles */
-.instructions-faq-button {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  margin-right: 12px;
-}
-
-.instructions-faq-button:hover {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-}
-
-.instructions-faq-button:active {
-  transform: translateY(0);
-}
-
 /* FAQ Accordion Styles */
 .faq-item {
   margin-bottom: 12px;
@@ -2501,19 +2663,20 @@ button:focus {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-/* FAQ Quick Actions */
-.faq-quick-action:hover {
-  background: rgba(59, 130, 246, 0.3) !important;
-  border-color: rgba(59, 130, 246, 0.6) !important;
-  transform: translateY(-1px);
+/* FAQ footer row (matches settings-action-button layout) */
+.faq-quick-actions-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
-.faq-quick-action:active {
-  transform: translateY(0);
-}
-
-/* FAQ External Link */
-a[href*="shadowrunfps.com"]:hover {
+/* FAQ External Link — exclude styled launcher buttons */
+a[href*="shadowrunfps.com"]:not(.settings-action-button):hover {
   background: rgba(16, 185, 129, 0.3) !important;
   border-color: rgba(16, 185, 129, 0.6) !important;
   transform: translateY(-1px);

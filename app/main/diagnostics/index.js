@@ -9,8 +9,8 @@
  *      diagnostics panel and is augmented with PCID info before return.
  *
  * Why dependency injection: this module wants to call several launcher-
- * internal helpers (DX9 install check, License Manager / Xbox Live
- * service probes + fixes) that haven't been extracted from main.js yet.
+ * internal helpers (DX9 install check) that haven't been extracted from
+ * main.js yet.
  * The launch sequence (Phase 6 - downloads, Phase 7 - launch) and the
  * auto-fix services (Phase 5b) will land later; this composer accepts
  * those operations as injected dependencies so 5a is reviewable and
@@ -37,10 +37,6 @@ const {
  *   Returns true if DirectX 9 is installed.
  * @property {() => Promise<boolean>} isVcRedistX86Installed
  *   Returns true if Microsoft Visual C++ v14 Redistributable (x86) is installed.
- * @property {() => Promise<{ running: boolean, exists: boolean }>} checkLicenseManager
- *   Probes the Windows License Manager Service.
- * @property {() => Promise<{ running: boolean, exists: boolean }>} checkXboxNetworking
- *   Probes the Xbox Live Networking Service (XboxNetApiSvc).
  */
 
 /**
@@ -52,8 +48,6 @@ const {
  * @returns {Promise<{
  *   directX: boolean,
  *   vcRedistX86: boolean,
- *   licenseManager: boolean,
- *   xboxNetworking: boolean,
  *   gpuInfo: { vendor: string, name: string },
  *   natType: { type: string, status?: string },
  *   firewall: { enabled: boolean | null, status: string },
@@ -65,12 +59,7 @@ const {
  * }>}
  */
 async function runPreLaunchDiagnostics(deps) {
-  const {
-    isDX9Installed,
-    isVcRedistX86Installed,
-    checkLicenseManager,
-    checkXboxNetworking,
-  } = deps;
+  const { isDX9Installed, isVcRedistX86Installed } = deps;
 
   safeLog.info("\n========================================");
   safeLog.info("[Diagnostics] RUNNING PRE-LAUNCH DIAGNOSTICS");
@@ -79,8 +68,6 @@ async function runPreLaunchDiagnostics(deps) {
   const diagnostics = {
     directX: false,
     vcRedistX86: false,
-    licenseManager: false,
-    xboxNetworking: false,
     gpuInfo: { vendor: "unknown", name: "Unknown" },
     natType: { type: "Unknown" },
     firewall: { enabled: null, status: "Unknown" },
@@ -131,58 +118,6 @@ async function runPreLaunchDiagnostics(deps) {
     }
   } catch (error) {
     safeLog.error("[Diagnostics] Error checking VC++ redistributable:", error.message);
-  }
-
-  // --------------------------------------------------------------------------
-  // Windows License Manager Service
-  // --------------------------------------------------------------------------
-  try {
-    const serviceStatus = await checkLicenseManager();
-    diagnostics.licenseManager = serviceStatus.running;
-
-    if (serviceStatus.exists && !serviceStatus.running) {
-      diagnostics.issues.push({
-        type: "license_manager",
-        severity: "high",
-        message:
-          "Windows License Manager Service is not running. This may cause error 0x80072746.",
-        fix: "Open services.msc, find 'LicenseManager', and start it manually.",
-      });
-      safeLog.info("[Diagnostics] WARN License Manager Service: Not Running");
-    } else if (serviceStatus.running) {
-      safeLog.info("[Diagnostics] License Manager Service: OK");
-    }
-  } catch (error) {
-    safeLog.error(
-      "[Diagnostics] Error checking License Manager:",
-      error.message
-    );
-  }
-
-  // --------------------------------------------------------------------------
-  // Xbox Live Networking Service
-  // --------------------------------------------------------------------------
-  try {
-    const xboxServiceStatus = await checkXboxNetworking();
-    diagnostics.xboxNetworking = xboxServiceStatus.running;
-
-    if (xboxServiceStatus.exists && !xboxServiceStatus.running) {
-      diagnostics.issues.push({
-        type: "xbox_networking",
-        severity: "high",
-        message:
-          "Xbox Live Networking Service is not running. This may cause P2P connection issues.",
-        fix: "Open services.msc, find 'XboxNetApiSvc', and start it manually.",
-      });
-      safeLog.info("[Diagnostics] WARN Xbox Live Networking Service: Not Running");
-    } else if (xboxServiceStatus.running) {
-      safeLog.info("[Diagnostics] Xbox Live Networking Service: OK");
-    }
-  } catch (error) {
-    safeLog.error(
-      "[Diagnostics] Error checking Xbox Live Networking:",
-      error.message
-    );
   }
 
   // --------------------------------------------------------------------------

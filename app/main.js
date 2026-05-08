@@ -70,17 +70,9 @@ const {
 } = require("./main/system");
 
 // Pre-launch diagnostics composer lives in app/main/diagnostics. The composer
-// still requires DI for one launcher-internal probe (isDX9Installed) since
-// the install-state checks live in app/main/downloads; the three Windows
-// service probes / auto-fixers come from app/main/services and are bound
-// here directly.
+// still requires DI for install-state checks because those probes live in
+// app/main/downloads.
 const { runPreLaunchDiagnostics } = require("./main/diagnostics");
-
-// Service probes for pre-launch diagnostics and the "check-persistent-issues" panel.
-const {
-  checkWindowsLicenseManagerService,
-  checkXboxLiveNetworkingService,
-} = require("./main/services");
 
 // Downloads pipeline (build.zip + GFWL + DX9) and the install-state probes.
 // `registerDownloadsIpc` owns the renderer-facing "cancel-download",
@@ -186,8 +178,6 @@ function getDiagnosticsDeps() {
   return {
     isDX9Installed,
     isVcRedistX86Installed,
-    checkLicenseManager: checkWindowsLicenseManagerService,
-    checkXboxNetworking: checkXboxLiveNetworkingService,
   };
 }
 
@@ -612,12 +602,11 @@ app.whenReady().then(async () => {
       handleSkipIntroToggle,
       readCurrentFpsFromDxvkConf,
       checkDxvkStatus,
+      checkSkipIntroStatus,
       findGameInstallation,
       isGFWLInstalled,
       isDX9Installed,
       isVcRedistX86Installed,
-      checkWindowsLicenseManagerService,
-      checkXboxLiveNetworkingService,
       setGameInstallDir: (dir) => {
         GAME_INSTALL_DIR = dir;
       },

@@ -508,9 +508,7 @@ function registerDownloadsIpc(deps) {
 
       // STEP 4: Determine installation directory (request admin if needed)
       const isAdmin = await isRunningAsAdmin();
-      const programFilesPath = path.join(
-        "C:\\Program Files (x86)\\Microsoft Games for Windows - LIVE\\Shadowrun"
-      );
+      const defaultUserGamePath = getGameInstallDir();
 
       // Helper function to create directory with admin privileges and set write permissions
       async function createDirectoryWithAdmin(dirPath) {
@@ -625,141 +623,27 @@ try {
         });
       }
 
-      // Check if user wants Program Files location
-      let useProgramFiles = false;
+      // Default install location is user-writable: %USERPROFILE%\Games\Shadowrun
+      // This avoids requiring admin privileges (Program Files ACLs vary by machine).
+      // Ensure the directory exists and is writable before extracting game files.
+      setGameInstallDir(defaultUserGamePath);
+      setResourcesDir(path.join(defaultUserGamePath, "Resources"));
 
-      if (!isAdmin) {
-        // Check if Program Files path already exists and is accessible
-        const programFilesExists = fs.existsSync(programFilesPath);
-        const canWriteProgramFiles = programFilesExists
-          ? isDirectoryWritable(programFilesPath)
-          : false;
-
-        if (!canWriteProgramFiles) {
-          // Automatically attempt Program Files with admin privileges (UAC will prompt)
-          // If denied/cancelled, automatically fall back to user folder
-          mainWindow.webContents.send(
-            "download-message",
-            "🔐 Requesting administrator privileges for Program Files installation... (UAC prompt will appear)"
-          );
-
-          const dirCreated = await createDirectoryWithAdmin(programFilesPath);
-
-          if (dirCreated) {
-            mainWindow.webContents.send(
-              "download-message",
-              "✓ Installation directory created and configured successfully"
-            );
-            // Verify we can write to it
-            const canWrite = isDirectoryWritable(programFilesPath);
-            if (canWrite) {
-              setGameInstallDir(programFilesPath);
-              setResourcesDir(path.join(programFilesPath, "Resources"));
-              safeLog.info(
-                `[Download] Using Program Files location: ${programFilesPath}`
-              );
-              useProgramFiles = true;
-            } else {
-              // Directory created but not writable, use fallback
-              safeLog.info(
-                `[Download] Program Files directory created but not writable, using fallback`
-              );
-              mainWindow.webContents.send(
-                "download-message",
-                "⚠️ Could not set write permissions. Using user folder instead..."
-              );
-              const fallbackCreated = await createDirectoryWithPermissions(
-                getGameInstallDir()
-              );
-              if (!fallbackCreated) {
-                downloadInProgress = false;
-                return {
-                  success: false,
-                  requiresAdmin: false,
-                  error: "Failed to create installation directory.",
-                };
-              }
-            }
-          } else {
-            // Failed to create with admin, automatically use fallback
-            safeLog.info(
-              `[Download] Failed to create Program Files directory, using fallback`
-            );
-            mainWindow.webContents.send(
-              "download-message",
-              "⚠️ Administrator privileges were denied or cancelled. Using user folder instead..."
-            );
-            const fallbackCreated = await createDirectoryWithPermissions(
-              getGameInstallDir()
-            );
-            if (!fallbackCreated) {
-              downloadInProgress = false;
-              return {
-                success: false,
-                requiresAdmin: false,
-                error: "Failed to create installation directory.",
-              };
-            }
-          }
-        } else {
-          // Can write to Program Files (maybe it was created previously)
-          setGameInstallDir(programFilesPath);
-          setResourcesDir(path.join(programFilesPath, "Resources"));
-          safeLog.info(
-            `[Download] Using Program Files location (already accessible): ${programFilesPath}`
-          );
-          useProgramFiles = true;
-        }
-      } else {
-        // Already running as admin, try Program Files first
-        const canWriteProgramFiles = isDirectoryWritable(programFilesPath);
-        if (canWriteProgramFiles) {
-          setGameInstallDir(programFilesPath);
-          setResourcesDir(path.join(programFilesPath, "Resources"));
-          safeLog.info(
-            `[Download] Using Program Files location (admin): ${programFilesPath}`
-          );
-          useProgramFiles = true;
-        } else {
-          // Admin but can't write to Program Files, use fallback
-          safeLog.info(
-            `[Download] Program Files not writable, using fallback location`
-          );
-          const dirCreated = await createDirectoryWithPermissions(
-            getGameInstallDir()
-          );
-          if (!dirCreated) {
-            downloadInProgress = false;
-            return {
-              success: false,
-              requiresAdmin: false,
-              error: "Failed to create installation directory.",
-            };
-          }
-        }
+      if (!fs.existsSync(defaultUserGamePath)) {
+        safeLog.info(
+          `[Download] Default game directory missing, creating: ${defaultUserGamePath}`
+        );
       }
 
-      // If we're using Program Files but directory doesn't exist yet, create it
-      if (useProgramFiles && !fs.existsSync(getGameInstallDir())) {
-        try {
-          fs.mkdirSync(getGameInstallDir(), { recursive: true });
-        } catch (error) {
-          // If creation fails, fall back to user location
-          safeLog.info(
-            `[Download] Failed to create Program Files directory, using fallback`
-          );
-          const dirCreated = await createDirectoryWithPermissions(
-            getGameInstallDir()
-          );
-          if (!dirCreated) {
-            downloadInProgress = false;
-            return {
-              success: false,
-              requiresAdmin: false,
-              error: "Failed to create installation directory.",
-            };
-          }
-        }
+      const dirCreated = await createDirectoryWithPermissions(defaultUserGamePath);
+      if (!dirCreated) {
+        downloadInProgress = false;
+        return {
+          success: false,
+          requiresAdmin: Boolean(isAdmin),
+          error:
+            "Failed to create the default game installation directory. Try choosing a different location (Change Game Location) or run as Administrator.",
+        };
       }
 
       // STEP 5: Check for Shadowrun game files

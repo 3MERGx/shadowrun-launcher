@@ -22,7 +22,7 @@
  *   });
  */
 
-const { BrowserWindow, app } = require("electron");
+const { BrowserWindow, app, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { safeLog } = require("../logger");
@@ -59,6 +59,7 @@ function createMainWindow({
   const win = new BrowserWindow({
     width: 1280,
     height: 720,
+    resizable: false,
     frame: false,
     transparent: false,
     webPreferences: {
@@ -85,6 +86,21 @@ function createMainWindow({
   }
 
   win.loadFile(rendererPath);
+
+  // Open http(s) links from target=_blank / window.open in the default browser.
+  // Otherwise Electron spawns a secondary BrowserWindow with the generic atom icon.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (
+      typeof url === "string" &&
+      (url.startsWith("https://") || url.startsWith("http://"))
+    ) {
+      shell.openExternal(url).catch((err) =>
+        safeLog.error("[WindowOpen] openExternal failed:", err)
+      );
+      return { action: "deny" };
+    }
+    return { action: "allow" };
+  });
 
   if (isDevMode) {
     safeLog.info("[Dev Mode] Opening DevTools automatically...");

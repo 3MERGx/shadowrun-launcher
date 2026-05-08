@@ -44,7 +44,11 @@ let modifiedFiles = [];
 // Status probe (read-only)
 // ============================================================================
 
-function makeCheckSkipIntroStatus({ getGameInstallDir, getSettings, saveSettingsToDisk }) {
+function makeCheckSkipIntroStatus({
+  getGameInstallDir,
+  getSettings,
+  saveSettingsToDisk,
+}) {
   // Update the skip intro status detection logic to be more reliable
   return async function checkSkipIntroStatus() {
     try {
@@ -55,7 +59,11 @@ function makeCheckSkipIntroStatus({ getGameInstallDir, getSettings, saveSettings
 
       const resourcesPath = path.join(gameInstallDir, "Resources");
       const backupPath = path.join(resourcesPath, "BackupIntro");
-      const targetFiles = ["logo_pc.bik", "notices_us.bik", "opening_en_us.bik"];
+      const targetFiles = [
+        "logo_pc.bik",
+        "notices_us.bik",
+        "opening_en_us.bik",
+      ];
 
       // Check if backup exists (any files should be there)
       const backupExists =
@@ -85,14 +93,18 @@ function makeCheckSkipIntroStatus({ getGameInstallDir, getSettings, saveSettings
         }
       }
 
+      // Routine probes run often (load-settings, settings screen open, save flow).
+      // Keep detailed lines at debug so logs stay quiet unless troubleshooting.
       if (modifiedFilesCount === 3) {
-        safeLog.info("[Skip Intro] Skip intro active (all 3 intro BIK files replaced)");
+        safeLog.debug(
+          "[Skip Intro] Skip intro active (all 3 intro BIK files replaced)",
+        );
       } else {
         for (const { file, size, modified } of fileStates) {
-          safeLog.info(
+          safeLog.debug(
             modified
               ? `Detected modified ${file}: size=${size} bytes`
-              : `Detected original ${file}: size=${size} bytes`
+              : `Detected original ${file}: size=${size} bytes`,
           );
         }
       }
@@ -113,7 +125,7 @@ function makeCheckSkipIntroStatus({ getGameInstallDir, getSettings, saveSettings
           // Create a marker file
           fs.writeFileSync(
             path.join(backupPath, "installed_externally.txt"),
-            "NoIntroFix was detected as pre-installed. Original files not available."
+            "NoIntroFix was detected as pre-installed. Original files not available.",
           );
 
           // Update settings to reflect the detected state
@@ -175,7 +187,7 @@ function makeHandleSkipIntroToggle(deps) {
         // Check if we already have the NoIntroFix files downloaded
         const noIntroFixDir = path.join(app.getPath("userData"), "NoIntroFix");
         const noIntroFixFilesExist = fileList.every((file) =>
-          fs.existsSync(path.join(noIntroFixDir, "Resources", file))
+          fs.existsSync(path.join(noIntroFixDir, "Resources", file)),
         );
 
         if (!noIntroFixFilesExist) {
@@ -230,7 +242,7 @@ function makeHandleSkipIntroToggle(deps) {
                 progress,
               });
             }
-          }
+          },
         );
 
         if (!downloadSuccess) {
@@ -449,7 +461,11 @@ function registerSkipIntroIpc(deps) {
       const resourcesPath = path.join(gameInstallDir, "Resources");
 
       // Correct files to backup/replace - these are the actual BIK files
-      const targetFiles = ["logo_pc.bik", "notices_us.bik", "opening_en_us.bik"];
+      const targetFiles = [
+        "logo_pc.bik",
+        "notices_us.bik",
+        "opening_en_us.bik",
+      ];
 
       // Ensure the backup folder exists
       const backupPath = path.join(resourcesPath, "BackupIntro");
@@ -519,7 +535,7 @@ function registerSkipIntroIpc(deps) {
                 progress: 50 + Math.floor(progress / 5), // Scale to 50-70% range
               });
             }
-          }
+          },
         );
 
         if (!downloaded) {
@@ -567,7 +583,7 @@ function registerSkipIntroIpc(deps) {
                 tempExtractDir,
                 "NoIntroFix",
                 "Resources",
-                file
+                file,
               );
             }
 
@@ -612,7 +628,7 @@ function registerSkipIntroIpc(deps) {
             } else {
               // No files were processed
               throw new Error(
-                "No files were copied from the NoIntroFix archive."
+                "No files were copied from the NoIntroFix archive.",
               );
             }
           }

@@ -2,11 +2,10 @@
 //
 // Handlers registered:
 //   load-settings  - returns the current settings object after refreshing
-//                    the two probes that can drift behind the user's
-//                    back: the FPS read out of dxvk.conf and whether
-//                    DXVK is currently enabled. Both fields are written
-//                    back into the settings object so the renderer's
-//                    UI reflects on-disk state, not stale boot state.
+//                    probes that can drift behind the user's back: FPS from
+//                    dxvk.conf, DXVK enable state, and Skip Intro (file probe).
+//                    Those fields are written into the settings object so the
+//                    renderer reflects on-disk state, not stale boot state.
 //   save-settings  - replaces the active settings object with the
 //                    payload from the renderer. If the skipIntro flag
 //                    flipped, runs handleSkipIntroToggle FIRST so the
@@ -29,6 +28,7 @@ function registerSettingsIpc(deps) {
     handleSkipIntroToggle,
     readCurrentFpsFromDxvkConf,
     checkDxvkStatus,
+    checkSkipIntroStatus,
   } = deps;
 
   // Add this to the load-settings handler
@@ -44,6 +44,10 @@ function registerSettingsIpc(deps) {
     // Check DXVK status and update settings
     const dxvkStatus = await checkDxvkStatus();
     settings.dxvk = dxvkStatus.enabled;
+
+    // Skip Intro: like DXVK, derive from files on disk (not settings.json alone)
+    const skipIntroStatus = await checkSkipIntroStatus();
+    settings.skipIntro = skipIntroStatus.installed;
 
     return settings;
   });

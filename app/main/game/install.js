@@ -78,14 +78,15 @@ function makeFindGameInstallation(deps) {
 
     // Potential locations to check (in order of priority)
     const possibleLocations = [
-      // Default location
-      path.join(
-        "C:\\Program Files (x86)\\Microsoft Games for Windows - LIVE\\Shadowrun"
-      ),
+      // Default location (user-writable)
+      path.join(app.getPath("home"), "Games", "Shadowrun"),
 
       // Other common locations
       path.join(
         "C:\\Program Files\\Microsoft Games for Windows - LIVE\\Shadowrun"
+      ),
+      path.join(
+        "C:\\Program Files (x86)\\Microsoft Games for Windows - LIVE\\Shadowrun"
       ),
       path.join("C:\\Program Files (x86)\\Shadowrun"),
       path.join("C:\\Program Files\\Shadowrun"),
@@ -130,9 +131,6 @@ function makeFindGameInstallation(deps) {
           "\\Program Files (x86)\\Microsoft Games for Windows - LIVE\\Shadowrun"
         )
       ),
-
-      // User's game-specific folders
-      path.join(app.getPath("home"), "Games", "Shadowrun"),
 
       // Steam default location
       path.join("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Shadowrun"),

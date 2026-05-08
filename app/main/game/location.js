@@ -992,7 +992,7 @@ objShell.ShellExecute "powershell.exe", "-ExecutionPolicy Bypass -WindowStyle Hi
             mainWindow,
             {
               title: "Select Shadowrun Game Directory",
-              defaultPath: "C:\\Program Files (x86)",
+              defaultPath: path.join(app.getPath("home"), "Games"),
               properties: ["openDirectory"],
             }
           );

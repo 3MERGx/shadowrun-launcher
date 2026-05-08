@@ -361,10 +361,10 @@ function showDownloadConfirmDialog(autoScanDisabled = false) {
           <strong>${
             autoScanDisabled ? "Have the game?" : "Already have the game?"
           }</strong> ${
-      autoScanDisabled
-        ? "Browse to your existing installation to avoid downloading again."
-        : "Browse for your existing installation to avoid downloading again."
-    }
+            autoScanDisabled
+              ? "Browse to your existing installation to avoid downloading again."
+              : "Browse for your existing installation to avoid downloading again."
+          }
         </div>
       </div>
       <div class="confirm-footer">
@@ -436,7 +436,7 @@ window.handlePcidBackupClick = async function () {
 
   // Start uncommenting:
   console.log(
-    "[Renderer] PCID Backup button clicked. Attempting to call window.api.backupPcid()."
+    "[Renderer] PCID Backup button clicked. Attempting to call window.api.backupPcid().",
   );
 
   const backupPcidButton = document.getElementById("backupPcidButton");
@@ -446,7 +446,7 @@ window.handlePcidBackupClick = async function () {
 
   if (!backupPcidButton || !pcidBackupStatus || !currentPcidDisplay) {
     console.error(
-      "[Renderer] One or more UI elements for PCID backup are missing!"
+      "[Renderer] One or more UI elements for PCID backup are missing!",
     );
     // alert("UI element missing for PCID backup!"); // Optional feedback
     return; // Stop if elements are missing
@@ -463,7 +463,7 @@ window.handlePcidBackupClick = async function () {
       const result = await window.api.backupPcid();
       console.log(
         "[Renderer] window.api.backupPcid() returned:",
-        JSON.stringify(result, null, 2)
+        JSON.stringify(result, null, 2),
       );
 
       if (result && result.success) {
@@ -480,13 +480,13 @@ window.handlePcidBackupClick = async function () {
           console.error("[Renderer] Backup failed with error:", result.error);
         } else {
           console.error(
-            "[Renderer] Backup failed with no specific error message from main process."
+            "[Renderer] Backup failed with no specific error message from main process.",
           );
         }
       }
     } else {
       console.error(
-        "[Renderer] window.api.backupPcid is not available or not a function!"
+        "[Renderer] window.api.backupPcid is not available or not a function!",
       );
       pcidBackupStatus.textContent = "Error: Backup API not available.";
       // alert("Backup API not available!"); // Optional feedback
@@ -494,7 +494,7 @@ window.handlePcidBackupClick = async function () {
   } catch (error) {
     console.error(
       "[Renderer] Exception during window.api.backupPcid() call:",
-      error
+      error,
     );
     pcidBackupStatus.textContent = "Error during backup. Check console.";
     // alert(`An error occurred while trying to backup PCID: ${error.message}`);
@@ -507,7 +507,7 @@ window.handlePcidBackupClick = async function () {
   }
 };
 console.log(
-  "[Renderer] handlePcidBackupClick has been globally defined (full version)."
+  "[Renderer] handlePcidBackupClick has been globally defined (full version).",
 );
 
 // Add this at the very beginning of your index.js, outside any functions or event listeners
@@ -598,7 +598,7 @@ function applyLauncherAudioFromSettingsPayload(savedSettings) {
   }
   syncBackgroundAudioVolumeSliderUI(gain);
   updateDiagnosticsLauncherAudioRowMutedClass(
-    backgroundAudio ? backgroundAudio.muted : isMuted
+    backgroundAudio ? backgroundAudio.muted : isMuted,
   );
 }
 
@@ -634,15 +634,18 @@ function syncDiagnosticsAudioVolumeSlider() {
     syncBackgroundAudioVolumeSliderUI(backgroundAudio.volume);
   }
   updateDiagnosticsLauncherAudioRowMutedClass(
-    backgroundAudio ? backgroundAudio.muted : isMuted
+    backgroundAudio ? backgroundAudio.muted : isMuted,
   );
 }
 
 // Initialize background audio
-async function initBackgroundAudio() {
+async function initBackgroundAudio(preloadedSettings) {
   if (backgroundAudio) {
     try {
-      const savedSettings = await window.api.loadSettings();
+      const savedSettings =
+        preloadedSettings !== undefined && preloadedSettings !== null
+          ? preloadedSettings
+          : await window.api.loadSettings();
       applyLauncherAudioFromSettingsPayload(savedSettings);
     } catch (error) {
       console.log("Could not load audio settings:", error);
@@ -705,7 +708,7 @@ function toggleMute() {
         ...currentSettings,
         audioMuted: isMuted,
         backgroundAudioVolume: clampLauncherAudioActualGain(
-          backgroundAudio.volume
+          backgroundAudio.volume,
         ),
       });
     })
@@ -794,10 +797,10 @@ let settings = {
 const discordIconButton = document.getElementById("discordIconButton");
 const instructionsScreen = document.getElementById("instructionsScreen");
 const closeInstructionsButton = document.getElementById(
-  "closeInstructionsButton"
+  "closeInstructionsButton",
 );
 const downloadProgressScreen = document.getElementById(
-  "downloadProgressScreen"
+  "downloadProgressScreen",
 );
 const gameFilesProgress = document.getElementById("gameFilesProgress");
 const gfwlProgress = document.getElementById("gfwlProgress");
@@ -810,6 +813,9 @@ const dxStatus = document.getElementById("dxStatus");
 const downloadMessage = document.getElementById("downloadMessage");
 const versionInfo = document.querySelector(".version-info");
 const playerCountInfo = document.getElementById("playerCountInfo");
+const PLAYER_COUNT_REFRESH_INTERVAL_MS = 30_000;
+let playerCountRefreshInterval = null;
+let playerCountRefreshInFlight = false;
 
 function setPlayerCountDisplay(data) {
   if (!playerCountInfo) return;
@@ -818,8 +824,11 @@ function setPlayerCountDisplay(data) {
   }
 }
 
-async function initPlayerCountDisplay() {
+async function refreshPlayerCountDisplay() {
   if (!playerCountInfo || !window.api?.getPlayerCount) return;
+  if (playerCountRefreshInFlight) return;
+
+  playerCountRefreshInFlight = true;
   try {
     const result = await window.api.getPlayerCount();
     if (result?.success && typeof result.inGame === "number") {
@@ -827,7 +836,23 @@ async function initPlayerCountDisplay() {
     }
   } catch (_err) {
     /* leave placeholder */
+  } finally {
+    playerCountRefreshInFlight = false;
   }
+}
+
+async function initPlayerCountDisplay() {
+  if (!playerCountInfo || !window.api?.getPlayerCount) return;
+
+  await refreshPlayerCountDisplay();
+
+  if (!playerCountRefreshInterval) {
+    playerCountRefreshInterval = setInterval(
+      refreshPlayerCountDisplay,
+      PLAYER_COUNT_REFRESH_INTERVAL_MS,
+    );
+  }
+
   if (window.api.onPlayerCountUpdate) {
     window.api.onPlayerCountUpdate((data) => setPlayerCountDisplay(data));
   }
@@ -835,7 +860,7 @@ async function initPlayerCountDisplay() {
 
 // Add this event listener for the Instructions button
 const openInstructionsButton = document.getElementById(
-  "openInstructionsButton"
+  "openInstructionsButton",
 );
 
 // Add event listener for cancel button
@@ -866,7 +891,7 @@ window.api.onGameStateUpdate((state) => {
   // If game just started running, clear launch in progress flag and auto-mute launcher audio
   if (!wasRunning && state.running) {
     console.log(
-      "[Game State] Game started running, clearing launch in progress flag"
+      "[Game State] Game started running, clearing launch in progress flag",
     );
     launchInProgress = false;
     // Auto-mute launcher background audio so it doesn't play over the game
@@ -884,7 +909,7 @@ window.api.onGameStateUpdate((state) => {
       updateMuteButtonAppearance(isMuted);
     }
     console.log(
-      "[Game State] Game closed, applying cooldown before re-enabling button"
+      "[Game State] Game closed, applying cooldown before re-enabling button",
     );
     launchInProgress = false;
 
@@ -963,7 +988,7 @@ window.api.onActivationStatus((status) => {
   // Only log the status, don't change UI
   console.log(
     "Game activation status:",
-    status.activated ? "Activated" : "Not activated"
+    status.activated ? "Activated" : "Not activated",
   );
 
   // Don't change the button text or add classes
@@ -990,7 +1015,7 @@ function updateUI() {
     "Updating UI. Game installed:",
     gameInstalled,
     "Game running:",
-    gameRunning
+    gameRunning,
   );
 
   if (gameInstalled) {
@@ -1017,7 +1042,7 @@ function updateUI() {
   const openGameDirButton = document.getElementById("openGameDirButton");
   const gameFolderLabel = document.getElementById("gameFolderLabel");
   const gameFolderDescription = document.getElementById(
-    "gameFolderDescription"
+    "gameFolderDescription",
   );
 
   if (openGameDirButton) {
@@ -1073,7 +1098,7 @@ function updateUI() {
     }
     // Enable Change Game Location button
     const changeGameLocationButton = document.getElementById(
-      "changeGameLocationButton"
+      "changeGameLocationButton",
     );
     if (changeGameLocationButton) {
       changeGameLocationButton.disabled = false;
@@ -1092,13 +1117,22 @@ function updateUI() {
       }
     }
   } else {
-    // Disable skip intro button
+    // Disable skip intro only when we truly have no game folder. If Shadowrun.exe is
+    // located but a dependency (GFWL/DX/VC++) is missing, gameInstalled is false while
+    // gameFilesLocated is true — do not reset the button to “Install Mod” (it wipes
+    // the real mod state until Settings is reopened).
     if (skipIntroButton) {
-      skipIntroButton.disabled = true;
-      skipIntroButton.classList.remove("installed");
-      skipIntroButton.textContent = "Install Mod";
-      skipIntroButton.style.opacity = "0.5";
-      skipIntroButton.style.cursor = "not-allowed";
+      if (!gameFilesLocated) {
+        skipIntroButton.disabled = true;
+        skipIntroButton.classList.remove("installed");
+        skipIntroButton.textContent = "Install Mod";
+        skipIntroButton.style.opacity = "0.5";
+        skipIntroButton.style.cursor = "not-allowed";
+      } else {
+        skipIntroButton.disabled = false;
+        skipIntroButton.style.opacity = "1";
+        skipIntroButton.style.cursor = "pointer";
+      }
     }
     // Disable FPS input and apply button
     if (maxFrameRateInput) {
@@ -1128,7 +1162,7 @@ function updateUI() {
     }
     // Disable Change Game Location button
     const changeGameLocationButton = document.getElementById(
-      "changeGameLocationButton"
+      "changeGameLocationButton",
     );
     if (changeGameLocationButton) {
       changeGameLocationButton.disabled = true;
@@ -1147,16 +1181,12 @@ function updateUI() {
         toggleContainer.style.pointerEvents = "none";
       }
     }
-    const gfwlServerStateTitle = document.getElementById("gfwlServerStateTitle");
-    if (gfwlServerStateTitle) {
-      gfwlServerStateTitle.textContent =
-        "Current: Not available (game location not set)";
-    }
+    updateGfwlServerDiagnosticsLabel("unavailable");
 
     // Game files exist but runtime deps (e.g. VC++) missing — still allow changing location
     if (gameFilesLocated) {
       const changeGameLocationButtonPartial = document.getElementById(
-        "changeGameLocationButton"
+        "changeGameLocationButton",
       );
       if (changeGameLocationButtonPartial) {
         changeGameLocationButtonPartial.disabled = false;
@@ -1177,7 +1207,7 @@ muteButton.addEventListener("click", () => {
 });
 
 const backgroundAudioVolumeSlider = document.getElementById(
-  "backgroundAudioVolumeSlider"
+  "backgroundAudioVolumeSlider",
 );
 if (backgroundAudioVolumeSlider) {
   backgroundAudioVolumeSlider.addEventListener("input", () => {
@@ -1241,7 +1271,7 @@ playButton.addEventListener("click", async () => {
   // First check if button is disabled, game is running, or launch is in progress
   if (playButton.disabled || gameRunning || launchInProgress) {
     console.log(
-      "Button clicked while disabled, game running, or launch in progress, ignoring..."
+      "Button clicked while disabled, game running, or launch in progress, ignoring...",
     );
     return; // Exit early, don't process the click
   }
@@ -1250,15 +1280,15 @@ playButton.addEventListener("click", async () => {
   const timeSinceLastLaunch = Date.now() - lastLaunchTime;
   if (timeSinceLastLaunch < LAUNCH_COOLDOWN_MS) {
     const remainingTime = Math.ceil(
-      (LAUNCH_COOLDOWN_MS - timeSinceLastLaunch) / 1000
+      (LAUNCH_COOLDOWN_MS - timeSinceLastLaunch) / 1000,
     );
     console.log(
-      `Button clicked too soon after last launch. Please wait ${remainingTime} second(s).`
+      `Button clicked too soon after last launch. Please wait ${remainingTime} second(s).`,
     );
     showToast(
       `Please wait ${remainingTime} second(s) before launching again`,
       "warning",
-      2000
+      2000,
     );
     return;
   }
@@ -1281,7 +1311,7 @@ playButton.addEventListener("click", async () => {
       showToast(
         "Game files not found. Please browse for your game folder in Settings.",
         "error",
-        5000
+        5000,
       );
       gameInstalled = false;
       gameFilesLocated = false;
@@ -1329,7 +1359,7 @@ playButton.addEventListener("click", async () => {
           error.message || "Something went wrong"
         }. Open Settings → Diagnostics for troubleshooting.`,
         "error",
-        6000
+        6000,
       );
     }
     return;
@@ -1356,7 +1386,7 @@ playButton.addEventListener("click", async () => {
         showToast(
           "✓ Game found! Shadowrun.exe detected in selected folder.",
           "success",
-          3000
+          3000,
         );
         // The game-installation-status event will be triggered automatically
         // which will update the UI
@@ -1365,7 +1395,7 @@ playButton.addEventListener("click", async () => {
           result.error ||
             "Shadowrun.exe not found in selected folder. Please select the folder containing Shadowrun.exe",
           "error",
-          5000
+          5000,
         );
       }
       // Re-enable button after browse operation
@@ -1379,7 +1409,7 @@ playButton.addEventListener("click", async () => {
           error.message || "Something went wrong"
         }. Please try selecting the folder that contains Shadowrun.exe.`,
         "error",
-        5000
+        5000,
       );
       // Re-enable button on error
       launchInProgress = false;
@@ -1491,7 +1521,7 @@ activateButton.addEventListener("click", async () => {
     showToast(
       "No PCID found. Launch the game first to generate a PCID, then you can activate the game.",
       "warning",
-      6000
+      6000,
     );
     return;
   }
@@ -1549,8 +1579,9 @@ websiteButton.addEventListener("click", () => {
 settingsButton.addEventListener("click", () => {
   settingsScreen.classList.add("visible");
 
-  // If game is not installed, disable all mod controls
-  if (!gameInstalled) {
+  // If we have no game path, disable all mod controls. If game files exist but a
+  // system dependency is missing, still probe skip intro / DXVK from disk.
+  if (!gameInstalled && !gameFilesLocated) {
     // Disable skip intro button
     if (skipIntroButton) {
       skipIntroButton.disabled = true;
@@ -1587,7 +1618,7 @@ settingsButton.addEventListener("click", () => {
     }
     // Disable Change Game Location button
     const changeGameLocationButton = document.getElementById(
-      "changeGameLocationButton"
+      "changeGameLocationButton",
     );
     if (changeGameLocationButton) {
       changeGameLocationButton.disabled = true;
@@ -1595,7 +1626,7 @@ settingsButton.addEventListener("click", () => {
       changeGameLocationButton.style.cursor = "not-allowed";
     }
   } else {
-    // Game is installed, check mod status whenever settings are opened
+    // Game files available — refresh mod/feature state from disk when opening settings
     window.api.checkSkipIntroStatus().then((status) => {
       updateSkipIntroButtonState(status.installed);
     });
@@ -1622,7 +1653,7 @@ settingsButton.addEventListener("click", () => {
       .catch((error) => {
         console.error(
           "Error reading FPS from dxvk.conf when opening settings:",
-          error
+          error,
         );
       });
   }
@@ -1637,7 +1668,7 @@ closeSettingsButton.addEventListener("click", () => {
 const diagnosticsScreen = document.getElementById("diagnosticsScreen");
 const openDiagnosticsButton = document.getElementById("openDiagnosticsButton");
 const closeDiagnosticsButton = document.getElementById(
-  "closeDiagnosticsButton"
+  "closeDiagnosticsButton",
 );
 
 if (openDiagnosticsButton && diagnosticsScreen) {
@@ -1674,7 +1705,7 @@ if (closeDiagnosticsButton && diagnosticsScreen) {
 async function loadCurrentGamePath() {
   const currentGamePathElement = document.getElementById("currentGamePath");
   const currentGamePathDisplay = document.getElementById(
-    "currentGamePathDisplay"
+    "currentGamePathDisplay",
   );
 
   if (!currentGamePathElement) return;
@@ -1699,7 +1730,7 @@ async function loadCurrentGamePath() {
 
 // Change Game Location button handler
 const changeGameLocationButton = document.getElementById(
-  "changeGameLocationButton"
+  "changeGameLocationButton",
 );
 if (changeGameLocationButton) {
   changeGameLocationButton.addEventListener("click", async () => {
@@ -1738,7 +1769,7 @@ if (changeGameLocationButton) {
           error.message || "Something went wrong"
         }. Please try again.`,
         "error",
-        6000
+        6000,
       );
       changeGameLocationButton.disabled = false;
       changeGameLocationButton.textContent = "📁 Change Location";
@@ -1770,7 +1801,7 @@ function showPreInstallConsentModal(needsInstall) {
           `<li style="margin-bottom:8px;">
             <strong>${c.name}</strong>
             <span style="color:#9ca3af;"> — ${c.reason}</span>
-          </li>`
+          </li>`,
       )
       .join("");
 
@@ -1830,7 +1861,7 @@ async function installVcRedistFromAlert() {
   showToast(
     "Downloading Microsoft Visual C++ v14 Redistributable (x86) from Microsoft...",
     "info",
-    5000
+    5000,
   );
   try {
     const result = await window.api.installVcRedistX86();
@@ -1838,20 +1869,20 @@ async function installVcRedistFromAlert() {
       showToast(
         "Microsoft Visual C++ v14 Redistributable (x86) is already installed.",
         "success",
-        5000
+        5000,
       );
     } else if (result.success && result.installed) {
       showToast(
         "Microsoft Visual C++ v14 Redistributable (x86) installed successfully.",
         "success",
-        6000
+        6000,
       );
     } else {
       showToast(
         result.error ||
           "Could not complete Microsoft Visual C++ v14 Redistributable (x86) installation. Open Diagnostics or install manually from aka.ms/vc14/vc_redist.x86.exe",
         "error",
-        10000
+        10000,
       );
     }
   } catch (e) {
@@ -1884,8 +1915,8 @@ function showGameMoveConfirmation(moveData) {
           moveData.sourceRequiresAdmin && moveData.destRequiresAdmin
             ? 'Both folders are protected (like Program Files). A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
             : moveData.sourceRequiresAdmin
-            ? 'The source folder is protected (like Program Files), so admin permission is needed to delete the old files. A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
-            : 'The destination folder is protected (like Program Files), so admin permission is needed to write files there. A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
+              ? 'The source folder is protected (like Program Files), so admin permission is needed to delete the old files. A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
+              : 'The destination folder is protected (like Program Files), so admin permission is needed to write files there. A UAC prompt will appear when you click "Move Files". Click "Yes" to proceed.'
         }
       </div>
     </div>
@@ -2038,7 +2069,7 @@ async function executeGameMove(newPath, progressModal) {
       showToast(
         `✓ Game files moved successfully to:\n${result.newPath}`,
         "success",
-        6000
+        6000,
       );
 
       // Refresh installation status
@@ -2053,15 +2084,15 @@ async function executeGameMove(newPath, progressModal) {
       // Update the displayed game path
       await loadCurrentGamePath();
 
-      // Update all UI elements with new settings
-      loadSettings();
+      // Update all UI elements with new settings (await so updateUI runs after skip intro state)
+      await loadSettings();
     } else {
       // Show error with context
       const errorMsg = result.error || "The move operation failed";
       showToast(
         `Failed to move game files: ${errorMsg}. Your game files are still in the original location.`,
         "error",
-        8000
+        8000,
       );
     }
   } catch (error) {
@@ -2077,7 +2108,7 @@ async function executeGameMove(newPath, progressModal) {
         error.message || "Something went wrong"
       }. Your game files are still in the original location.`,
       "error",
-      8000
+      8000,
     );
   }
 }
@@ -2097,11 +2128,7 @@ function applyCooldown(toggleElement, duration = 1500) {
   }, duration);
 }
 
-// Add near the beginning of your file with other initialization
-window.api.checkSkipIntroStatus().then((status) => {
-  console.log("Skip intro status:", status);
-  updateSkipIntroButtonState(status.installed);
-});
+// Skip intro button state is set by loadSettings() (load-settings probes disk).
 
 // Add this helper function
 function updateSkipIntroButtonState(installed) {
@@ -2194,7 +2221,7 @@ if (dxvkToggle) {
           error.message || "Unknown error"
         }. Please try again.`,
         "error",
-        6000
+        6000,
       );
     } finally {
       // Restore label and re-enable toggle
@@ -2215,9 +2242,11 @@ function saveSettings() {
 // Load settings from main process
 async function loadSettings() {
   settings = await window.api.loadSettings();
-  skipIntroButton.classList.contains("installed")
-    ? skipIntroButton.classList.remove("installed")
-    : skipIntroButton.classList.add("installed");
+  // Drive Skip Intro from saved settings — do NOT toggle `.installed` from prior DOM state
+  // (toggling inverted the button after game move: settings-updated fixed it, then this undid it).
+  if (skipIntroButton) {
+    updateSkipIntroButtonState(Boolean(settings.skipIntro));
+  }
 
   // Check DXVK status and update toggle
   try {
@@ -2254,6 +2283,9 @@ async function loadSettings() {
   }
 
   applyLauncherAudioFromSettingsPayload(settings);
+
+  // Re-apply install-dependent control enable/disable (skip intro, DXVK, etc.)
+  updateUI();
 }
 
 // Load version number on startup
@@ -2264,15 +2296,16 @@ async function loadVersion() {
   }
 }
 
-// Initialize UI and load settings
-updateUI();
-loadSettings();
-loadVersion();
-initPlayerCountDisplay();
-
-// Initialize audio
-initBackgroundAudio();
-addButtonSoundEffects();
+// Initialize UI: load settings once, then audio (avoids duplicate load-settings /
+// checkSkipIntroStatus probes that spammed identical log lines).
+(async function startupLauncherUi() {
+  updateUI();
+  await loadSettings();
+  loadVersion();
+  initPlayerCountDisplay();
+  await initBackgroundAudio(settings);
+  addButtonSoundEffects();
+})();
 
 // Update the drag event handler
 document.addEventListener("mousedown", (e) => {
@@ -2296,7 +2329,7 @@ document.addEventListener("mousedown", (e) => {
     // Move the window by sending the movement to the main process
     window.api.moveWindow(
       moveEvent.clientX - startX,
-      moveEvent.clientY - startY
+      moveEvent.clientY - startY,
     );
   };
 
@@ -2523,7 +2556,8 @@ d3d9.maxFrameRate = 85</code></pre>
       `,
     },
     {
-      question: "Nothing Happens When I Press Play (Black Screen or No Response)",
+      question:
+        "Nothing Happens When I Press Play (Black Screen or No Response)",
       answer: `
         <p><strong>Problem:</strong> You press Play but nothing happens, or you get a black screen with no game window.</p>
         <p><strong>Solution:</strong> Try disabling DXVK Support and launch again.</p>
@@ -2565,7 +2599,7 @@ d3d9.maxFrameRate = 85</code></pre>
         </div>
       </div>
     </div>
-  `
+  `,
     )
     .join("");
 
@@ -2575,7 +2609,7 @@ d3d9.maxFrameRate = 85</code></pre>
     question.addEventListener("click", () => {
       const index = question.dataset.index;
       const answer = faqContent.querySelector(
-        `.faq-answer[data-index="${index}"]`
+        `.faq-answer[data-index="${index}"]`,
       );
       const icon = question.querySelector(".faq-icon");
 
@@ -2786,7 +2820,7 @@ cancelDownloadButton.addEventListener("click", () => {
 window.api.onComponentSkipped((component, message) => {
   // Mark the component as skipped in the UI
   const progressItem = document.querySelector(
-    `.progress-item[data-component="${component}"]`
+    `.progress-item[data-component="${component}"]`,
   );
   if (progressItem) {
     progressItem.classList.add("skipped");
@@ -2827,7 +2861,7 @@ saveFrameRateButton.addEventListener("click", async () => {
         // Reset to default green color for next time
         feedback.style.backgroundColor = "rgba(16, 185, 129, 0.9)";
       },
-      result.requiresRestart ? 5000 : 3000
+      result.requiresRestart ? 5000 : 3000,
     );
   } else {
     // Show error feedback
@@ -2900,7 +2934,10 @@ window.api.onLaunchError((data) => {
 function isSpawnFailurePayload(data) {
   const err = data.error || "";
   if (!err) return false;
-  if (/^spawn\s/i.test(err) || /\bENOENT\b|\bEACCES\b|\bEPERM\b|\bENOTDIR\b/i.test(err)) {
+  if (
+    /^spawn\s/i.test(err) ||
+    /\bENOENT\b|\bEACCES\b|\bEPERM\b|\bENOTDIR\b/i.test(err)
+  ) {
     return true;
   }
   if (data.exitCode === -1 && err.length > 0) return true;
@@ -2946,7 +2983,8 @@ function describeWindowsGameExit(exitCode) {
   if (exitCode === undefined || exitCode === null) {
     return {
       title: "Game closed unexpectedly",
-      detail: "No exit code was reported (the process may have been terminated unusually).",
+      detail:
+        "No exit code was reported (the process may have been terminated unusually).",
       tip: "Check Settings → Diagnostics. Details may be in game-crash.log.",
     };
   }
@@ -2980,14 +3018,16 @@ function describeWindowsGameExit(exitCode) {
       tip: "Disable mods and DXVK temporarily; update GPU drivers; try a clean game folder.",
     },
     0xc0000409: {
-      title: "Security check failed — stack buffer overrun (STATUS_STACK_BUFFER_OVERRUN)",
+      title:
+        "Security check failed — stack buffer overrun (STATUS_STACK_BUFFER_OVERRUN)",
       detail:
         "Windows terminated the process due to a stack protection violation—can indicate a bug, mod, or exploit mitigation.",
       tip: "Remove mods; update the game files; update Windows and drivers.",
     },
     0xc00000fd: {
       title: "Stack overflow (STATUS_STACK_OVERFLOW)",
-      detail: "The game exhausted the stack—sometimes mods or infinite recursion in injected code.",
+      detail:
+        "The game exhausted the stack—sometimes mods or infinite recursion in injected code.",
       tip: "Disable mods and DXVK; verify vanilla install.",
     },
     0xc0000094: {
@@ -2997,7 +3037,8 @@ function describeWindowsGameExit(exitCode) {
     },
     0xc000001d: {
       title: "Illegal instruction (STATUS_ILLEGAL_INSTRUCTION)",
-      detail: "The CPU executed an instruction it could not run—CPU/driver mismatch or corrupted code.",
+      detail:
+        "The CPU executed an instruction it could not run—CPU/driver mismatch or corrupted code.",
       tip: "Update CPU chipset/GPU drivers; verify game files; avoid incompatible mods.",
     },
     0x80000003: {
@@ -3136,17 +3177,25 @@ function syncLauncherLiveLogoFromMode(mode) {
   wrap.hidden = mode === "ahl";
 }
 
+function syncGfwlServerToggleAria() {
+  const toggle = document.getElementById("gfwlServerToggle");
+  if (!toggle) return;
+  toggle.setAttribute("aria-checked", toggle.checked ? "true" : "false");
+}
+
 function updateGfwlServerDiagnosticsLabel(mode) {
-  const title = document.getElementById("gfwlServerStateTitle");
-  if (!title) return;
+  const valueEl = document.getElementById("gfwlServerStateValue");
+  if (!valueEl) return;
   if (mode === "ahl") {
-    title.textContent = "Current: AntHill LIVE (AHL)";
+    valueEl.textContent = "AntHill LIVE (AHL)";
   } else if (mode === "gfwl") {
-    title.textContent = "Current: Microsoft GFWL (Xbox Live)";
+    valueEl.textContent = "Classic GFWL";
+  } else if (mode === "unavailable") {
+    valueEl.textContent = "— (set game folder)";
   } else {
-    title.textContent =
-      "Current: Not configured (no server profile in game folder yet)";
+    valueEl.textContent = "Not configured yet";
   }
+  syncGfwlServerToggleAria();
 }
 
 function syncActivationUiFromServerMode(mode) {
@@ -3191,34 +3240,32 @@ if (gfwlServerToggle) {
     const feedback = document.getElementById("gfwlServerFeedback");
     const statusEl = document.getElementById("gfwlServerStatus");
     if (feedback) feedback.style.display = "block";
-    if (statusEl) statusEl.textContent = newMode === "ahl" ? "Enabling AHL…" : "Switching to real GFWL…";
+    if (statusEl) {
+      statusEl.textContent =
+        newMode === "ahl"
+          ? "Switching to AntHill LIVE…"
+          : "Switching to classic GFWL…";
+    }
 
     try {
       const result = await window.api.toggleGfwlServer(newMode);
 
       if (result.success) {
-        showToast(result.message, "success");
-        if (newMode === "ahl") {
-          showToast(
-            "Activation is disabled while AntHill LIVE (AHL) is enabled.",
-            "info",
-            5000
-          );
-        }
+        showToast(result.message, "success", 5500);
       } else {
         // Revert
         gfwlServerToggle.checked = !gfwlServerToggle.checked;
-        syncLauncherLiveLogoFromMode(
-          gfwlServerToggle.checked ? "ahl" : "gfwl"
-        );
+        syncLauncherLiveLogoFromMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
         updateGfwlServerDiagnosticsLabel(
-          gfwlServerToggle.checked ? "ahl" : "gfwl"
+          gfwlServerToggle.checked ? "ahl" : "gfwl",
         );
-        syncActivationUiFromServerMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
+        syncActivationUiFromServerMode(
+          gfwlServerToggle.checked ? "ahl" : "gfwl",
+        );
         showToast(
           result.message || "Failed to switch server configuration.",
           "error",
-          6000
+          6000,
         );
       }
     } catch (error) {
@@ -3226,13 +3273,13 @@ if (gfwlServerToggle) {
       gfwlServerToggle.checked = !gfwlServerToggle.checked;
       syncLauncherLiveLogoFromMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
       updateGfwlServerDiagnosticsLabel(
-        gfwlServerToggle.checked ? "ahl" : "gfwl"
+        gfwlServerToggle.checked ? "ahl" : "gfwl",
       );
       syncActivationUiFromServerMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
       showToast(
         `Server toggle failed: ${error.message || "Unknown error"}. Please try again.`,
         "error",
-        6000
+        6000,
       );
     } finally {
       if (feedback) feedback.style.display = "none";
@@ -3292,7 +3339,7 @@ async function loadChangelog() {
     if (!changelog) {
       try {
         const serverResponse = await fetch(
-          "https://downloads.shadowrunfps.com/launcher/changelog.json"
+          "https://downloads.shadowrunfps.com/launcher/changelog.json",
         );
         if (serverResponse.ok) {
           changelog = await serverResponse.json();
@@ -3367,59 +3414,91 @@ async function loadChangelog() {
               ${entry.date}
             </span>
           </div>
-          <ul style="list-style: none; padding: 0; margin: 0; font-size: 13px; line-height: 1.8;">
+          <div style="font-size: 13px; line-height: 1.8;">
       `;
 
-      entry.notes.forEach((note) => {
-        // Check if note has a dash separator (title - description format)
-        const dashIndex = note.indexOf(" - ");
+      const formatChangelogInline = (text) =>
+        text.replace(
+          /\*\*([^*]+)\*\*/g,
+          '<strong style="color: #60a5fa;">$1</strong>',
+        );
 
-        if (dashIndex > 0) {
-          // Split into title and description
-          const title = note.substring(0, dashIndex).trim();
-          const description = note.substring(dashIndex + 3).trim();
+      const escapeChangelogPlain = (s) =>
+        String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
 
-          // Parse markdown-style bold text for title
-          const formattedTitle = title.replace(
-            /\*\*([^*]+)\*\*/g,
-            '<strong style="color: #60a5fa;">$1</strong>'
-          );
+      /** Group `**Category:** body` notes so each category shows once with multiple line items. */
+      const categoryNoteRegex = /^\*\*([^*]+)\*\*:\s*(.+)$/;
+      const groups = [];
+      for (const note of entry.notes) {
+        const m = note.match(categoryNoteRegex);
+        if (m) {
+          const category = m[1];
+          const itemBody = m[2].trim();
+          const prev = groups[groups.length - 1];
+          if (prev && prev.category === category) {
+            prev.items.push(itemBody);
+          } else {
+            groups.push({ category, items: [itemBody] });
+          }
+        } else {
+          groups.push({ category: null, items: [note] });
+        }
+      }
 
-          // Parse markdown-style bold text for description (if any)
-          const formattedDescription = description.replace(
-            /\*\*([^*]+)\*\*/g,
-            '<strong style="color: #60a5fa;">$1</strong>'
-          );
-
+      for (const group of groups) {
+        if (group.category) {
           html += `
-            <li style="margin-bottom: 8px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
-              <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
-              <div style="margin-bottom: 2px;">
-                ${formattedTitle}
+            <div style="margin-bottom: 14px;">
+              <div style="font-size: 13px; font-weight: 600; color: #60a5fa; margin-bottom: 6px;">
+                ${escapeChangelogPlain(group.category)}
               </div>
-              <div style="padding-left: 20px; color: rgba(255, 255, 255, 0.6); font-size: 12px; line-height: 1.5;">
-                ${formattedDescription}
-              </div>
-            </li>
+              <ul style="list-style: none; padding: 0; margin: 0;">
+          `;
+          for (const item of group.items) {
+            html += `
+                <li style="margin-bottom: 6px; color: rgba(255, 255, 255, 0.85); padding-left: 18px; position: relative;">
+                  <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
+                  ${formatChangelogInline(item)}
+                </li>
+            `;
+          }
+          html += `
+              </ul>
+            </div>
           `;
         } else {
-          // No dash separator - render as single line (backwards compatibility)
-          const formattedNote = note.replace(
-            /\*\*([^*]+)\*\*/g,
-            '<strong style="color: #60a5fa;">$1</strong>'
-          );
-
-          html += `
-          <li style="margin-bottom: 4px; color: rgba(255, 255, 255, 0.8); padding-left: 20px; position: relative;">
-            <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
-            ${formattedNote}
-          </li>
-        `;
+          for (const raw of group.items) {
+            const dashIndex = raw.indexOf(" - ");
+            if (dashIndex > 0) {
+              const title = raw.substring(0, dashIndex).trim();
+              const description = raw.substring(dashIndex + 3).trim();
+              html += `
+            <div style="margin-bottom: 10px; color: rgba(255, 255, 255, 0.8); padding-left: 18px; position: relative;">
+              <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
+              <div style="margin-bottom: 2px;">${formatChangelogInline(title)}</div>
+              <div style="padding-left: 16px; color: rgba(255, 255, 255, 0.6); font-size: 12px; line-height: 1.5;">
+                ${formatChangelogInline(description)}
+              </div>
+            </div>
+              `;
+            } else {
+              html += `
+            <div style="margin-bottom: 8px; color: rgba(255, 255, 255, 0.8); padding-left: 18px; position: relative;">
+              <span style="position: absolute; left: 0; color: #60a5fa;">•</span>
+              ${formatChangelogInline(raw)}
+            </div>
+              `;
+            }
+          }
         }
-      });
+      }
 
       html += `
-          </ul>
+          </div>
         </div>
       `;
     });
@@ -3540,7 +3619,7 @@ window.addEventListener("focus", async () => {
       showToast(
         "Game files not found. Please browse for your game folder in Settings.",
         "error",
-        5000
+        5000,
       );
     } else {
       applyInstallationCheckResult(checkResult);
@@ -3562,7 +3641,7 @@ async function checkPersistentIssues() {
 
       // Determine severity (error > warning)
       const hasError = result.issues.some(
-        (issue) => issue.severity === "error"
+        (issue) => issue.severity === "error",
       );
       const severity = hasError ? "error" : "warning";
 
@@ -3597,7 +3676,6 @@ async function checkPersistentIssues() {
             ? "Download and install Microsoft Visual C++ v14 Redistributable (x86)"
             : "Open Diagnostics";
       }
-
     } else {
       // Hide alert bar if no issues
       currentIssues = [];
@@ -3626,7 +3704,7 @@ function showStackedErrorAlerts() {
       // Rough estimate: 7px per character + padding
       return Math.min(issue.message.length * 7 + 100, 600);
     }),
-    350 // Minimum width
+    350, // Minimum width
   );
 
   // Create stacked alerts for each issue
@@ -3804,7 +3882,7 @@ document.addEventListener("DOMContentLoaded", function () {
             showToast(
               "✓ Game found! Shadowrun.exe detected in selected folder.",
               "success",
-              3000
+              3000,
             );
             // The game-installation-status event will be triggered automatically
             // which will update the UI
@@ -3813,7 +3891,7 @@ document.addEventListener("DOMContentLoaded", function () {
               result.error ||
                 "Shadowrun.exe not found in selected folder. Please select the folder containing Shadowrun.exe",
               "error",
-              5000
+              5000,
             );
           }
 
@@ -3826,7 +3904,7 @@ document.addEventListener("DOMContentLoaded", function () {
               error.message || "Unknown error"
             }. Please try selecting the folder manually.`,
             "error",
-            5000
+            5000,
           );
           openGameDirButton.disabled = false;
           openGameDirButton.textContent = "Find Existing Game";
@@ -3914,7 +3992,7 @@ window.apiTest = {
 };
 
 console.log(
-  "Test functions added - you can run window.testIpcDirectly() in the console"
+  "Test functions added - you can run window.testIpcDirectly() in the console",
 );
 
 // ========================================
@@ -3923,10 +4001,10 @@ console.log(
 
 // Get launcher update UI elements (OLD CODE - WILL BE REPLACED)
 const launcherUpdateProgressScreen = document.getElementById(
-  "launcherUpdateProgressScreen"
+  "launcherUpdateProgressScreen",
 );
 const launcherUpdateProgress = document.getElementById(
-  "launcherUpdateProgress"
+  "launcherUpdateProgress",
 );
 const launcherUpdateStatus = document.getElementById("launcherUpdateStatus");
 const launcherUpdateDetails = document.getElementById("launcherUpdateDetails");
@@ -3963,9 +4041,11 @@ window.api.onUpdateDownloadProgress((progress) => {
       launcherUpdateStatus.textContent = `Downloading... ${Math.round(percent)}%`;
     }
     if (launcherUpdateDetails) {
-      const transferredMB = ((progress?.transferred || 0) / 1024 / 1024).toFixed(
-        2
-      );
+      const transferredMB = (
+        (progress?.transferred || 0) /
+        1024 /
+        1024
+      ).toFixed(2);
       const totalMB = ((progress?.total || 0) / 1024 / 1024).toFixed(2);
       if (progress?.total && progress.total > 0) {
         launcherUpdateDetails.textContent = `${transferredMB} MB / ${totalMB} MB`;
@@ -3981,7 +4061,7 @@ window.api.onUpdateDownloadProgress((progress) => {
       `Downloading update... ${Math.round(percent)}%`,
       "info",
       0,
-      true
+      true,
     );
   } else {
     const messageEl = updateToastId.querySelector(".toast-message");
@@ -4041,7 +4121,7 @@ const updateReleaseNotes = document.getElementById("updateReleaseNotes");
 const updateLaterButton = document.getElementById("updateLaterButton");
 const updateDownloadButton = document.getElementById("updateDownloadButton");
 const updateAvailableIndicator = document.getElementById(
-  "updateAvailableIndicator"
+  "updateAvailableIndicator",
 );
 
 // Store pending update data
@@ -4115,7 +4195,7 @@ window.api.onPortableUpdateAvailable((data) => {
     showToast(
       `v${data.version} is available! Click "Update Available" to download the new portable launcher.`,
       "info",
-      8000
+      8000,
     );
   }
 });
@@ -4126,7 +4206,7 @@ function showPortableUpdateDialog(data) {
   if (!updateDialog) return;
 
   const dialogHeader = updateDialog.querySelector(
-    ".update-dialog-header h2, h2"
+    ".update-dialog-header h2, h2",
   );
   const descEl = updateDialog.querySelector(".update-description");
   const actionsEl = updateDialog.querySelector(".update-dialog-actions");
@@ -4203,7 +4283,7 @@ window.api.onUpdateNotAvailable((data) => {
   console.log("[Renderer] Time:", new Date().toLocaleTimeString());
 
   // Show success toast
-  showToast("You're on the latest version! ✓", "success", 4000);
+  showToast("You're on the latest version!", "success", 4000);
 
   console.log("");
   console.log("=================================================");
@@ -4213,12 +4293,12 @@ window.api.onUpdateNotAvailable((data) => {
 // Rollback Dialog Handlers
 const rollbackDialog = document.getElementById("rollbackDialog");
 const rollbackCurrentVersion = document.getElementById(
-  "rollbackCurrentVersion"
+  "rollbackCurrentVersion",
 );
 const rollbackTargetVersion = document.getElementById("rollbackTargetVersion");
 const rollbackReason = document.getElementById("rollbackReason");
 const rollbackDownloadButton = document.getElementById(
-  "rollbackDownloadButton"
+  "rollbackDownloadButton",
 );
 const rollbackLaterButton = document.getElementById("rollbackLaterButton");
 const rollbackProgress = document.getElementById("rollbackProgress");
@@ -4320,7 +4400,7 @@ window.api.onUpdateCheckDevMode(() => {
   showToast(
     "Could not reach update server. Check your internet connection.",
     "error",
-    5000
+    5000,
   );
 });
 
@@ -4351,7 +4431,7 @@ window.api.onUpdateDownloadedSilent((data) => {
   showToast(
     `Update v${data.version} downloaded! Launcher will restart in 5 seconds...`,
     "success",
-    5000
+    5000,
   );
 });
 
@@ -4495,8 +4575,8 @@ window.api.onUpdateError((data) => {
             data.type === "network"
               ? "Please check your internet connection and try again."
               : data.type === "timeout"
-              ? "The download is taking too long. Your connection may be unstable."
-              : "If this problem persists, you can download the update manually."
+                ? "The download is taking too long. Your connection may be unstable."
+                : "If this problem persists, you can download the update manually."
           }
         </p>
       `;
@@ -4575,7 +4655,7 @@ window.api.onUpdateInstallationFailed((data) => {
       const dialogHeader = updateDialog.querySelector("h2");
       const dialogContent = updateDialog.querySelector(".update-description");
       const dialogActions = updateDialog.querySelector(
-        ".update-dialog-actions"
+        ".update-dialog-actions",
       );
 
       if (dialogHeader) {
@@ -4620,7 +4700,7 @@ window.api.onUpdateInstallationFailed((data) => {
           } catch (error) {
             console.error(
               "[Renderer] Error getting manual download URL:",
-              error
+              error,
             );
           }
         };
@@ -4723,7 +4803,7 @@ function showUpdateToast(
   message,
   type = "info",
   duration = 0,
-  showProgress = false
+  showProgress = false,
 ) {
   const container = document.getElementById("toastContainer");
   if (!container) {
@@ -4828,7 +4908,7 @@ function showUpdateToast(
       showToast(
         "Failed to check for updates. Check your internet connection and try again.",
         "error",
-        6000
+        6000,
       );
 
       // Reset button on error
@@ -4871,7 +4951,7 @@ function showUpdateToast(
         Object.assign(document.createTextNode(""), {
           textContent:
             "Check if a new version of the portable launcher is available. Updates are applied by downloading and replacing the .exe.\u00a0",
-        })
+        }),
       );
       if (changelogLink) {
         descSpan.appendChild(changelogLink);
@@ -4918,7 +4998,7 @@ if (runDiagnosticsButton) {
         showToast(
           `Failed to run diagnostics: ${errorMsg}. Please try again, or run the launcher as Administrator.`,
           "error",
-          6000
+          6000,
         );
       }
     } catch (error) {
@@ -4935,7 +5015,7 @@ if (runDiagnosticsButton) {
           error.message || "Something went wrong"
         }. Please try again, or run the launcher as Administrator.`,
         "error",
-        6000
+        6000,
       );
     } finally {
       runDiagnosticsButton.disabled = false;
@@ -4993,58 +5073,36 @@ function showDiagnosticsResults(diag) {
           
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
-              diag.directX
+              diag.directX,
             )};">
               <span style="font-size: 13px;">DirectX 9+</span>
               <span style="color: ${statusColor(
-                diag.directX
+                diag.directX,
               )}; font-weight: 600;">${statusIcon(diag.directX)} ${statusText(
-    diag.directX
-  )}</span>
+                diag.directX,
+              )}</span>
             </div>
 
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
-              diag.vcRedistX86
+              diag.vcRedistX86,
             )};">
               <span style="font-size: 13px;">Microsoft Visual C++ v14 Redistributable (x86)</span>
               <span style="color: ${statusColor(
-                diag.vcRedistX86
+                diag.vcRedistX86,
               )}; font-weight: 600;">${statusIcon(diag.vcRedistX86)} ${statusText(
-    diag.vcRedistX86
-  )}</span>
+                diag.vcRedistX86,
+              )}</span>
             </div>
             
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
-              diag.licenseManager
-            )};">
-              <span style="font-size: 13px;">License Manager Service</span>
-              <span style="color: ${statusColor(
-                diag.licenseManager
-              )}; font-weight: 600;">${statusIcon(diag.licenseManager)} ${
-    diag.licenseManager ? "Running" : "Not Running"
-  }</span>
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
-              diag.xboxNetworking
-            )};">
-              <span style="font-size: 13px;">Xbox Live Networking Service</span>
-              <span style="color: ${statusColor(
-                diag.xboxNetworking
-              )}; font-weight: 600;">${statusIcon(diag.xboxNetworking)} ${
-    diag.xboxNetworking ? "Running" : "Not Running"
-  }</span>
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; border-left: 3px solid ${statusColor(
-              diag.dotNet.installed
+              diag.dotNet.installed,
             )};">
               <span style="font-size: 13px;">.NET Framework 3.5</span>
               <span style="color: ${statusColor(
-                diag.dotNet.installed
+                diag.dotNet.installed,
               )}; font-weight: 600;">${statusIcon(diag.dotNet.installed)} ${
-    diag.dotNet.installed ? diag.dotNet.version : "Not Installed"
-  }</span>
+                diag.dotNet.installed ? diag.dotNet.version : "Not Installed"
+              }</span>
             </div>
             
             <!-- PCID Display -->
@@ -5080,10 +5138,10 @@ function showDiagnosticsResults(diag) {
             <div style="padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; text-align: center;">
               <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Internet</div>
               <div style="color: ${statusColor(
-                diag.network.online
+                diag.network.online,
               )}; font-weight: 600; font-size: 13px;">${
-    diag.network.status
-  }</div>
+                diag.network.status
+              }</div>
             </div>
             
             <div style="padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; text-align: center;">
@@ -5091,14 +5149,14 @@ function showDiagnosticsResults(diag) {
               <div style="color: ${
                 diag.firewall.enabled ? "#f59e0b" : "#10b981"
               }; font-weight: 600; font-size: 13px;">${
-    diag.firewall.status
-  }</div>
+                diag.firewall.status
+              }</div>
             </div>
             
             <div style="padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px; text-align: center; grid-column: span 2;">
               <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">NAT Type (P2P)</div>
               <div style="color: ${getNatColor(
-                diag.natType.type
+                diag.natType.type,
               )}; font-weight: 600; font-size: 13px;">${diag.natType.type}</div>
             </div>
           </div>
@@ -5113,7 +5171,7 @@ function showDiagnosticsResults(diag) {
             ${diag.autoFixed
               .map(
                 (fix) =>
-                  `<div style="font-size: 12px; margin-bottom: 4px;">• ${fix}</div>`
+                  `<div style="font-size: 12px; margin-bottom: 4px;">• ${fix}</div>`,
               )
               .join("")}
           </div>
@@ -5141,7 +5199,7 @@ function showDiagnosticsResults(diag) {
                     : ""
                 }
               </div>
-            `
+            `,
               )
               .join("")}
           </div>
@@ -5180,7 +5238,7 @@ function showDiagnosticsResults(diag) {
             showToast(
               "Could not copy PCID. Select the text and copy manually.",
               "error",
-              4000
+              4000,
             );
           }
         });
@@ -5201,7 +5259,7 @@ let cachedSystemInfo = null;
 // Function to detect and display system info
 async function detectAndDisplaySystemInfo(
   shouldShowToast = true,
-  forceRefresh = false
+  forceRefresh = false,
 ) {
   if (detectSystemButton) detectSystemButton.disabled = true;
   if (gpuInfo) gpuInfo.textContent = "Detecting...";
@@ -5259,7 +5317,7 @@ async function detectAndDisplaySystemInfo(
         showToast(
           `✓ System information ${result.cached ? "loaded" : "detected"}!`,
           "success",
-          3000
+          3000,
         );
       }
     } else {
@@ -5290,7 +5348,7 @@ async function detectAndDisplaySystemInfo(
 // Detect System button handler (show toast + force re-detect, skip cache)
 if (detectSystemButton) {
   detectSystemButton.addEventListener("click", () =>
-    detectAndDisplaySystemInfo(true, true)
+    detectAndDisplaySystemInfo(true, true),
   );
 }
 
@@ -5340,11 +5398,10 @@ if (copySystemInfoButton) {
         } catch (err) {
           alert(
             "Failed to copy to clipboard. Please copy manually:\n\n" +
-              systemText
+              systemText,
           );
         }
         document.body.removeChild(textArea);
       });
   });
 }
-

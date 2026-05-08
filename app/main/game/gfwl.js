@@ -241,7 +241,8 @@ function registerGfwlServerIpc({
         sendProgress("complete", "AHL enabled");
         return {
           success: true,
-          message: "AntHill LIVE (AHL) is now active. Restart the game to apply.",
+          message:
+            "AntHill LIVE (AHL) is now active. Restart the game to apply. Activate Game in the launcher stays disabled while AHL is on.",
         };
       }
 

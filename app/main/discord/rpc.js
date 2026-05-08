@@ -15,10 +15,7 @@
 
 const { safeLog } = require("../logger");
 const { fetchPlayerStats } = require("../services/playerTrackerStats");
-const {
-  CLIENT_ID,
-  DISCORD_UPDATE_INTERVAL,
-} = require("../config/constants");
+const { CLIENT_ID, DISCORD_UPDATE_INTERVAL } = require("../config/constants");
 const REFRESH_INTERVAL_MS = 30_000; // 30 s keep-alive
 
 // ----------------------------------------------------------------------------
@@ -248,7 +245,7 @@ async function updateDiscordActivity(playing) {
   // its gameProcess handle too.
   if (playing && !actuallyPlaying) {
     safeLog.info(
-      "[Discord RPC] Game state mismatch detected - correcting to idle"
+      "[Discord RPC] Game state mismatch detected - correcting to idle",
     );
     playerInGame = false;
     gameStartTime = null;
@@ -342,12 +339,22 @@ async function updateDiscordActivity(playing) {
   }
 
   rpc.setActivity(activity).catch((error) => {
-    if (
-      error.message &&
-      !error.message.includes("RPC_CONNECTION") &&
-      !error.message.includes("ENOENT")
-    ) {
-      safeLog.info("[Discord RPC] Activity update error:", error.message);
+    const msg = (error && error.message) || String(error || "");
+    // discord-rpc often reports generic "Unknown Error" when IPC is flaky, the
+    // Discord client restarted, or assets/buttons fail validation — not worth an
+    // info log every 30s keep-alive. Unexpected messages still surface at debug.
+    const benign =
+      !msg.trim() ||
+      /rpc_connection|enoent|unknown error|connection closed|socket|econnrefused|ipc/i.test(
+        msg,
+      );
+    if (!benign) {
+      safeLog.info("[Discord RPC] Activity update error:", msg);
+    } else {
+      safeLog.debug(
+        "[Discord RPC] Activity update skipped:",
+        msg || "(no message)",
+      );
     }
   });
 }

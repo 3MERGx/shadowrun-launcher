@@ -377,14 +377,16 @@
         <div class="settings-section">
           <h3 class="settings-section-title">Server Configuration</h3>
 
-          <div class="setting-item">
+          <div class="setting-item server-config-item">
             <div class="setting-label-group">
-              <label for="gfwlServerToggle"
-                ><span id="gfwlServerStateTitle">Current: —</span></label
-              >
-              <span class="setting-description"
-                >When off, the launcher uses Microsoft's GFWL endpoints. Turn
-                on only if you play on AntHill LIVE.</span
+              <label for="gfwlServerToggle" id="gfwlServerLabel">
+                <strong class="server-config-current-label">Current:</strong>
+                <span id="gfwlServerStateValue" aria-live="polite">—</span>
+              </label>
+              <span class="setting-description" id="gfwlServerHelp"
+                >On — AntHill LIVE community servers.<br />
+                Off — Microsoft’s classic GFWL endpoints.<br />
+                Restart the game if it’s open.</span
               >
               <div
                 id="gfwlServerFeedback"
@@ -397,9 +399,18 @@
                 </div>
               </div>
             </div>
-            <div class="toggle-switch">
-              <input type="checkbox" id="gfwlServerToggle" />
-              <span class="toggle-slider"></span>
+            <div class="server-config-control">
+              <div class="toggle-switch">
+                <input
+                  type="checkbox"
+                  id="gfwlServerToggle"
+                  role="switch"
+                  aria-checked="false"
+                  aria-labelledby="gfwlServerLabel"
+                  aria-describedby="gfwlServerHelp"
+                />
+                <span class="toggle-slider" aria-hidden="true"></span>
+              </div>
             </div>
           </div>
         </div>
@@ -666,120 +677,139 @@
 
     <!-- Add this before the closing body tag -->
     <div id="instructionsScreen" class="modal-screen">
-      <div class="modal-content">
+      <div class="modal-content instructions-modal-wide">
         <div class="modal-header">
-          <h2>Installation Instructions</h2>
+          <h2 class="instructions-modal-heading">
+            <span class="instructions-heading-icon" aria-hidden="true">i</span>
+            Installation Instructions
+          </h2>
           <button id="closeInstructionsButton" class="close-button">×</button>
         </div>
         <div class="modal-body">
-          <p style="margin: 0 0 14px 0; padding: 6px 10px; font-size: 12px; line-height: 1.4; background: rgba(59, 130, 246, 0.15); border-left: 3px solid #3b82f6; border-radius: 4px;">
-            <strong>Already have the game installed?</strong> Click <strong>Download</strong> → <strong>Select Existing Game</strong>, browse to your game folder, then continue from step 2 (Launch Game First).
+          <p class="instructions-prerequisites">
+            <strong>Prerequisites:</strong>
+            <a
+              class="instructions-inline-link"
+              href="https://dotnet.microsoft.com/en-us/download/dotnet/6.0"
+              target="_blank"
+              rel="noopener noreferrer"
+              >.NET Desktop Runtime 6.0</a>
           </p>
-          <div class="instructions-intro">
-            <p>
-              Follow these steps to install and activate Shadowrun (10-15 min).
-            </p>
-          </div>
+          <p class="instructions-existing-game-note">
+            <strong>Already have the game?</strong> Use
+            <strong>Download</strong> → <strong>Find Existing Install</strong>,
+            or open <strong>Settings</strong> and browse for your game folder —
+            then continue from the steps below.
+          </p>
           <ol class="instructions-list">
             <li>
               <div class="instruction-step">
-                <strong>📥 Download & Install</strong>
+                <strong>Download game files</strong>
                 <p>
-                  Click "Download" and wait for all components to install (game
-                  files, GFWL, DirectX 9). You'll see progress indicators for
-                  each component.
+                  Click <strong>Download</strong> here in the launcher and wait
+                  for the install to finish. The files are set up for
+                  <strong>AntHill LIVE (AHL)</strong> by default.
                 </p>
               </div>
             </li>
             <li>
               <div class="instruction-step">
-                <strong>🚀 Launch Game First</strong>
+                <strong>AntHill LIVE account (for online play)</strong>
+                <p class="instructions-sub-step">
+                  <strong>a.</strong> First sign up:
+                  <a
+                    class="instructions-inline-link"
+                    href="https://login.shadowrunfps.com/signup.srf"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >login.shadowrunfps.com/signup.srf</a>
+                </p>
+                <p class="instructions-sub-step">
+                  <strong>b.</strong> Create your gamertag:
+                  <a
+                    class="instructions-inline-link"
+                    href="http://xbox.shadowrunfps.com:8090/NewGamertag.srf"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >xbox.shadowrunfps.com:8090/NewGamertag.srf</a>
+                </p>
+                <div class="instructions-account-box">
+                  <ul>
+                    <li>Email is case-sensitive in-game.</li>
+                    <li>
+                      Password <strong>MUST</strong> be 15 characters or less.
+                    </li>
+                    <li>
+                      Save email/password — there is no recovery flow. Any email
+                      works if you can remember it at login.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </li>
+            <li>
+              <div class="instruction-step">
+                <strong>Launch &amp; sign in</strong>
                 <p>
-                  Once installation completes and you see the "Play" button,
-                  click it to launch the game at least once. This initializes
-                  required files.
+                  Click <strong>Play</strong> in this launcher. When the game
+                  opens, sign in with your AHL email and password. For offline or
+                  bots only, choose <strong>Create Local Profile</strong>.
                 </p>
               </div>
             </li>
             <li>
               <div class="instruction-step">
-                <strong>🔐 Activate Game</strong>
-                <p>
-                  Close the game, then click "Activate Game" in the launcher.
-                  Allow administrator permissions when Windows prompts you (UAC
-                  dialog).
+                <strong>GFWL only — Activate Game</strong>
+                <p class="instruction-step-note instruction-step-skip-note">
+                  Skip this step if you only use AHL.
                 </p>
-                <p class="instruction-step-note">
-                  <strong>Note:</strong> This step is only for
-                  <strong>GFWL-enabled</strong> installs (retail / Games for
-                  Windows Live). If your build does not use GFWL, you can skip
-                  launcher activation.
-                </p>
-              </div>
-            </li>
-            <li>
-              <div class="instruction-step">
-                <strong>🎮 Launch & Sign In</strong>
                 <p>
-                  Click "Play" to start Shadowrun. When the Games for Windows
-                  Live (GFWL) sign-in window appears, sign in with your Xbox
-                  Live account.
-                </p>
-              </div>
-            </li>
-            <li>
-              <div class="instruction-step">
-                <strong>✅ Complete Setup</strong>
-                <p>
-                  Once you reach the main menu, close the game completely. You
-                  can now relaunch and play normally!
+                  Classic Xbox LIVE online only: launch Shadowrun → sign in until
+                  the activation screen appears → <strong>then</strong> click
+                  <strong>Activate Game</strong> in the launcher (not sooner).
+                  When fully signed in online, <strong>quit Shadowrun fully</strong>
+                  and relaunch.
                 </p>
               </div>
             </li>
           </ol>
-          <div class="instructions-warning">
-            <h3>⚠️ Important Notes:</h3>
-            <ul>
-              <li>
-                <strong>First Launch:</strong> Always close the game after your
-                first successful login, then relaunch to begin playing.
-              </li>
-              <li>
-                <strong>After Activation:</strong> Failure to close the game
-                first after activating may lead to connection issues in a small
-                number of cases. Always close the game completely after
-                activation before launching again.
-              </li>
-              <li>
-                <strong>Offline Sign-In:</strong> If you see "Signed in offline"
-                when launching, close the game and run the activation steps
-                again.
-              </li>
-              <li>
-                <strong>Admin Rights:</strong> The launcher may need
-                administrator permissions for activation. Right-click and "Run
-                as Administrator" if prompted.
-              </li>
-            </ul>
+          <div class="instructions-before-play">
+            <h3 class="instructions-before-play-title">Before you play</h3>
+            <p>
+              In-game (main menu only — not during a match): open
+              <strong>Video</strong> → <strong>Advanced</strong> and turn
+              <strong>V-Sync off</strong> (leaving it on caps FPS at 30). Set
+              <strong>Input</strong> to <strong>Default</strong> for mouse and
+              keyboard or <strong>Gamepad</strong> for a controller. Non-Xbox
+              controllers — see the
+              <a
+                class="instructions-inline-link"
+                href="https://www.shadowrunfps.com/docs/troubleshoot"
+                target="_blank"
+                rel="noopener noreferrer"
+                >troubleshooting guide</a>.
+            </p>
           </div>
-          <div class="instructions-tips">
-            <h3>💡 Pro Tips:</h3>
-            <ul>
-              <li>
-                Launch the game at least once before activating to ensure all
-                files & PCID are initialized
-              </li>
-              <li>
-                Run the launcher as Administrator if you encounter any
-                activation issues
-              </li>
-            </ul>
+          <div class="instructions-footer-extra">
+            <p>
+              <strong>Dedicated server:</strong> In-game:
+              <strong>Public Matches</strong> → <strong>Dedicated Servers</strong>
+              → <strong>Find All</strong> → <strong>Shadowrun Official Server</strong>.
+            </p>
+            <p>
+              <strong>AntHill LIVE vs GFWL:</strong>
+              <strong>Settings</strong> → <strong>Open Diagnostics</strong> →
+              <strong>Server Configuration</strong> (toggle at the top):<br />
+              <strong>On</strong> = AntHill LIVE community servers<br />
+              <strong>Off</strong> = Microsoft’s classic GFWL endpoints (online
+              play uses <strong>Activate Game</strong>; AHL does not)
+            </p>
           </div>
           <div class="instructions-actions">
-            <button id="openFaqButton" class="instructions-faq-button">
+            <button id="openFaqButton" class="settings-action-button">
               📚 FAQ
             </button>
-            <button id="gotItButton" class="instructions-got-it-button">
+            <button id="gotItButton" class="settings-action-button">
               Got it!
             </button>
           </div>
@@ -849,64 +879,26 @@
           </div>
 
           <!-- Quick actions at bottom -->
-          <div
-            style="
-              display: flex;
-              gap: 8px;
-              margin-top: 20px;
-              padding-top: 20px;
-              border-top: 1px solid rgba(255, 255, 255, 0.1);
-              flex-shrink: 0;
-              flex-wrap: wrap;
-            "
-          >
+          <div class="faq-quick-actions-row">
             <button
-              class="faq-quick-action"
+              type="button"
+              class="faq-quick-action settings-action-button"
               data-action="expand-all"
-              style="
-                padding: 8px 16px;
-                background: rgba(59, 130, 246, 0.2);
-                border: 1px solid rgba(59, 130, 246, 0.4);
-                border-radius: 4px;
-                color: #60a5fa;
-                font-size: 12px;
-                cursor: pointer;
-                transition: all 0.2s;
-              "
             >
               Expand All
             </button>
             <button
-              class="faq-quick-action"
+              type="button"
+              class="faq-quick-action settings-action-button"
               data-action="collapse-all"
-              style="
-                padding: 8px 16px;
-                background: rgba(59, 130, 246, 0.2);
-                border: 1px solid rgba(59, 130, 246, 0.4);
-                border-radius: 4px;
-                color: #60a5fa;
-                font-size: 12px;
-                cursor: pointer;
-                transition: all 0.2s;
-              "
             >
               Collapse All
             </button>
             <a
+              class="settings-action-button"
               href="https://www.shadowrunfps.com/docs/troubleshoot"
               target="_blank"
-              style="
-                padding: 8px 16px;
-                background: rgba(16, 185, 129, 0.2);
-                border: 1px solid rgba(16, 185, 129, 0.4);
-                border-radius: 4px;
-                color: #10b981;
-                font-size: 12px;
-                cursor: pointer;
-                text-decoration: none;
-                transition: all 0.2s;
-                display: inline-block;
-              "
+              rel="noopener noreferrer"
             >
               🌐 View Full Guide
             </a>

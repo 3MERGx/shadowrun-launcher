@@ -2,89 +2,106 @@
 
 All notable changes to the Shadowrun Launcher will be documented in this file.
 
+Each version uses **Added**, **Improved**, **Tweaks**, **Changed**, **Fixed**, and **Removed** sections as needed. Under each section, every `-` line is one discrete change.
+
+## [0.9.114] - 2026-05-08
+
+### Improved
+
+- Diagnostics no longer surface License Manager Service or Xbox Live Networking Service as status rows or detected issues.
+- The live player count now refreshes automatically while the launcher stays open.
+- Install checks recognize Microsoft Visual C++ v14 Redistributable (x86) build `14.50.35719`.
+
+### Changed
+
+- Default location for new game downloads/installs is `%USERPROFILE%\Games\Shadowrun` instead of under Program Files, so extraction stays user-writable without relying on Program Files ACLs or UAC.
+
+### Fixed
+
+- Skip Intro (Uninstall Mod) in Settings stays in sync with the game folder after moving files or when the game is found but a system dependency still reports missing.
+
 ## [0.9.112] - 2026-04-30
 
 ### Added
 
-- **Live player counter** - Shows how many players are in-game in the community (may not be fully accurate as the community hasn't fully migrated yet).
-- **Background volume control** - Diagnostics includes a slider to adjust launcher background music volume; the setting is remembered for next launch.
+- Live player counter (in-game community count; accuracy may vary while migration is ongoing).
+- Diagnostics slider for launcher background music volume with the value remembered for next launch.
 
 ### Changed
 
-- **Default background volume** - Starting background music level is **half** of the previous default (50% lower) so the UI is less loud on new installs.
+- Default background music level for new installs is half of the previous default (quieter first launch).
 
 ### Removed
 
-- **Common Error Fixes** (Diagnostics) - Removed the License Manager / Xbox Networking / SFC quick-fix actions and related IPC; service checks still appear in diagnostics, with manual steps when something is stopped.
-- **GPU Checker** (Diagnostics) - Removed the separate "detected graphics hardware" panel from the diagnostics screen (full diagnostics still report GPU in the main results).
+- Diagnostics “Common Error Fixes” (License Manager / Xbox Networking / SFC quick actions and related IPC); service rows remain with manual guidance where relevant.
+- Separate Diagnostics “GPU Checker” panel (GPU still appears in full diagnostics).
 
 ## [0.9.109] - 2026-04-27
 
 ### Added
 
-- **AntHill LIVE (AHL) server toggle** - Diagnostics includes a Server Configuration switch: leave it off for Microsoft's original GFWL endpoints, or turn it on for AntHill LIVE. Missing AHL patcher files are downloaded and extracted automatically when needed (`AHL Files.zip` from releases).
+- AntHill LIVE (AHL) server toggle in Diagnostics: leave off for Microsoft GFWL endpoints or enable for AntHill LIVE; missing AHL files download automatically from releases when needed.
 
 ### Improved
 
-- **Main process structure** - Refactored the large `main.js` into smaller, purpose-built modules (window, downloads, game, diagnostics, updater, activation, logging, and more) so the launcher is easier to maintain and review. User-facing behavior is intended to stay the same.
-- **Logging** - Main process uses a single `safeLog` pipeline (electron-log); logs are written to `%APPDATA%\Shadowrun FPS Launcher\logs\main.log` (rotates to `main.old.log` at 1 MB) for support and debugging.
-- **Activation & support code** - Game activation, PCID tools, and .NET 6 / helper logic now live in dedicated files; the flow and steps were not redesigned, only relocated.
+- Main process refactored into smaller modules (window, downloads, game, diagnostics, updater, activation, logging, etc.) without intended behavior changes.
+- Logging consolidated to `safeLog` / `%APPDATA%\Shadowrun FPS Launcher\logs\main.log` (rotate at 1 MB).
+- Activation, PCID, and .NET helper code moved into dedicated files (flows unchanged).
 
 ## [0.9.100] - 2025-12-31
 
 ### Added
 
-- **Update Error Notifications** - Comprehensive error messages for download failures with specific error type detection (network, timeout, server errors, etc.)
-- **Download Timeout Detection** - Automatic detection of stalled downloads with 3-minute timeout and user notification
-- **Update Retry Functionality** - One-click retry button for failed downloads without needing to re-check for updates
-- **Installation Failure Detection** - Automatic detection of failed update installations on app restart with detailed error messages
-- **Manual Download Fallback** - Direct download link option when auto-update fails, opens installer in browser
+- Richer update error notifications (network, timeout, server, etc.).
+- Stalled-download detection with ~3-minute timeout and user notification.
+- One-click retry for failed downloads without re-checking for updates.
+- Restart-time detection of failed installs with clearer messaging.
+- Manual installer download when auto-update cannot finish.
 
 ### Improved
 
-- **Update Error Handling** - Enhanced error classification and user-friendly error messages with troubleshooting guidance
-- **Update Download Reliability** - Progress tracking prevents silent failures and provides clear feedback during downloads
-- **Update Installation Verification** - Automatic verification of successful installations on app restart with success confirmation
-- **Update User Experience** - Improved error dialogs with retry, manual download, and close options for better user control
+- Clearer error classification and troubleshooting text.
+- More reliable download progress feedback.
+- Post-install verification on restart.
+- Error dialogs with retry, manual download, and dismiss options.
 
 ## [0.9.93] - 2025-12-24
 
 ### Added
 
-- **Find Existing Location** - Manually select existing game files if located in a different location
+- Browse for an existing game installation when files live outside default paths.
 
 ### Improved
 
-- **Game Path Persistence** - Selected game folder is now remembered across sessions and window focus changes
-- **Folder Name Independence** - Launcher works with any folder name as long as Shadowrun.exe is present
-- **Dynamic Mod Status Updates** - Mod statuses (Skip Intro, DXVK, FPS, srs_shadowrun.dll) automatically update after selecting game location
-- **Window Focus Re-checking** - Launcher automatically detects when game files are moved or renamed while launcher is running
+- Saved game folder persists across sessions and focus changes.
+- Any folder name works when it contains `Shadowrun.exe`.
+- Mod statuses (Skip Intro, DXVK, FPS, srs_shadowrun.dll) refresh after changing location.
+- Launcher re-checks when files move or rename while it is open.
 
 ## [0.9.92] - 2025-12-20
 
 ### Added
 
-- **Change Game Location** - Move game files to a different location after initial download
-- **GPU Driver Update Detection** - Automatically detects GPU vendor and opens appropriate software
-- **System File Checker (SFC) with UAC** - Run Windows SFC scan with UAC elevation
-- **Launcher Visibility Management** - Launcher automatically hides when game launches
+- Move game files after install.
+- GPU vendor detection with links to vendor updaters.
+- Run Windows SFC elevated via Diagnostics.
+- Launcher hides while the game runs.
 
 ### Improved
 
-- **Game File Move Operations**
-- **UI/UX Enhancements**
+- Game move workflow, UI polish, and related reliability.
 
 ## [0.9.8] - 2025-12-15
 
 ### Added
 
-- Changelog Modal & History
-- DXVK Support toggle for better compatibility
-- srs_shadowrun.dll version switcher (newer/older)
-- System diagnostics and troubleshooting tools
-- Automatic updates
+- In-app changelog and history.
+- DXVK toggle for compatibility.
+- srs_shadowrun.dll version switcher.
+- Diagnostics and troubleshooting tools.
+- Automatic launcher updates.
 
 ### Improved
 
-- Game activation with auto-injection
-- File download progress tracking
+- Game activation path.
+- Download progress feedback.
