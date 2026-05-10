@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-brand-primary: #f97316;
+  --color-brand-secondary: #38bdf8;
+  --color-brand-neutral-dim: rgba(255, 255, 255, 0.55);
+}
+
 /* Base styles */
 * {
   margin: 0;
@@ -110,6 +116,10 @@ body::after {
   pointer-events: none;
 }
 
+.launcher-brand-header .launcher-live-logo-wrap {
+  pointer-events: auto;
+}
+
 .launcher-brand-inner {
   display: flex;
   flex-direction: column;
@@ -131,11 +141,6 @@ body::after {
   height: auto;
 }
 
-/* [hidden] must win over display:flex — otherwise LIVE stays visible when AHL is on */
-.launcher-live-logo-wrap[hidden] {
-  display: none !important;
-}
-
 .launcher-live-logo-wrap {
   width: 100%;
   display: flex;
@@ -145,11 +150,62 @@ body::after {
   transform: translateX(6px);
 }
 
+.launcher-server-badge-btn {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.launcher-server-badge-btn:focus-visible {
+  outline: 2px solid var(--color-brand-secondary);
+  outline-offset: 2px;
+}
+
+.launcher-server-badge-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.launcher-server-badge-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* AHL is wider than the LIVE PNG + glow; nudge left so the right edge matches SHADOWRUN */
+.launcher-server-badge-btn--ahl {
+  transform: translateX(-14px);
+}
+
+/* [hidden] must win — badge visibility is toggled in JS */
+.launcher-server-badge-btn[hidden] {
+  display: none !important;
+}
+
 .launcher-live-logo {
   display: block;
   height: clamp(18px, 4.2vh, 28px);
   width: auto;
   max-width: min(200px, 46vw);
+  pointer-events: none;
+}
+
+/* Text stand-in when no AHL image asset — matches LIVE footprint roughly */
+.launcher-ahl-badge-label {
+  display: block;
+  font-size: clamp(15px, 3.6vh, 22px);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  color: var(--color-brand-secondary);
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.28);
+  padding-bottom: 2px;
+  pointer-events: none;
 }
 
 /* Left-align buttons container */
@@ -523,6 +579,11 @@ button:focus {
   color: rgba(255, 255, 255, 0.45);
   font-weight: 300;
   white-space: nowrap;
+}
+
+.player-count-info.player-count-info--stacked {
+  white-space: pre-line;
+  line-height: 1.35;
 }
 
 .background-audio-volume-row {

@@ -2,6 +2,7 @@
 const EventEmitter = require("events");
 const { safeLog } = require("../main/logger");
 const { TRACKING_API_URL } = require("../main/services/playerTrackerStats");
+const { getServerModeFromGameDir } = require("../main/game/gfwl");
 const https = require("https");
 const http = require("http");
 const fs = require("fs");
@@ -92,6 +93,18 @@ class PlayerTracker extends EventEmitter {
     this.currentStatus = "menu"; // 'menu', 'in-game', 'downloading', 'installing'
     this.enabled = true;
     this.gameSessionStart = null; // Track when game session started
+    /** @type {null | (() => string)} */
+    this.getGameInstallDir = null;
+  }
+
+  /**
+   * Called from main process before `start()` so heartbeats can send `serverMode`.
+   * @param {{ getGameInstallDir: () => string }} deps
+   */
+  configureTrackingDeps({ getGameInstallDir }) {
+    if (typeof getGameInstallDir === "function") {
+      this.getGameInstallDir = getGameInstallDir;
+    }
   }
 
   getOrCreatePlayerId() {
@@ -282,6 +295,9 @@ class PlayerTracker extends EventEmitter {
   }
 
   sendHeartbeat() {
+    const gameDir = this.getGameInstallDir ? this.getGameInstallDir() : "";
+    const serverMode = getServerModeFromGameDir(gameDir);
+
     const data = JSON.stringify({
       playerId: this.playerId,
       status: this.currentStatus,
@@ -293,6 +309,7 @@ class PlayerTracker extends EventEmitter {
       sessionDuration: this.gameSessionStart
         ? Date.now() - this.gameSessionStart
         : 0,
+      serverMode,
     });
 
     const url = new URL(`${TRACKING_API_URL}/api/heartbeat`);
@@ -331,7 +348,21 @@ class PlayerTracker extends EventEmitter {
               `[PlayerTracker] Heartbeat sent successfully. Total players: ${totalOnline ?? "?"}`
             );
             if (typeof response.inGame === "number" && typeof totalOnline === "number") {
-              this.emit("public-stats", { inGame: response.inGame, totalOnline });
+              /** @type {{ inGame: number, totalOnline: number, inGameAhl?: number, inGameGfwl?: number, inGameUnknown?: number }} */
+              const payload = {
+                inGame: response.inGame,
+                totalOnline,
+              };
+              if (typeof response.inGameAhl === "number") {
+                payload.inGameAhl = response.inGameAhl;
+              }
+              if (typeof response.inGameGfwl === "number") {
+                payload.inGameGfwl = response.inGameGfwl;
+              }
+              if (typeof response.inGameUnknown === "number") {
+                payload.inGameUnknown = response.inGameUnknown;
+              }
+              this.emit("public-stats", payload);
             }
           } catch (e) {
             safeLog.debug("[PlayerTracker] Heartbeat sent successfully");

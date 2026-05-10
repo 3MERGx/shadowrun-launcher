@@ -11,8 +11,12 @@
 //   patcher_conf.ini              - server endpoint config (this module owns it)
 //
 // The other 5 files are static and downloaded as a zip bundle from AHL_ZIP_URL
-// if any are missing. The .ini is always written fresh from the known constant
-// for the requested mode — no file swapping, no .old files.
+// if any are missing. The .ini is always written fresh from the known constant.
+//
+// Classic GFWL mode: the three msidcrl / redirect shims must not load (they point
+// traffic at AHL). When switching AHL → GFWL they are renamed to *.old in the
+// game folder; switching back restores *.old → original names before any
+// missing-file download logic runs.
 //
 // Exports:
 //   makeCheckGfwlServerStatus({ getGameInstallDir })
@@ -64,6 +68,71 @@ const AHL_FILES = [
 ];
 
 const AHL_ZIP_TEMP = path.join(os.tmpdir(), "AHL_Files.zip");
+
+/** Files renamed aside when using real GFWL so the AHL credential redirects do not load. */
+const MSIDCRL_REDIRECT_FILES = [
+  "GFWLmsidcrl40Redirector.asi",
+  "msidcrl40.dll",
+  "msidcrl67.dll",
+];
+
+/**
+ * @param {string} gameDir
+ */
+function removeStaleBackupThenRename(gameDir, baseName) {
+  const from = path.join(gameDir, baseName);
+  const to = path.join(gameDir, `${baseName}.old`);
+  if (!fs.existsSync(from)) {
+    return false;
+  }
+  if (fs.existsSync(to)) {
+    fs.unlinkSync(to);
+  }
+  fs.renameSync(from, to);
+  return true;
+}
+
+/**
+ * AHL → classic GFWL: move redirect DLLs / ASI aside so only patcher_conf.ini
+ * drives endpoints (no AHL shim injection for those files).
+ *
+ * @param {string} gameDir
+ */
+function disableMsidcrlRedirectsForClassicGfwl(gameDir) {
+  for (const name of MSIDCRL_REDIRECT_FILES) {
+    try {
+      if (removeStaleBackupThenRename(gameDir, name)) {
+        safeLog.info(`[AHL] Renamed ${name} → ${name}.old for classic GFWL`);
+      }
+    } catch (err) {
+      safeLog.error(`[AHL] Failed to rename ${name} for classic GFWL:`, err);
+      throw err;
+    }
+  }
+}
+
+/**
+ * GFWL → AHL: if originals were moved to *.old, restore them before checking
+ * for missing AHL files (avoids redundant zip download).
+ *
+ * @param {string} gameDir
+ */
+function restoreMsidcrlRedirectsFromBackup(gameDir) {
+  for (const name of MSIDCRL_REDIRECT_FILES) {
+    const original = path.join(gameDir, name);
+    const backup = path.join(gameDir, `${name}.old`);
+    if (fs.existsSync(original) || !fs.existsSync(backup)) {
+      continue;
+    }
+    try {
+      fs.renameSync(backup, original);
+      safeLog.info(`[AHL] Restored ${name} from backup ${name}.old`);
+    } catch (err) {
+      safeLog.error(`[AHL] Failed to restore ${name} from ${name}.old:`, err);
+      throw err;
+    }
+  }
+}
 
 // ============================================================================
 // Status probe (read-only)
@@ -167,6 +236,8 @@ function registerGfwlServerIpc({
     try {
       // ── Enable AHL ────────────────────────────────────────────────────
       if (mode === "ahl") {
+        restoreMsidcrlRedirectsFromBackup(gameDir);
+
         const missingFiles = AHL_FILES.filter(
           (f) => !fs.existsSync(path.join(gameDir, f))
         );
@@ -248,6 +319,8 @@ function registerGfwlServerIpc({
 
       // ── Enable real GFWL ──────────────────────────────────────────────
       if (mode === "gfwl") {
+        disableMsidcrlRedirectsForClassicGfwl(gameDir);
+
         const iniPath = path.join(gameDir, "patcher_conf.ini");
         fs.writeFileSync(iniPath, GFWL_CONFIG, "utf8");
         safeLog.info("[AHL] patcher_conf.ini written with real GFWL server endpoints.");
@@ -271,7 +344,33 @@ function registerGfwlServerIpc({
   });
 }
 
+/**
+ * Sync read of `patcher_conf.ini` for heartbeat telemetry (launcher main process).
+ * Matches the mode inference used by checkGfwlServerStatus without async IPC.
+ *
+ * @param {string} gameDir
+ * @returns {'ahl'|'gfwl'|'unknown'}
+ */
+function getServerModeFromGameDir(gameDir) {
+  if (!gameDir || typeof gameDir !== "string" || !fs.existsSync(gameDir)) {
+    return "unknown";
+  }
+  const iniPath = path.join(gameDir, "patcher_conf.ini");
+  if (!fs.existsSync(iniPath)) {
+    return "unknown";
+  }
+  try {
+    const content = fs.readFileSync(iniPath, "utf8");
+    if (content.includes("shadowrunfps.com")) return "ahl";
+    if (content.includes("login.live.com")) return "gfwl";
+    return "unknown";
+  } catch (_) {
+    return "unknown";
+  }
+}
+
 module.exports = {
   makeCheckGfwlServerStatus,
   registerGfwlServerIpc,
+  getServerModeFromGameDir,
 };

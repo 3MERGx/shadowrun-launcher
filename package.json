@@ -1,7 +1,7 @@
 {
   "name": "shadowrun-fps-launcher",
   "productName": "Shadowrun FPS Launcher",
-  "version": "0.9.114",
+  "version": "0.9.115",
   "repository": {
     "type": "git",
     "url": "https://github.com/3MERGx/shadowrun-launcher.git"
@@ -103,7 +103,6 @@
       "artifactName": "${productName} Setup ${version}.exe",
       "installerHeader": "build/installerHeader.bmp",
       "installerSidebar": "build/installerSidebar.bmp",
-      "uninstallerIcon": "app/assets/icon2.ico",
       "installerIcon": "app/assets/icon2.ico",
       "uninstallDisplayName": "${productName}",
       "menuCategory": true,

@@ -111,11 +111,21 @@ function registerAppInfoIpc(deps) {
       if (!stats) {
         return { success: false, inGame: null, totalOnline: null };
       }
-      return {
+      const payload = {
         success: true,
         inGame: stats.inGame,
         totalOnline: stats.totalOnline,
       };
+      if (
+        typeof stats.inGameAhl === "number" &&
+        typeof stats.inGameGfwl === "number" &&
+        typeof stats.inGameUnknown === "number"
+      ) {
+        payload.inGameAhl = stats.inGameAhl;
+        payload.inGameGfwl = stats.inGameGfwl;
+        payload.inGameUnknown = stats.inGameUnknown;
+      }
+      return payload;
     } catch (error) {
       safeLog.warn("[IPC] get-player-count failed:", error.message);
       return { success: false, inGame: null, totalOnline: null };

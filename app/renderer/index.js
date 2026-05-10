@@ -174,6 +174,177 @@ function showActivationConfirmDialog() {
   });
 }
 
+/** Confirm switching server mode from the main-window LIVE / AHL badges */
+function showServerSwitchConfirmDialog(targetMode) {
+  const toAhl = targetMode === "ahl";
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.15s ease-out;
+    `;
+
+    const dialog = document.createElement("div");
+    dialog.style.cssText = `
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      width: 440px;
+      max-width: 90%;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      animation: slideIn 0.2s ease-out;
+    `;
+
+    const headerTitle = toAhl
+      ? "Switch to AntHill LIVE?"
+      : "Switch to classic GFWL?";
+    const messageHtml = toAhl
+      ? `<div class="confirm-message">Use AntHill LIVE (AHL) community servers. Restart Shadowrun after switching.</div>`
+      : `<div class="confirm-message">Use Microsoft classic Xbox LIVE / GFWL endpoints. Restart Shadowrun after switching.</div>`;
+
+    dialog.innerHTML = `
+      <style>
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideIn {
+          from {
+            transform: translateY(-10px);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        .confirm-dialog-header {
+          padding: 16px 20px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .confirm-title {
+          font-size: 16px;
+          font-weight: 500;
+          color: #ffffff;
+        }
+        .confirm-content {
+          padding: 24px 20px;
+          color: rgba(255, 255, 255, 0.85);
+          line-height: 1.5;
+        }
+        .confirm-message {
+          font-size: 14px;
+          margin-bottom: 16px;
+        }
+        .confirm-note {
+          background: rgba(255, 255, 255, 0.05);
+          border-left: 2px solid rgba(255, 255, 255, 0.2);
+          padding: 10px 12px;
+          font-size: 13px;
+          color: rgba(255, 255, 255, 0.7);
+        }
+        .confirm-footer {
+          padding: 12px 20px;
+          background: rgba(0, 0, 0, 0.2);
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+          display: flex;
+          gap: 8px;
+          justify-content: flex-end;
+        }
+        .confirm-button {
+          padding: 8px 20px;
+          border-radius: 4px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          border: none;
+        }
+        .confirm-button-cancel {
+          background: transparent;
+          color: rgba(255, 255, 255, 0.7);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .confirm-button-cancel:hover {
+          background: rgba(255, 255, 255, 0.05);
+          color: #ffffff;
+        }
+        .confirm-button-ok {
+          background: #3b82f6;
+          color: #ffffff;
+        }
+        .confirm-button-ok:hover {
+          background: #2563eb;
+        }
+        .confirm-button:active {
+          transform: scale(0.98);
+        }
+      </style>
+      <div class="confirm-dialog-header">
+        <div class="confirm-title">${headerTitle}</div>
+      </div>
+      <div class="confirm-content">
+        ${messageHtml}
+      </div>
+      <div class="confirm-footer">
+        <button type="button" class="confirm-button confirm-button-cancel" id="serverSwitchCancelBtn">Cancel</button>
+        <button type="button" class="confirm-button confirm-button-ok" id="serverSwitchOkBtn">Switch</button>
+      </div>
+    `;
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    const okBtn = dialog.querySelector("#serverSwitchOkBtn");
+    const cancelBtn = dialog.querySelector("#serverSwitchCancelBtn");
+
+    const cleanup = () => {
+      overlay.style.animation = "fadeIn 0.15s ease-out reverse";
+      setTimeout(() => {
+        document.body.removeChild(overlay);
+      }, 150);
+    };
+
+    okBtn.addEventListener("click", () => {
+      cleanup();
+      resolve(true);
+    });
+
+    cancelBtn.addEventListener("click", () => {
+      cleanup();
+      resolve(false);
+    });
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        cleanup();
+        resolve(false);
+      }
+    });
+
+    const handleEscape = (e) => {
+      if (e.key === "Escape") {
+        cleanup();
+        resolve(false);
+        document.removeEventListener("keydown", handleEscape);
+      }
+    };
+    document.addEventListener("keydown", handleEscape);
+  });
+}
+
 // Function to show download confirmation dialog with option to find existing game
 function showDownloadConfirmDialog(autoScanDisabled = false) {
   return new Promise((resolve) => {
@@ -820,7 +991,27 @@ let playerCountRefreshInFlight = false;
 function setPlayerCountDisplay(data) {
   if (!playerCountInfo) return;
   if (data && typeof data.inGame === "number") {
-    playerCountInfo.textContent = `In Game: ${data.inGame}`;
+    const ahl = data.inGameAhl;
+    const gfwl = data.inGameGfwl;
+    const hasSplit =
+      typeof ahl === "number" &&
+      typeof gfwl === "number" &&
+      typeof data.inGameUnknown === "number";
+    if (hasSplit) {
+      playerCountInfo.classList.add("player-count-info--stacked");
+      playerCountInfo.textContent = [
+        `Total: ${data.inGame}`,
+        `AHL: ${ahl}`,
+        `GFWL: ${gfwl}`,
+      ].join("\n");
+      playerCountInfo.title =
+        "Community tracker (updates ~30s). Total = every in-game launcher (includes older clients or unclassified modes). AHL / GFWL = configured server from game folder; if Total > AHL + GFWL, the remainder is unreported mode.";
+    } else {
+      playerCountInfo.classList.remove("player-count-info--stacked");
+      playerCountInfo.textContent = `In Game: ${data.inGame}`;
+      playerCountInfo.title =
+        "Launchers reporting in-game (community tracker; updates about every 30s)";
+    }
   }
 }
 
@@ -832,7 +1023,12 @@ async function refreshPlayerCountDisplay() {
   try {
     const result = await window.api.getPlayerCount();
     if (result?.success && typeof result.inGame === "number") {
-      setPlayerCountDisplay({ inGame: result.inGame });
+      setPlayerCountDisplay({
+        inGame: result.inGame,
+        inGameAhl: result.inGameAhl,
+        inGameGfwl: result.inGameGfwl,
+        inGameUnknown: result.inGameUnknown,
+      });
     }
   } catch (_err) {
     /* leave placeholder */
@@ -1008,6 +1204,18 @@ const backupPcidButton = document.getElementById("backupPcidButton");
 const pcidBackupFeedback = document.getElementById("pcidBackupFeedback");
 const pcidBackupStatus = document.getElementById("pcidBackupStatus");
 const currentPcidDisplay = document.getElementById("currentPcidDisplay");
+
+function syncLauncherServerBadgeInteractable() {
+  const enabled = !!gameInstalled;
+  const live = document.getElementById("launcherGfwlLiveBadge");
+  const ahl = document.getElementById("launcherAhlBadge");
+  for (const el of [live, ahl]) {
+    if (!el) continue;
+    el.disabled = !enabled;
+    el.style.opacity = enabled ? "1" : "0.5";
+    el.style.cursor = enabled ? "pointer" : "not-allowed";
+  }
+}
 
 // Update UI based on game state
 function updateUI() {
@@ -1195,6 +1403,8 @@ function updateUI() {
       }
     }
   }
+
+  syncLauncherServerBadgeInteractable();
 }
 
 // Window control handlers
@@ -1536,32 +1746,42 @@ activateButton.addEventListener("click", async () => {
 
   console.log("Activating game...");
 
-  // Disable button during activation
   activateButton.disabled = true;
   activateButton.textContent = "Activating...";
+
+  const ACTIVATE_BUTTON_RESET_MS = 3000;
 
   try {
     const result = await window.api.activateGame();
 
     if (result.success) {
-      // Show success UI or notification
-      setTimeout(() => {
-        activateButton.textContent = "Activate Game";
-        activateButton.disabled = false;
-      }, 3000);
-    } else {
-      // Show failure UI or use the notification that main process already sent
-      setTimeout(() => {
-        activateButton.textContent = "Activate Game";
-        activateButton.disabled = false;
-      }, 3000);
+      try {
+        const serverStatus = await window.api.checkGfwlServer();
+        if (serverStatus.mode !== "ahl") {
+          showToast(
+            "Game activated successfully for classic GFWL. Launch Shadowrun and sign in when prompted.",
+            "success",
+            5500,
+          );
+        }
+      } catch (_) {
+        showToast(
+          "Game activated successfully.",
+          "success",
+          5500,
+        );
+      }
     }
   } catch (error) {
     console.error("Activation error:", error);
+  } finally {
     setTimeout(() => {
-      activateButton.textContent = "Activate Game";
-      activateButton.disabled = false;
-    }, 3000);
+      if (activateButton) {
+        activateButton.textContent = "Activate Game";
+        activateButton.disabled = false;
+      }
+      void refreshGfwlServerStatus();
+    }, ACTIVATE_BUTTON_RESET_MS);
   }
 });
 
@@ -3171,10 +3391,13 @@ window.api.onDxvkProgress((data) => {
 // ─── AHL / GFWL Server Toggle ────────────────────────────────────────────────
 const gfwlServerToggle = document.getElementById("gfwlServerToggle");
 
-function syncLauncherLiveLogoFromMode(mode) {
-  const wrap = document.getElementById("launcherLiveLogoWrap");
-  if (!wrap) return;
-  wrap.hidden = mode === "ahl";
+function syncLauncherServerBadgeFromMode(mode) {
+  const liveBtn = document.getElementById("launcherGfwlLiveBadge");
+  const ahlBtn = document.getElementById("launcherAhlBadge");
+  if (!liveBtn || !ahlBtn) return;
+  const isAhl = mode === "ahl";
+  liveBtn.hidden = isAhl;
+  ahlBtn.hidden = !isAhl;
 }
 
 function syncGfwlServerToggleAria() {
@@ -3217,76 +3440,182 @@ async function refreshGfwlServerStatus() {
     if (gfwlServerToggle) {
       gfwlServerToggle.checked = status.mode === "ahl";
     }
-    syncLauncherLiveLogoFromMode(status.mode);
+    syncLauncherServerBadgeFromMode(status.mode);
     updateGfwlServerDiagnosticsLabel(status.mode);
     syncActivationUiFromServerMode(status.mode);
   } catch (error) {
     console.error("Error checking GFWL server status:", error);
-    syncLauncherLiveLogoFromMode("gfwl");
+    syncLauncherServerBadgeFromMode("gfwl");
     updateGfwlServerDiagnosticsLabel("none");
     syncActivationUiFromServerMode("none");
+  }
+  syncLauncherServerBadgeInteractable();
+}
+
+/** Prevents stacked success toasts when flipping AHL/GFWL rapidly (badges + toggle). */
+const GFWL_SERVER_SWITCH_COOLDOWN_MS = 3500;
+
+let gfwlServerSwitchInProgress = false;
+let gfwlServerSwitchCooldownUntil = 0;
+let gfwlServerSwitchCooldownTimer = null;
+
+function isGfwlServerSwitchCoolingDown() {
+  return Date.now() < gfwlServerSwitchCooldownUntil;
+}
+
+/** Whole seconds remaining until server-switch cooldown ends (at least 1 while cooling). */
+function getGfwlServerSwitchCooldownRemainingSeconds() {
+  const ms = gfwlServerSwitchCooldownUntil - Date.now();
+  if (ms <= 0) return 0;
+  return Math.max(1, Math.ceil(ms / 1000));
+}
+
+function scheduleGfwlServerSwitchCooldownUnlock() {
+  if (gfwlServerSwitchCooldownTimer) {
+    clearTimeout(gfwlServerSwitchCooldownTimer);
+  }
+  gfwlServerSwitchCooldownTimer = setTimeout(() => {
+    gfwlServerSwitchCooldownTimer = null;
+    gfwlServerSwitchCooldownUntil = 0;
+    if (gfwlServerToggle) {
+      gfwlServerToggle.disabled = false;
+      gfwlServerToggle.parentElement?.classList.remove("cooldown");
+    }
+    syncLauncherServerBadgeInteractable();
+    void refreshGfwlServerStatus();
+  }, GFWL_SERVER_SWITCH_COOLDOWN_MS);
+}
+
+async function runGfwlServerToggleFlow(newMode) {
+  if (gfwlServerSwitchInProgress) {
+    showToast("A server switch is already running.", "warning", 2800);
+    await refreshGfwlServerStatus();
+    return;
+  }
+  if (isGfwlServerSwitchCoolingDown()) {
+    const secs = getGfwlServerSwitchCooldownRemainingSeconds();
+    const remainingMs = Math.max(0, gfwlServerSwitchCooldownUntil - Date.now());
+    const waitWord = secs === 1 ? "second" : "seconds";
+    showToast(
+      `Please wait ${secs} more ${waitWord} before switching server mode again.`,
+      "warning",
+      Math.min(5500, Math.max(2200, remainingMs + 700)),
+    );
+    await refreshGfwlServerStatus();
+    return;
+  }
+
+  gfwlServerSwitchInProgress = true;
+
+  syncLauncherServerBadgeFromMode(newMode);
+  updateGfwlServerDiagnosticsLabel(newMode);
+  syncActivationUiFromServerMode(newMode);
+  if (gfwlServerToggle) {
+    gfwlServerToggle.checked = newMode === "ahl";
+  }
+
+  if (gfwlServerToggle) gfwlServerToggle.disabled = true;
+  const liveBadge = document.getElementById("launcherGfwlLiveBadge");
+  const ahlBadge = document.getElementById("launcherAhlBadge");
+  for (const el of [liveBadge, ahlBadge]) {
+    if (el) {
+      el.disabled = true;
+      el.style.opacity = "0.7";
+      el.style.cursor = "wait";
+    }
+  }
+
+  const feedback = document.getElementById("gfwlServerFeedback");
+  const statusEl = document.getElementById("gfwlServerStatus");
+  if (feedback) feedback.style.display = "block";
+  if (statusEl) {
+    statusEl.textContent =
+      newMode === "ahl"
+        ? "Switching to AntHill LIVE…"
+        : "Switching to classic GFWL…";
+  }
+
+  try {
+    const result = await window.api.toggleGfwlServer(newMode);
+
+    if (result.success) {
+      showToast(result.message, "success", 5500);
+    } else {
+      const revertMode = newMode === "ahl" ? "gfwl" : "ahl";
+      syncLauncherServerBadgeFromMode(revertMode);
+      updateGfwlServerDiagnosticsLabel(revertMode);
+      syncActivationUiFromServerMode(revertMode);
+      if (gfwlServerToggle) {
+        gfwlServerToggle.checked = revertMode === "ahl";
+      }
+      showToast(
+        result.message || "Failed to switch server configuration.",
+        "error",
+        6000,
+      );
+    }
+  } catch (error) {
+    console.error("Error toggling GFWL server:", error);
+    const revertMode = newMode === "ahl" ? "gfwl" : "ahl";
+    syncLauncherServerBadgeFromMode(revertMode);
+    updateGfwlServerDiagnosticsLabel(revertMode);
+    syncActivationUiFromServerMode(revertMode);
+    if (gfwlServerToggle) {
+      gfwlServerToggle.checked = revertMode === "ahl";
+    }
+    showToast(
+      `Server toggle failed: ${error.message || "Unknown error"}. Please try again.`,
+      "error",
+      6000,
+    );
+  } finally {
+    gfwlServerSwitchInProgress = false;
+    if (feedback) feedback.style.display = "none";
+
+    gfwlServerSwitchCooldownUntil = Date.now() + GFWL_SERVER_SWITCH_COOLDOWN_MS;
+
+    if (gfwlServerToggle) {
+      gfwlServerToggle.disabled = true;
+      gfwlServerToggle.parentElement?.classList.add("cooldown");
+    }
+    for (const el of [liveBadge, ahlBadge]) {
+      if (el) {
+        el.disabled = true;
+        el.style.opacity = "0.5";
+        el.style.cursor = "not-allowed";
+      }
+    }
+
+    scheduleGfwlServerSwitchCooldownUnlock();
+    void refreshGfwlServerStatus();
   }
 }
 
 if (gfwlServerToggle) {
   gfwlServerToggle.addEventListener("change", async () => {
     const newMode = gfwlServerToggle.checked ? "ahl" : "gfwl";
-    syncLauncherLiveLogoFromMode(newMode);
-    updateGfwlServerDiagnosticsLabel(newMode);
-    syncActivationUiFromServerMode(newMode);
+    await runGfwlServerToggleFlow(newMode);
+  });
+}
 
-    gfwlServerToggle.disabled = true;
+const launcherGfwlLiveBadge = document.getElementById("launcherGfwlLiveBadge");
+const launcherAhlBadge = document.getElementById("launcherAhlBadge");
 
-    const feedback = document.getElementById("gfwlServerFeedback");
-    const statusEl = document.getElementById("gfwlServerStatus");
-    if (feedback) feedback.style.display = "block";
-    if (statusEl) {
-      statusEl.textContent =
-        newMode === "ahl"
-          ? "Switching to AntHill LIVE…"
-          : "Switching to classic GFWL…";
-    }
+if (launcherGfwlLiveBadge) {
+  launcherGfwlLiveBadge.addEventListener("click", async () => {
+    if (launcherGfwlLiveBadge.disabled) return;
+    const ok = await showServerSwitchConfirmDialog("ahl");
+    if (!ok) return;
+    await runGfwlServerToggleFlow("ahl");
+  });
+}
 
-    try {
-      const result = await window.api.toggleGfwlServer(newMode);
-
-      if (result.success) {
-        showToast(result.message, "success", 5500);
-      } else {
-        // Revert
-        gfwlServerToggle.checked = !gfwlServerToggle.checked;
-        syncLauncherLiveLogoFromMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
-        updateGfwlServerDiagnosticsLabel(
-          gfwlServerToggle.checked ? "ahl" : "gfwl",
-        );
-        syncActivationUiFromServerMode(
-          gfwlServerToggle.checked ? "ahl" : "gfwl",
-        );
-        showToast(
-          result.message || "Failed to switch server configuration.",
-          "error",
-          6000,
-        );
-      }
-    } catch (error) {
-      console.error("Error toggling GFWL server:", error);
-      gfwlServerToggle.checked = !gfwlServerToggle.checked;
-      syncLauncherLiveLogoFromMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
-      updateGfwlServerDiagnosticsLabel(
-        gfwlServerToggle.checked ? "ahl" : "gfwl",
-      );
-      syncActivationUiFromServerMode(gfwlServerToggle.checked ? "ahl" : "gfwl");
-      showToast(
-        `Server toggle failed: ${error.message || "Unknown error"}. Please try again.`,
-        "error",
-        6000,
-      );
-    } finally {
-      if (feedback) feedback.style.display = "none";
-      gfwlServerToggle.disabled = false;
-      applyCooldown(gfwlServerToggle);
-      void refreshGfwlServerStatus();
-    }
+if (launcherAhlBadge) {
+  launcherAhlBadge.addEventListener("click", async () => {
+    if (launcherAhlBadge.disabled) return;
+    const ok = await showServerSwitchConfirmDialog("gfwl");
+    if (!ok) return;
+    await runGfwlServerToggleFlow("gfwl");
   });
 }
 

@@ -69,19 +69,38 @@
     </div>
 
     <div class="content">
-      <!-- Top-left brand: LIVE badge only (title bmp not shown). Right-aligned with title slot. -->
-      <div class="launcher-brand-header" aria-hidden="true">
+      <!-- Top-left brand: LIVE (GFWL) / AHL badges — same slot; click opens confirm → server toggle -->
+      <div class="launcher-brand-header">
         <div class="launcher-brand-inner">
           <div class="launcher-title-slot"></div>
           <div id="launcherLiveLogoWrap" class="launcher-live-logo-wrap">
-            <img
-              src="../assets/livelogo.png"
-              alt=""
-              class="launcher-live-logo"
-              width="160"
-              height="40"
-              loading="lazy"
-            />
+            <button
+              type="button"
+              id="launcherGfwlLiveBadge"
+              class="launcher-server-badge-btn launcher-server-badge-btn--gfwl"
+              aria-label="Switch to AntHill LIVE community servers"
+              title="Switch to AntHill LIVE (AHL)"
+              hidden
+            >
+              <img
+                src="../assets/livelogo.png"
+                alt=""
+                class="launcher-live-logo"
+                width="160"
+                height="40"
+                loading="lazy"
+              />
+            </button>
+            <button
+              type="button"
+              id="launcherAhlBadge"
+              class="launcher-server-badge-btn launcher-server-badge-btn--ahl"
+              aria-label="Switch to classic Xbox LIVE / GFWL servers"
+              title="Switch to classic GFWL"
+              hidden
+            >
+              <span class="launcher-ahl-badge-label">AHL</span>
+            </button>
           </div>
         </div>
       </div>

@@ -303,7 +303,10 @@ async function updateDiscordActivity(playing) {
   if (actuallyPlaying) {
     // Discord auto-renders "Playing for X hours Y minutes" from startTimestamp.
     const state = playerStats
-      ? `${playerStats.totalOnline} online • ${playerStats.inGame} in-game`
+      ? typeof playerStats.inGameAhl === "number" &&
+          typeof playerStats.inGameGfwl === "number"
+        ? `${playerStats.totalOnline} online • ${playerStats.inGame} in-game (AHL ${playerStats.inGameAhl} · GFWL ${playerStats.inGameGfwl})`
+        : `${playerStats.totalOnline} online • ${playerStats.inGame} in-game`
       : "In-Game";
     activity = {
       details: "Playing Shadowrun (2007)",
@@ -321,7 +324,10 @@ async function updateDiscordActivity(playing) {
     };
   } else {
     const state = playerStats
-      ? `${playerStats.totalOnline} online • ${playerStats.inGame} in-game`
+      ? typeof playerStats.inGameAhl === "number" &&
+          typeof playerStats.inGameGfwl === "number"
+        ? `${playerStats.totalOnline} online • ${playerStats.inGame} in-game (AHL ${playerStats.inGameAhl} · GFWL ${playerStats.inGameGfwl})`
+        : `${playerStats.totalOnline} online • ${playerStats.inGame} in-game`
       : "Idle in Launcher";
     activity = {
       details: "Idle in Launcher",

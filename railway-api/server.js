@@ -108,6 +108,30 @@ function countPlayersWithStatus(status) {
   return n;
 }
 
+/** Count in-game players whose last heartbeat reported this serverMode (ahl | gfwl | unknown). */
+function countInGameByServerMode(mode) {
+  let n = 0;
+  for (const data of activePlayers.values()) {
+    if (data.status !== "in-game") continue;
+    const sm = data.serverMode || "unknown";
+    if (sm === mode) n++;
+  }
+  return n;
+}
+
+function normalizeServerMode(raw) {
+  if (raw === "ahl" || raw === "gfwl" || raw === "unknown") return raw;
+  return "unknown";
+}
+
+function aggregateInGameSplit() {
+  return {
+    inGameAhl: countInGameByServerMode("ahl"),
+    inGameGfwl: countInGameByServerMode("gfwl"),
+    inGameUnknown: countInGameByServerMode("unknown"),
+  };
+}
+
 // Heartbeat endpoint - launcher calls this every 30 seconds
 app.post("/api/heartbeat", (req, res) => {
   const {
@@ -119,6 +143,7 @@ app.post("/api/heartbeat", (req, res) => {
     platform,
     gameSessionStart,
     sessionDuration,
+    serverMode: serverModeRaw,
   } = req.body;
 
   // Validation
@@ -132,6 +157,8 @@ app.post("/api/heartbeat", (req, res) => {
   ) {
     return res.status(400).json({ error: "Invalid status" });
   }
+
+  const serverMode = normalizeServerMode(serverModeRaw);
 
   const now = Date.now();
   const existingPlayer = activePlayers.get(playerId);
@@ -148,6 +175,7 @@ app.post("/api/heartbeat", (req, res) => {
 
   activePlayers.set(playerId, {
     status,
+    serverMode,
     version: version || "unknown",
     os: os || "unknown",
     osVersion: osVersion || "unknown",
@@ -160,6 +188,7 @@ app.post("/api/heartbeat", (req, res) => {
 
   const totalOnline = activePlayers.size;
   const inGame = countPlayersWithStatus("in-game");
+  const split = aggregateInGameSplit();
 
   res.json({
     success: true,
@@ -167,6 +196,7 @@ app.post("/api/heartbeat", (req, res) => {
     totalPlayers: totalOnline,
     totalOnline,
     inGame,
+    ...split,
   });
 });
 
@@ -320,6 +350,9 @@ app.get("/api/stats", (req, res) => {
     totalOnline: activePlayers.size,
     inMenu: 0,
     inGame: 0,
+    inGameAhl: 0,
+    inGameGfwl: 0,
+    inGameUnknown: 0,
     downloading: 0,
     installing: 0,
     players: [],
@@ -332,6 +365,10 @@ app.get("/api/stats", (req, res) => {
     // Count by status
     if (data.status === "in-game") {
       stats.inGame++;
+      const sm = data.serverMode || "unknown";
+      if (sm === "ahl") stats.inGameAhl++;
+      else if (sm === "gfwl") stats.inGameGfwl++;
+      else stats.inGameUnknown++;
     } else if (data.status === "downloading") {
       stats.downloading++;
     } else if (data.status === "installing") {
@@ -515,6 +552,13 @@ app.get("/api/transparency", (req, res) => {
                 example: 3600000,
                 note: "0 when not in-game",
               },
+              serverMode: {
+                type: "string",
+                description:
+                  "Configured server endpoints from game folder patcher_conf.ini (launcher-reported; optional on older clients)",
+                example: "ahl",
+                possibleValues: ["ahl", "gfwl", "unknown"],
+              },
             },
             examplePayload: {
               playerId: "550e8400-e29b-41d4-a716-446655440000",
@@ -525,6 +569,7 @@ app.get("/api/transparency", (req, res) => {
               platform: "win32",
               gameSessionStart: 1705392000000,
               sessionDuration: 3600000,
+              serverMode: "ahl",
             },
             storedIn:
               "In-memory Map (temporary, cleared after 90 seconds of inactivity)",

@@ -12,6 +12,9 @@ const TRACKING_API_URL = "https://playertracker-production.up.railway.app";
  *   totalOnline: number,
  *   inGame: number,
  *   inMenu: number,
+ *   inGameAhl?: number,
+ *   inGameGfwl?: number,
+ *   inGameUnknown?: number,
  *   versionBreakdown: Record<string, number>
  * } | null>}
  */
@@ -35,12 +38,22 @@ function fetchPlayerStats() {
           res.on("end", () => {
             try {
               const stats = JSON.parse(data);
-              resolve({
+              const base = {
                 totalOnline: stats.totalOnline || 0,
                 inGame: stats.inGame || 0,
                 inMenu: stats.inMenu || 0,
                 versionBreakdown: stats.versionBreakdown || {},
-              });
+              };
+              if (
+                typeof stats.inGameAhl === "number" &&
+                typeof stats.inGameGfwl === "number" &&
+                typeof stats.inGameUnknown === "number"
+              ) {
+                base.inGameAhl = stats.inGameAhl;
+                base.inGameGfwl = stats.inGameGfwl;
+                base.inGameUnknown = stats.inGameUnknown;
+              }
+              resolve(base);
             } catch (_err) {
               resolve(null);
             }

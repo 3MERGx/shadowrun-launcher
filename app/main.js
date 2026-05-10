@@ -621,6 +621,10 @@ app.whenReady().then(async () => {
       }
     });
 
+    playerTracker.configureTrackingDeps({
+      getGameInstallDir: () => GAME_INSTALL_DIR,
+    });
+
     playerTracker.start();
 
     // Wire the activation IPC contract: activate-game (full pipeline including
