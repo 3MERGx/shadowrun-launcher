@@ -1236,7 +1236,7 @@ objShell.ShellExecute "powershell.exe", "-ExecutionPolicy Bypass -WindowStyle Hi
         };
       }
 
-      safeLog.info(`[Browse Game] ✓ Found Shadowrun.exe at: ${exePath}`);
+      safeLog.info(`[Browse Game] Found Shadowrun.exe at: ${exePath}`);
 
       // Update the global path variables
       setGameInstallDir(selectedPath);

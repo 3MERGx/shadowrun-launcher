@@ -356,8 +356,9 @@ function getServerModeFromGameDir(gameDir) {
     return "unknown";
   }
   const iniPath = path.join(gameDir, "patcher_conf.ini");
+  // INI is created by the AHL/GFWL toggle flow; classic installs have no file → treat as GFWL.
   if (!fs.existsSync(iniPath)) {
-    return "unknown";
+    return "gfwl";
   }
   try {
     const content = fs.readFileSync(iniPath, "utf8");

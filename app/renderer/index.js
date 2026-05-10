@@ -920,6 +920,10 @@ const errorAlertMessage = document.getElementById("errorAlertMessage");
 const errorAlertDismiss = document.getElementById("errorAlertDismiss");
 const errorAlertCount = document.getElementById("errorAlertCount");
 const errorAlertFix = document.getElementById("errorAlertFix");
+const ahlHintAlertBar = document.getElementById("ahlHintAlertBar");
+const ahlHintAlertMessage = document.getElementById("ahlHintAlertMessage");
+const ahlHintAlertFix = document.getElementById("ahlHintAlertFix");
+const ahlHintAlertDismiss = document.getElementById("ahlHintAlertDismiss");
 const errorListPopup = document.getElementById("errorListPopup");
 const errorListContent = document.getElementById("errorListContent");
 const errorListClose = document.getElementById("errorListClose");
@@ -1598,6 +1602,7 @@ playButton.addEventListener("click", async () => {
           "success",
           3000,
         );
+        tryShowAhlMissingHintAfterExistingBrowse();
         // The game-installation-status event will be triggered automatically
         // which will update the UI
       } else if (!result.canceled) {
@@ -3443,6 +3448,15 @@ async function refreshGfwlServerStatus() {
     syncLauncherServerBadgeFromMode(status.mode);
     updateGfwlServerDiagnosticsLabel(status.mode);
     syncActivationUiFromServerMode(status.mode);
+    if (
+      !isAhlPatchSetIncomplete(status) &&
+      ahlHintAlertBar &&
+      ahlHintAlertBar.style.display === "block"
+    ) {
+      hideAhlHintAlertBar();
+      persistAhlExistingInstallHintDismissed();
+      syncAhlHintAlertStackPosition();
+    }
   } catch (error) {
     console.error("Error checking GFWL server status:", error);
     syncLauncherServerBadgeFromMode("gfwl");
@@ -3999,6 +4013,8 @@ async function checkPersistentIssues() {
         errorAlertBar.style.display = "block";
       }
 
+      syncAhlHintAlertStackPosition();
+
       if (errorAlertFix) {
         errorAlertFix.title =
           result.issues[0]?.type === "vcredist"
@@ -4012,6 +4028,7 @@ async function checkPersistentIssues() {
       if (errorAlertBar) {
         errorAlertBar.style.display = "none";
       }
+      syncAhlHintAlertStackPosition();
     }
   } catch (error) {
     console.error("[Persistent Issues] Error checking issues:", error);
@@ -4099,6 +4116,7 @@ function showStackedErrorAlerts() {
 
   // Store alerts for cleanup
   window.stackedAlerts = alerts;
+  syncAhlHintAlertStackPosition();
 }
 
 // Hide stacked error alerts
@@ -4116,6 +4134,7 @@ function hideStackedErrorAlerts() {
   if (errorAlertBar && currentIssues && currentIssues.length > 0) {
     errorAlertBar.style.display = "block";
   }
+  syncAhlHintAlertStackPosition();
 }
 
 function openDiagnosticsAndScrollToIssue() {
@@ -4175,6 +4194,45 @@ if (errorAlertDismiss) {
     if (errorAlertBar) {
       errorAlertBar.style.display = "none";
     }
+    syncAhlHintAlertStackPosition();
+  });
+}
+
+function syncAhlHintAlertStackPosition() {
+  if (!ahlHintAlertBar || ahlHintAlertBar.style.display === "none") {
+    return;
+  }
+  const primaryVisible =
+    errorAlertBar && errorAlertBar.style.display === "block";
+  ahlHintAlertBar.style.bottom = primaryVisible ? "52px" : "8px";
+}
+
+function hideAhlHintAlertBar() {
+  if (ahlHintAlertBar) {
+    ahlHintAlertBar.style.display = "none";
+    ahlHintAlertBar.style.bottom = "8px";
+  }
+}
+
+if (ahlHintAlertFix) {
+  ahlHintAlertFix.addEventListener("click", async () => {
+    hideAhlHintAlertBar();
+    persistAhlExistingInstallHintDismissed();
+    openDiagnosticsAndScrollToIssue();
+    const diagnosticsScreen = document.getElementById("diagnosticsScreen");
+    if (diagnosticsScreen) {
+      await loadCurrentGamePath();
+      detectAndDisplaySystemInfo(false);
+    }
+    syncAhlHintAlertStackPosition();
+  });
+}
+
+if (ahlHintAlertDismiss) {
+  ahlHintAlertDismiss.addEventListener("click", () => {
+    hideAhlHintAlertBar();
+    persistAhlExistingInstallHintDismissed();
+    syncAhlHintAlertStackPosition();
   });
 }
 
@@ -4213,6 +4271,7 @@ document.addEventListener("DOMContentLoaded", function () {
               "success",
               3000,
             );
+            tryShowAhlMissingHintAfterExistingBrowse();
             // The game-installation-status event will be triggered automatically
             // which will update the UI
           } else if (!result.canceled) {
@@ -5082,6 +5141,83 @@ window.api.onUpdateInstallationSuccess((data) => {
 // ============================================================================
 // TOAST NOTIFICATION SYSTEM
 // ============================================================================
+
+const AHL_EXISTING_INSTALL_HINT_STORAGE_KEY =
+  "shadowrunLauncher_ahlExistingInstallHintDismissed";
+
+function persistAhlExistingInstallHintDismissed() {
+  try {
+    localStorage.setItem(AHL_EXISTING_INSTALL_HINT_STORAGE_KEY, "1");
+  } catch (_err) {
+    /* ignore quota / private mode */
+  }
+}
+
+/** Any required AHL file missing on disk (e.g. renamed to *.old counts as missing). */
+function isAhlPatchSetIncomplete(status) {
+  if (!status) {
+    return false;
+  }
+  if (status.allFilesPresent === false) {
+    return true;
+  }
+  if (Array.isArray(status.missingFiles) && status.missingFiles.length > 0) {
+    return true;
+  }
+  return false;
+}
+
+function showAhlMissingFilesHintAlert() {
+  if (!ahlHintAlertBar || !ahlHintAlertMessage) {
+    return;
+  }
+  const message =
+    "AntHill LIVE patch files are not in this folder yet. Click the LIVE badge in the title bar to download them into your game folder, or enable AntHill LIVE under Settings → Diagnostics.";
+  ahlHintAlertMessage.textContent = message;
+  ahlHintAlertBar.className = "error-alert-bar error ahl-hint-alert";
+  ahlHintAlertBar.style.display = "block";
+  syncAhlHintAlertStackPosition();
+}
+
+/**
+ * One-time hint after the user successfully points the launcher at an existing
+ * game folder: if AHL patch files are missing, suggest the LIVE badge (and Diagnostics).
+ */
+function tryShowAhlMissingHintAfterExistingBrowse() {
+  try {
+    if (localStorage.getItem(AHL_EXISTING_INSTALL_HINT_STORAGE_KEY) === "1") {
+      return;
+    }
+  } catch (_err) {
+    return;
+  }
+
+  void (async () => {
+    const waitMs = [0, 200];
+    for (const ms of waitMs) {
+      if (ms > 0) {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      }
+      try {
+        if (localStorage.getItem(AHL_EXISTING_INSTALL_HINT_STORAGE_KEY) === "1") {
+          return;
+        }
+      } catch (_err) {
+        return;
+      }
+      try {
+        const status = await window.api.checkGfwlServer();
+        if (!status || !isAhlPatchSetIncomplete(status)) {
+          continue;
+        }
+        showAhlMissingFilesHintAlert();
+        return;
+      } catch (_err) {
+        /* retry */
+      }
+    }
+  })();
+}
 
 function showToast(message, type = "info", duration = 4000) {
   const container = document.getElementById("toastContainer");

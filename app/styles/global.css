@@ -770,6 +770,11 @@ button:focus {
   animation: slideUpAlert 0.2s ease-out;
 }
 
+/* AHL missing-files hint (stacked above diagnostic alert when both visible) */
+.error-alert-bar.ahl-hint-alert {
+  max-width: 520px;
+}
+
 /* Error indicator badge for diagnostics section */
 .error-indicator-badge {
   font-size: 14px;
